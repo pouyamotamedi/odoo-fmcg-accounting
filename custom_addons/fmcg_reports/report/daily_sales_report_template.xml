@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Daily Sales PDF Report Action -->
+    <record id="action_report_daily_sales" model="ir.actions.report">
+        <field name="name">Daily Sales Summary</field>
+        <field name="model">fmcg.report.daily.sales</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">fmcg_reports.report_daily_sales_template</field>
+        <field name="report_file">fmcg_reports.report_daily_sales_template</field>
+    </record>
+
+    <!-- QWeb Template for Daily Sales -->
+    <template id="report_daily_sales_template">
+        <t t-call="web.html_container">
+            <t t-call="web.external_layout">
+                <div class="page" dir="rtl" style="font-family: 'Tahoma', 'IRANSans', sans-serif;">
+                    <h2 style="text-align: center;">گزارش فروش روزانه</h2>
+                    <h4 style="text-align: center;">
+                        از <t t-esc="data.get('date_from', '')"/> تا <t t-esc="data.get('date_to', '')"/>
+                    </h4>
+
+                    <table class="table table-bordered mt-4">
+                        <thead>
+                            <tr>
+                                <th>شرح</th>
+                                <th>مقدار</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>مجموع فروش</td>
+                                <td><t t-esc="'{:,.0f}'.format(data.get('total_revenue', 0))"/></td>
+                            </tr>
+                            <tr>
+                                <td>تعداد تراکنش</td>
+                                <td><t t-esc="data.get('transaction_count', 0)"/></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h4 class="mt-4">تفکیک روش پرداخت</h4>
+                    <table class="table table-bordered">
+                        <thead>
+                            <tr>
+                                <th>روش پرداخت</th>
+                                <th>مبلغ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <t t-foreach="data.get('payment_methods', {}).items()" t-as="method">
+                                <tr>
+                                    <td><t t-esc="method[0]"/></td>
+                                    <td><t t-esc="'{:,.0f}'.format(method[1])"/></td>
+                                </tr>
+                            </t>
+                        </tbody>
+                    </table>
+                </div>
+            </t>
+        </t>
+    </template>
+</odoo>

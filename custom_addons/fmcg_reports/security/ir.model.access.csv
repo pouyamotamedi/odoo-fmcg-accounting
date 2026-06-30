@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_fmcg_report_daily_sales,fmcg.report.daily.sales,model_fmcg_report_daily_sales,base.group_user,1,1,1,1
+access_fmcg_report_inventory,fmcg.report.inventory.status,model_fmcg_report_inventory_status,base.group_user,1,1,1,1
+access_fmcg_report_credit,fmcg.report.customer.credit,model_fmcg_report_customer_credit,base.group_user,1,1,1,1
+access_fmcg_report_cash_flow,fmcg.report.cash.flow,model_fmcg_report_cash_flow,base.group_user,1,1,1,1

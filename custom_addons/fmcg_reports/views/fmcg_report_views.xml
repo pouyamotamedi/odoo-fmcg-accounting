@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Daily Sales Wizard Form -->
+    <record id="fmcg_report_daily_sales_form" model="ir.ui.view">
+        <field name="name">fmcg.report.daily.sales.form</field>
+        <field name="model">fmcg.report.daily.sales</field>
+        <field name="arch" type="xml">
+            <form string="Daily Sales Report">
+                <group>
+                    <field name="date_from"/>
+                    <field name="date_to"/>
+                </group>
+                <footer>
+                    <button name="action_generate_report" string="Generate Report" type="object" class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Cash Flow Wizard Form -->
+    <record id="fmcg_report_cash_flow_form" model="ir.ui.view">
+        <field name="name">fmcg.report.cash.flow.form</field>
+        <field name="model">fmcg.report.cash.flow</field>
+        <field name="arch" type="xml">
+            <form string="Cash Flow Report">
+                <group>
+                    <field name="date_from"/>
+                    <field name="date_to"/>
+                </group>
+                <footer>
+                    <button name="action_generate_report" string="Generate Report" type="object" class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Actions -->
+    <record id="action_fmcg_daily_sales_wizard" model="ir.actions.act_window">
+        <field name="name">Daily Sales Summary</field>
+        <field name="res_model">fmcg.report.daily.sales</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <record id="action_fmcg_inventory_status_wizard" model="ir.actions.act_window">
+        <field name="name">Inventory Status</field>
+        <field name="res_model">fmcg.report.inventory.status</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <record id="action_fmcg_credit_aging_wizard" model="ir.actions.act_window">
+        <field name="name">Customer Credit Aging</field>
+        <field name="res_model">fmcg.report.customer.credit</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <record id="action_fmcg_cash_flow_wizard" model="ir.actions.act_window">
+        <field name="name">Cash Flow</field>
+        <field name="res_model">fmcg.report.cash.flow</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <!-- Menu: Finance > Reports -->
+    <menuitem id="menu_fmcg_reports"
+        name="Reports"
+        parent="fmcg_bank_cash.menu_fmcg_finance_root"
+        sequence="50"/>
+
+    <menuitem id="menu_fmcg_daily_sales"
+        name="Daily Sales Summary"
+        parent="menu_fmcg_reports"
+        action="action_fmcg_daily_sales_wizard"
+        sequence="10"/>
+
+    <menuitem id="menu_fmcg_inventory_status"
+        name="Inventory Status"
+        parent="menu_fmcg_reports"
+        action="action_fmcg_inventory_status_wizard"
+        sequence="20"/>
+
+    <menuitem id="menu_fmcg_credit_aging"
+        name="Customer Credit Aging"
+        parent="menu_fmcg_reports"
+        action="action_fmcg_credit_aging_wizard"
+        sequence="30"/>
+
+    <menuitem id="menu_fmcg_cash_flow"
+        name="Cash Flow"
+        parent="menu_fmcg_reports"
+        action="action_fmcg_cash_flow_wizard"
+        sequence="40"/>
+</odoo>
