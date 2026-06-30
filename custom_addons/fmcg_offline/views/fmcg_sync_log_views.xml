@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Sync Log Form -->
+    <record id="fmcg_sync_log_form" model="ir.ui.view">
+        <field name="name">fmcg.sync.log.form</field>
+        <field name="model">fmcg.sync.log</field>
+        <field name="arch" type="xml">
+            <form string="Sync Log Entry">
+                <header>
+                    <button name="action_retry_sync" string="Retry Sync" type="object"
+                            class="btn-primary" invisible="state not in ('failed', 'pending')"/>
+                    <button name="action_resolve_keep_local" string="Keep Local" type="object"
+                            class="btn-warning" invisible="state != 'conflict'"/>
+                    <button name="action_resolve_keep_server" string="Keep Server" type="object"
+                            class="btn-secondary" invisible="state != 'conflict'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="pending,synced"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="sync_date"/>
+                            <field name="record_model"/>
+                            <field name="record_id"/>
+                            <field name="operation"/>
+                        </group>
+                        <group>
+                            <field name="retry_count"/>
+                            <field name="resolved_by" invisible="state != 'synced'"/>
+                            <field name="resolution_date" invisible="state != 'synced'"/>
+                            <field name="resolution_action" invisible="state != 'synced'"/>
+                        </group>
+                    </group>
+                    <group string="Error" invisible="not error_message">
+                        <field name="error_message" nolabel="1"/>
+                    </group>
+                    <notebook invisible="state != 'conflict'">
+                        <page string="Local Data">
+                            <field name="local_data" nolabel="1"/>
+                        </page>
+                        <page string="Server Data">
+                            <field name="server_data" nolabel="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Sync Log List -->
+    <record id="fmcg_sync_log_list" model="ir.ui.view">
+        <field name="name">fmcg.sync.log.list</field>
+        <field name="model">fmcg.sync.log</field>
+        <field name="arch" type="xml">
+            <list string="Sync Log" decoration-danger="state == 'failed'" decoration-warning="state == 'conflict'" decoration-info="state == 'pending'">
+                <field name="sync_date"/>
+                <field name="name"/>
+                <field name="record_model"/>
+                <field name="operation"/>
+                <field name="retry_count"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Sync Log Action -->
+    <record id="action_fmcg_sync_log" model="ir.actions.act_window">
+        <field name="name">Sync Log</field>
+        <field name="res_model">fmcg.sync.log</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No sync events yet
+            </p>
+            <p>Sync log entries appear when offline transactions are synchronized with the server.</p>
+        </field>
+    </record>
+
+    <!-- Menu under Settings -->
+    <menuitem id="menu_fmcg_sync_log"
+        name="Sync Log"
+        parent="fmcg_bank_cash.menu_fmcg_finance_root"
+        action="action_fmcg_sync_log"
+        sequence="90"/>
+</odoo>
