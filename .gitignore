@@ -21,3 +21,9 @@ Desktop.ini
 *.pyc
 filestore/
 sessions/
+odoo.log
+odoo/
+
+# Database
+*.sql
+*.dump

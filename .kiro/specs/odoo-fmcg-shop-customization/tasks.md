@@ -2,7 +2,7 @@
 
 ## Task 1: Project Setup and Odoo Installation
 
-- [ ] 1.1 Clone Odoo 18 Community Edition from GitHub
+- [~] 1.1 Clone Odoo 18 Community Edition from GitHub
 - [ ] 1.2 Set up Python virtual environment and install dependencies
 - [ ] 1.3 Configure PostgreSQL database
 - [ ] 1.4 Create custom_addons directory structure
