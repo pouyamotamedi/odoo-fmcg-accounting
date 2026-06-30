@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- POS Terminal Config Form -->
+    <record id="fmcg_pos_terminal_config_form" model="ir.ui.view">
+        <field name="name">fmcg.pos.terminal.config.form</field>
+        <field name="model">fmcg.pos.terminal.config</field>
+        <field name="arch" type="xml">
+            <form string="POS Terminal Configuration">
+                <header>
+                    <button name="action_test_connection" string="Test Connection"
+                            type="object" class="btn-primary"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="disconnected,connected"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" placeholder="e.g. Main Counter Terminal"/></h1>
+                    </div>
+                    <group>
+                        <group string="Connection Settings">
+                            <field name="protocol"/>
+                            <field name="port" placeholder="COM3 or 192.168.1.100:9100"/>
+                            <field name="baud_rate" invisible="protocol != 'serial'"/>
+                        </group>
+                        <group string="Timeouts">
+                            <field name="connection_timeout"/>
+                            <field name="transaction_timeout"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Device Info">
+                            <field name="device_model"/>
+                            <field name="pos_config_id"/>
+                            <field name="active"/>
+                        </group>
+                        <group string="Status" invisible="not last_error">
+                            <field name="last_error" readonly="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- POS Terminal Config List -->
+    <record id="fmcg_pos_terminal_config_list" model="ir.ui.view">
+        <field name="name">fmcg.pos.terminal.config.list</field>
+        <field name="model">fmcg.pos.terminal.config</field>
+        <field name="arch" type="xml">
+            <list string="POS Terminals">
+                <field name="name"/>
+                <field name="protocol"/>
+                <field name="port"/>
+                <field name="device_model"/>
+                <field name="state"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- POS Terminal Action -->
+    <record id="action_fmcg_pos_terminal_config" model="ir.actions.act_window">
+        <field name="name">POS Terminals</field>
+        <field name="res_model">fmcg.pos.terminal.config</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Configure a POS terminal device
+            </p>
+            <p>Set up connection parameters for your bank POS terminal to enable automatic payment transmission.</p>
+        </field>
+    </record>
+
+    <!-- Menu under Point of Sale Configuration -->
+    <menuitem id="menu_fmcg_pos_terminal"
+        name="POS Terminals"
+        parent="point_of_sale.menu_point_config_product"
+        action="action_fmcg_pos_terminal_config"
+        sequence="90"/>
+</odoo>
