@@ -3,10 +3,10 @@
     <record id="res_config_settings_view_form_fmcg" model="ir.ui.view">
         <field name="name">res.config.settings.view.form.fmcg</field>
         <field name="model">res.config.settings</field>
-        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
-                <app data-string="FMCG Shop" string="FMCG Shop">
+                <app data-string="FMCG Shop" string="FMCG Shop" name="fmcg_shop" groups="base.group_system">
                     <block title="General Settings">
                         <setting string="Default Locale" help="Set the default language for the shop interface">
                             <div class="content-group">

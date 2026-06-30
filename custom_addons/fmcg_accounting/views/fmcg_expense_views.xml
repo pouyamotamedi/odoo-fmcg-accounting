@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Expense Form View -->
+    <record id="fmcg_expense_form" model="ir.ui.view">
+        <field name="name">fmcg.expense.form</field>
+        <field name="model">fmcg.expense</field>
+        <field name="arch" type="xml">
+            <form string="Expense">
+                <header>
+                    <button name="action_confirm" string="Confirm" type="object"
+                            class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_cancel" string="Cancel" type="object"
+                            class="btn-secondary" invisible="state != 'confirmed'"/>
+                    <button name="action_reset_to_draft" string="Reset to Draft" type="object"
+                            class="btn-secondary" invisible="state != 'cancelled'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="date" readonly="state != 'draft'"/>
+                            <field name="amount" readonly="state != 'draft'"/>
+                            <field name="currency_id" invisible="1"/>
+                        </group>
+                        <group>
+                            <field name="account_id" readonly="state != 'draft'"/>
+                            <field name="payment_journal_id" readonly="state != 'draft'"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="description" readonly="state != 'draft'"
+                               placeholder="Brief description of the expense (min 3 chars)"/>
+                    </group>
+                    <group invisible="not move_id">
+                        <field name="move_id"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Expense List View -->
+    <record id="fmcg_expense_list" model="ir.ui.view">
+        <field name="name">fmcg.expense.list</field>
+        <field name="model">fmcg.expense</field>
+        <field name="arch" type="xml">
+            <list string="Expenses" decoration-info="state == 'draft'" decoration-muted="state == 'cancelled'">
+                <field name="name"/>
+                <field name="date"/>
+                <field name="description"/>
+                <field name="amount" sum="Total"/>
+                <field name="account_id"/>
+                <field name="payment_journal_id"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Expense Search View -->
+    <record id="fmcg_expense_search" model="ir.ui.view">
+        <field name="name">fmcg.expense.search</field>
+        <field name="model">fmcg.expense</field>
+        <field name="arch" type="xml">
+            <search string="Search Expenses">
+                <field name="description"/>
+                <field name="account_id"/>
+                <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
+                <filter name="confirmed" string="Confirmed" domain="[('state', '=', 'confirmed')]"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_account" string="Expense Account" context="{'group_by': 'account_id'}"/>
+                    <filter name="group_date" string="Date" context="{'group_by': 'date:month'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Expense Action -->
+    <record id="action_fmcg_expenses" model="ir.actions.act_window">
+        <field name="name">Expenses</field>
+        <field name="res_model">fmcg.expense</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Record a new expense
+            </p>
+            <p>Track shop expenses like rent, utilities, salaries, and other costs.</p>
+        </field>
+    </record>
+
+    <!-- Menu Items under Finance -->
+    <menuitem id="menu_fmcg_expenses"
+        name="Expenses"
+        parent="fmcg_bank_cash.menu_fmcg_finance_root"
+        action="action_fmcg_expenses"
+        sequence="20"/>
+
+    <!-- Sequence for expense reference -->
+    <record id="seq_fmcg_expense" model="ir.sequence">
+        <field name="name">FMCG Expense Sequence</field>
+        <field name="code">fmcg.expense</field>
+        <field name="prefix">EXP/%(year)s/</field>
+        <field name="padding">4</field>
+    </record>
+</odoo>

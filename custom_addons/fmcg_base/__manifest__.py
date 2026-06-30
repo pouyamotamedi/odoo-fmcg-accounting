@@ -13,6 +13,7 @@
     'license': 'LGPL-3',
     'depends': [
         'base',
+        'base_setup',
         'point_of_sale',
     ],
     'data': [
