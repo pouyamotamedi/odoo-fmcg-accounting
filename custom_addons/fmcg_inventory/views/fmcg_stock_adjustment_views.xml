@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Stock Adjustment Form View -->
+    <record id="fmcg_stock_adjustment_form" model="ir.ui.view">
+        <field name="name">fmcg.stock.adjustment.form</field>
+        <field name="model">fmcg.stock.adjustment</field>
+        <field name="arch" type="xml">
+            <form string="Stock Adjustment">
+                <header>
+                    <button name="action_confirm" string="Confirm Adjustment"
+                            type="object" class="btn-primary"
+                            invisible="state != 'draft'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="product_id" readonly="state == 'confirmed'"/>
+                            <field name="quantity" readonly="state == 'confirmed'"/>
+                            <field name="reason" readonly="state == 'confirmed'"/>
+                            <field name="date" readonly="state == 'confirmed'"/>
+                        </group>
+                        <group>
+                            <field name="user_id"/>
+                            <field name="product_qty_before" invisible="state == 'draft'"/>
+                            <field name="product_qty_after" invisible="state == 'draft'"/>
+                        </group>
+                    </group>
+                    <group string="Notes">
+                        <field name="note" nolabel="1" placeholder="Describe the reason for adjustment (required, max 500 chars)"
+                               readonly="state == 'confirmed'"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Stock Adjustment List View -->
+    <record id="fmcg_stock_adjustment_list" model="ir.ui.view">
+        <field name="name">fmcg.stock.adjustment.list</field>
+        <field name="model">fmcg.stock.adjustment</field>
+        <field name="arch" type="xml">
+            <list string="Stock Adjustments" decoration-warning="state == 'draft'" decoration-success="state == 'confirmed'">
+                <field name="date"/>
+                <field name="product_id"/>
+                <field name="quantity"/>
+                <field name="reason"/>
+                <field name="user_id"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Stock Adjustment Action -->
+    <record id="action_fmcg_stock_adjustment" model="ir.actions.act_window">
+        <field name="name">Stock Adjustments</field>
+        <field name="res_model">fmcg.stock.adjustment</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Record a stock adjustment
+            </p>
+            <p>Use this to record damaged, expired, or lost goods and reduce inventory accordingly.</p>
+        </field>
+    </record>
+
+    <!-- Menu Items -->
+    <menuitem id="menu_fmcg_inventory_root"
+        name="FMCG Inventory"
+        parent="stock.menu_stock_root"
+        sequence="99"/>
+
+    <menuitem id="menu_fmcg_stock_adjustments"
+        name="Stock Adjustments"
+        parent="menu_fmcg_inventory_root"
+        action="action_fmcg_stock_adjustment"
+        sequence="10"/>
+</odoo>

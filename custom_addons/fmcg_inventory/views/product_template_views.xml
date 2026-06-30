@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Extend Product Template Form -->
+    <record id="product_template_form_view_fmcg" model="ir.ui.view">
+        <field name="name">product.template.form.fmcg</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//group[@name='group_general']" position="after">
+                <group string="FMCG Inventory Settings">
+                    <field name="fmcg_reorder_threshold"/>
+                    <field name="fmcg_is_low_stock" widget="boolean_toggle"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Product List with Low Stock Indicator -->
+    <record id="product_template_list_view_fmcg" model="ir.ui.view">
+        <field name="name">product.template.list.fmcg</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_tree_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='type']" position="after">
+                <field name="fmcg_is_low_stock" string="⚠️" widget="boolean"
+                       optional="show"/>
+                <field name="fmcg_reorder_threshold" optional="hide"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>
