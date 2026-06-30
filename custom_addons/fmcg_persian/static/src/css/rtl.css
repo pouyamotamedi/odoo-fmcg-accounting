@@ -1,0 +1,75 @@
+/* RTL Support for Persian/Farsi locale in FMCG Shop */
+
+/* When Persian locale is active, apply RTL direction */
+html[lang="fa"],
+html[lang="fa_IR"],
+body.o_rtl {
+    direction: rtl;
+    text-align: right;
+}
+
+/* Mirror navigation for RTL */
+body.o_rtl .o_main_navbar {
+    direction: rtl;
+}
+
+body.o_rtl .o_menu_brand {
+    float: right;
+}
+
+/* Form views RTL adjustments */
+body.o_rtl .o_form_view .o_group {
+    direction: rtl;
+    text-align: right;
+}
+
+body.o_rtl .o_form_view label {
+    text-align: right;
+}
+
+/* List views RTL */
+body.o_rtl .o_list_view th,
+body.o_rtl .o_list_view td {
+    text-align: right;
+}
+
+/* Sidebar/Menu RTL */
+body.o_rtl .o_action_manager {
+    direction: rtl;
+}
+
+body.o_rtl .o_cp_searchview {
+    direction: rtl;
+}
+
+/* Breadcrumb RTL */
+body.o_rtl .breadcrumb {
+    direction: rtl;
+}
+
+/* Button groups RTL */
+body.o_rtl .o_statusbar_buttons {
+    direction: rtl;
+}
+
+/* Notebook/Tabs RTL */
+body.o_rtl .o_notebook .nav-tabs {
+    direction: rtl;
+}
+
+/* POS specific RTL */
+body.o_rtl .pos .product-list {
+    direction: rtl;
+}
+
+body.o_rtl .pos .order-container {
+    direction: rtl;
+}
+
+/* Persian font for better readability */
+body.o_rtl,
+body.o_rtl input,
+body.o_rtl textarea,
+body.o_rtl select {
+    font-family: 'IRANSans', 'Vazirmatn', 'Tahoma', 'Arial', sans-serif;
+}
