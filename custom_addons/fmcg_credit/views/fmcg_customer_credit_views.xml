@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Credit Entry Form -->
+    <record id="fmcg_customer_credit_form" model="ir.ui.view">
+        <field name="name">fmcg.customer.credit.form</field>
+        <field name="model">fmcg.customer.credit</field>
+        <field name="arch" type="xml">
+            <form string="Customer Credit">
+                <header>
+                    <button name="action_record_repayment" string="Record Repayment"
+                            type="object" class="btn-primary"
+                            invisible="state == 'paid'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="open,partial,paid"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="partner_id"/>
+                            <field name="invoice_ref"/>
+                            <field name="date"/>
+                        </group>
+                        <group>
+                            <field name="amount"/>
+                            <field name="paid_amount"/>
+                            <field name="remaining"/>
+                            <field name="currency_id" invisible="1"/>
+                        </group>
+                    </group>
+                    <group string="Note">
+                        <field name="note" nolabel="1" placeholder="Describe the credit arrangement (max 500 chars)"/>
+                    </group>
+                    <notebook>
+                        <page string="Repayments" name="repayments">
+                            <field name="repayment_ids">
+                                <list string="Repayments" editable="bottom">
+                                    <field name="date"/>
+                                    <field name="amount"/>
+                                    <field name="note"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Credit Entry List -->
+    <record id="fmcg_customer_credit_list" model="ir.ui.view">
+        <field name="name">fmcg.customer.credit.list</field>
+        <field name="model">fmcg.customer.credit</field>
+        <field name="arch" type="xml">
+            <list string="Customer Credits" decoration-danger="state == 'open'" decoration-warning="state == 'partial'" decoration-success="state == 'paid'">
+                <field name="date"/>
+                <field name="partner_id"/>
+                <field name="invoice_ref"/>
+                <field name="amount" sum="Total Credit"/>
+                <field name="paid_amount" sum="Total Paid"/>
+                <field name="remaining" sum="Total Outstanding"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Credit Search View -->
+    <record id="fmcg_customer_credit_search" model="ir.ui.view">
+        <field name="name">fmcg.customer.credit.search</field>
+        <field name="model">fmcg.customer.credit</field>
+        <field name="arch" type="xml">
+            <search string="Search Credits">
+                <field name="partner_id"/>
+                <field name="invoice_ref"/>
+                <filter name="open" string="Open" domain="[('state', '=', 'open')]"/>
+                <filter name="partial" string="Partially Paid" domain="[('state', '=', 'partial')]"/>
+                <filter name="paid" string="Paid" domain="[('state', '=', 'paid')]"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_customer" string="Customer" context="{'group_by': 'partner_id'}"/>
+                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Credit Action -->
+    <record id="action_fmcg_customer_credits" model="ir.actions.act_window">
+        <field name="name">Customer Credits</field>
+        <field name="res_model">fmcg.customer.credit</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Record a credit sale
+            </p>
+            <p>Track deferred payments and customer outstanding balances.</p>
+        </field>
+    </record>
+
+    <!-- Menu under Finance -->
+    <menuitem id="menu_fmcg_credits"
+        name="Customer Credits"
+        parent="fmcg_bank_cash.menu_fmcg_finance_root"
+        action="action_fmcg_customer_credits"
+        sequence="30"/>
+</odoo>

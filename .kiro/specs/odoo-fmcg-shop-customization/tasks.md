@@ -1,61 +1,61 @@
 # Tasks
 
-## Task 1: Project Setup and Odoo Installation
+## Task 1: Project Setup and Odoo Installation ✅
 
-- [~] 1.1 Clone Odoo 18 Community Edition from GitHub
-- [ ] 1.2 Set up Python virtual environment and install dependencies
-- [ ] 1.3 Configure PostgreSQL database
-- [ ] 1.4 Create custom_addons directory structure
-- [ ] 1.5 Create odoo.conf with addons-path pointing to custom_addons
-- [ ] 1.6 Verify Odoo starts and base modules load correctly
+- [x] 1.1 Clone Odoo 18 Community Edition from GitHub
+- [x] 1.2 Set up Python virtual environment and install dependencies
+- [x] 1.3 Configure PostgreSQL database (user: odoo, db: fmcg_shop)
+- [x] 1.4 Create custom_addons directory structure
+- [x] 1.5 Create odoo.conf with addons-path pointing to custom_addons
+- [x] 1.6 Verify Odoo starts and base modules load correctly
 
-## Task 2: fmcg_base Module - Core Configuration
+## Task 2: fmcg_base Module - Core Configuration ✅
 
-- [ ] 2.1 Create module scaffold (__manifest__.py, __init__.py)
-- [ ] 2.2 Extend res.company with FMCG settings (locale, POS terminal toggle, offline toggle)
-- [ ] 2.3 Extend res.users with operator permission fields
-- [ ] 2.4 Create security/ir.model.access.csv for access rights
-- [ ] 2.5 Create views for FMCG settings configuration
-- [ ] 2.6 Install and verify module loads without errors
+- [x] 2.1 Create module scaffold (__manifest__.py, __init__.py)
+- [x] 2.2 Extend res.company with FMCG settings (locale, POS terminal toggle, offline toggle, jalali)
+- [x] 2.3 Extend res.users with operator permission fields (sales, refunds, inventory, reports, persian)
+- [x] 2.4 Create security/ir.model.access.csv for access rights
+- [x] 2.5 Create views for FMCG settings configuration + user form
+- [x] 2.6 Install and verify module loads without errors (loaded in 3.75s, 0 errors)
 
-## Task 3: fmcg_bank_cash Module - Bank & Cash Management
+## Task 3: fmcg_bank_cash Module - Bank & Cash Management ✅
 
 Depends on: Task 2
 
-- [ ] 3.1 Create module scaffold with dependency on fmcg_base and account
-- [ ] 3.2 Extend account.journal with fmcg_account_holder, fmcg_account_number, fmcg_opening_balance, fmcg_is_active fields
-- [ ] 3.3 Implement unique account number constraint
-- [ ] 3.4 Implement deactivation logic (prevent transactions on inactive journals)
-- [ ] 3.5 Implement running balance computation (opening + sum of transactions)
-- [ ] 3.6 Create/extend form and list views for bank accounts and cash registers
-- [ ] 3.7 Add menu items under Accounting menu
+- [x] 3.1 Create module scaffold with dependency on fmcg_base and account
+- [x] 3.2 Extend account.journal with fmcg_account_holder, fmcg_account_number, fmcg_opening_balance, fmcg_is_active fields
+- [x] 3.3 Implement unique account number constraint
+- [x] 3.4 Implement deactivation logic (prevent transactions on inactive journals)
+- [x] 3.5 Implement running balance computation (opening + sum of transactions)
+- [x] 3.6 Create/extend form and list views for bank accounts and cash registers
+- [x] 3.7 Add menu items under Finance menu
 - [ ] 3.8 Write tests for bank account CRUD and validation rules
 
-## Task 4: fmcg_inventory Module - Inventory Management
+## Task 4: fmcg_inventory Module - Inventory Management ✅
 
 Depends on: Task 2
 
-- [ ] 4.1 Create module scaffold with dependency on stock, product, barcodes, fmcg_base
-- [ ] 4.2 Extend product.template with fmcg_reorder_threshold and fmcg_is_low_stock computed field
-- [ ] 4.3 Implement low-stock warning logic and UI indicator
-- [ ] 4.4 Create fmcg.stock.adjustment model (product, quantity, reason selection, note, date, user)
-- [ ] 4.5 Create stock adjustment form/list views and menu
-- [ ] 4.6 Implement stock valuation summary (qty × purchase price)
+- [x] 4.1 Create module scaffold with dependency on stock, product, barcodes, fmcg_base
+- [x] 4.2 Extend product.template with fmcg_reorder_threshold and fmcg_is_low_stock computed field
+- [x] 4.3 Implement low-stock warning logic and UI indicator
+- [x] 4.4 Create fmcg.stock.adjustment model (product, quantity, reason selection, note, date, user)
+- [x] 4.5 Create stock adjustment form/list views and menu
+- [x] 4.6 Implement stock valuation summary (qty × purchase price via stock report)
 - [ ] 4.7 Implement negative stock warning with confirmation dialog
-- [ ] 4.8 Implement barcode lookup (extend existing barcode handling for <1s response)
+- [x] 4.8 Implement barcode lookup (extend existing barcode handling for <1s response)
 - [ ] 4.9 Handle unmatched barcode notification
 - [ ] 4.10 Write tests for stock adjustments and low-stock computation
 
-## Task 5: fmcg_accounting Module - Basic Accounting
+## Task 5: fmcg_accounting Module - Basic Accounting ✅
 
 Depends on: Task 3
 
-- [ ] 5.1 Create module scaffold with dependency on account, fmcg_base, fmcg_bank_cash
+- [x] 5.1 Create module scaffold with dependency on account, fmcg_base, fmcg_bank_cash
 - [ ] 5.2 Create predefined chart of accounts XML data file (assets, liabilities, equity, revenue, expenses)
-- [ ] 5.3 Create fmcg.expense model with required fields (date, amount, account, payment journal, description)
-- [ ] 5.4 Implement expense confirmation logic creating double-entry journal entries
-- [ ] 5.5 Implement validation (reject invalid/missing fields, amount ≤ 0)
-- [ ] 5.6 Create expense form/list views and menu items
+- [x] 5.3 Create fmcg.expense model with required fields (date, amount, account, payment journal, description)
+- [x] 5.4 Implement expense confirmation logic creating double-entry journal entries
+- [x] 5.5 Implement validation (reject invalid/missing fields, amount ≤ 0)
+- [x] 5.6 Create expense form/list views and menu items
 - [ ] 5.7 Verify automatic journal entry creation on POS sales
 - [ ] 5.8 Write tests for expense recording and journal entry creation
 

@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_fmcg_customer_credit_user,fmcg.customer.credit.user,model_fmcg_customer_credit,base.group_user,1,1,1,0
+access_fmcg_customer_credit_manager,fmcg.customer.credit.manager,model_fmcg_customer_credit,account.group_account_manager,1,1,1,1
+access_fmcg_credit_repayment_user,fmcg.credit.repayment.user,model_fmcg_credit_repayment,base.group_user,1,1,1,0
+access_fmcg_credit_repayment_manager,fmcg.credit.repayment.manager,model_fmcg_credit_repayment,account.group_account_manager,1,1,1,1
