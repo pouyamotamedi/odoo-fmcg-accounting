@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Extend Bank Journal Form -->
+    <record id="view_account_journal_form_fmcg_bank" model="ir.ui.view">
+        <field name="name">account.journal.form.fmcg.bank</field>
+        <field name="model">account.journal</field>
+        <field name="inherit_id" ref="account.view_account_journal_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="after">
+                <group string="FMCG Bank/Cash Settings" invisible="type not in ('bank', 'cash')">
+                    <group>
+                        <field name="fmcg_account_holder" invisible="type != 'bank'"/>
+                        <field name="fmcg_account_number" invisible="type != 'bank'"/>
+                        <field name="fmcg_opening_balance"/>
+                    </group>
+                    <group>
+                        <field name="fmcg_is_active"/>
+                        <field name="fmcg_running_balance"/>
+                    </group>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Bank Accounts List View -->
+    <record id="view_fmcg_bank_accounts_tree" model="ir.ui.view">
+        <field name="name">account.journal.list.fmcg.bank</field>
+        <field name="model">account.journal</field>
+        <field name="arch" type="xml">
+            <list string="Bank Accounts">
+                <field name="name"/>
+                <field name="fmcg_account_holder"/>
+                <field name="fmcg_account_number"/>
+                <field name="fmcg_running_balance"/>
+                <field name="fmcg_is_active"/>
+                <field name="currency_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Cash Registers List View -->
+    <record id="view_fmcg_cash_registers_tree" model="ir.ui.view">
+        <field name="name">account.journal.list.fmcg.cash</field>
+        <field name="model">account.journal</field>
+        <field name="arch" type="xml">
+            <list string="Cash Registers">
+                <field name="name"/>
+                <field name="fmcg_opening_balance"/>
+                <field name="fmcg_running_balance"/>
+                <field name="fmcg_is_active"/>
+                <field name="currency_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Bank Accounts Action -->
+    <record id="action_fmcg_bank_accounts" model="ir.actions.act_window">
+        <field name="name">Bank Accounts</field>
+        <field name="res_model">account.journal</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('type', '=', 'bank')]</field>
+        <field name="view_ids" eval="[(5, 0, 0), (0, 0, {'view_mode': 'list', 'view_id': ref('view_fmcg_bank_accounts_tree')})]"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first bank account
+            </p>
+            <p>Define bank accounts to track payments received through banking channels.</p>
+        </field>
+    </record>
+
+    <!-- Cash Registers Action -->
+    <record id="action_fmcg_cash_registers" model="ir.actions.act_window">
+        <field name="name">Cash Registers</field>
+        <field name="res_model">account.journal</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('type', '=', 'cash')]</field>
+        <field name="view_ids" eval="[(5, 0, 0), (0, 0, {'view_mode': 'list', 'view_id': ref('view_fmcg_cash_registers_tree')})]"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first cash register
+            </p>
+            <p>Define cash registers to track physical cash holdings.</p>
+        </field>
+    </record>
+
+    <!-- Menu Items -->
+    <menuitem id="menu_fmcg_finance_root"
+        name="Finance"
+        sequence="30"
+        web_icon="fmcg_bank_cash,static/description/icon.png"/>
+
+    <menuitem id="menu_fmcg_bank_cash"
+        name="Bank &amp; Cash"
+        parent="menu_fmcg_finance_root"
+        sequence="10"/>
+
+    <menuitem id="menu_fmcg_bank_accounts"
+        name="Bank Accounts"
+        parent="menu_fmcg_bank_cash"
+        action="action_fmcg_bank_accounts"
+        sequence="10"/>
+
+    <menuitem id="menu_fmcg_cash_registers"
+        name="Cash Registers"
+        parent="menu_fmcg_bank_cash"
+        action="action_fmcg_cash_registers"
+        sequence="20"/>
+</odoo>
