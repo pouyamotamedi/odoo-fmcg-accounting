@@ -1,188 +1,21 @@
-# Translation file for FMCG modules - Persian (Farsi)
+# Translation file for fmcg_persian module - Persian (Farsi)
 # Copyright (C) 2026 FMCG Shop
+# Automatically generated
 msgid ""
 msgstr ""
-"Project-Id-Version: FMCG Shop 18.0\n"
+"Project-Id-Version: Odoo Server 18.0\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-01-01 00:00+0000\n"
 "PO-Revision-Date: 2026-01-01 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: Persian\n"
 "Language: fa_IR\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
-#. module: fmcg_base
-msgid "FMCG Shop"
-msgstr "فروشگاه FMCG"
-
-msgid "Default Locale"
-msgstr "زبان پیش‌فرض"
-
-msgid "Jalali Calendar"
-msgstr "تقویم شمسی"
-
-msgid "POS Terminal"
-msgstr "دستگاه پوز"
-
-msgid "Offline Mode"
-msgstr "حالت آفلاین"
-
-msgid "Can Process Sales"
-msgstr "اجازه ثبت فروش"
-
-msgid "Can Issue Refunds"
-msgstr "اجازه مرجوعی"
-
-msgid "Can Modify Inventory"
-msgstr "اجازه تغییر موجودی"
-
-msgid "Can View Reports"
-msgstr "اجازه مشاهده گزارش‌ها"
-
-msgid "Use Persian Locale"
-msgstr "استفاده از زبان فارسی"
-
-#. module: fmcg_bank_cash
-msgid "Bank Accounts"
-msgstr "حساب‌های بانکی"
-
-msgid "Cash Registers"
-msgstr "صندوق‌ها"
-
-msgid "FMCG Account Holder"
-msgstr "صاحب حساب"
-
-msgid "Bank Account Number"
-msgstr "شماره حساب بانکی"
-
-msgid "Opening Balance"
-msgstr "موجودی اولیه"
-
-msgid "Running Balance"
-msgstr "موجودی جاری"
-
-#. module: fmcg_inventory
-msgid "Reorder Threshold"
-msgstr "حد هشدار موجودی"
-
-msgid "Low Stock"
-msgstr "موجودی کم"
-
-msgid "Stock Adjustments"
-msgstr "تعدیل موجودی"
-
-msgid "Damaged"
-msgstr "خراب"
-
-msgid "Expired"
-msgstr "منقضی"
-
-msgid "Lost"
-msgstr "مفقودی"
-
-msgid "Other"
-msgstr "سایر"
-
-#. module: fmcg_accounting
-msgid "Expenses"
-msgstr "هزینه‌ها"
-
-msgid "Expense Account"
-msgstr "حساب هزینه"
-
-msgid "Payment Method"
-msgstr "روش پرداخت"
-
-msgid "Description"
-msgstr "شرح"
-
-#. module: fmcg_credit
-msgid "Customer Credits"
-msgstr "اعتبار مشتریان"
-
-msgid "Credit Amount"
-msgstr "مبلغ اعتبار"
-
-msgid "Total Outstanding"
-msgstr "مجموع بدهی"
-
-msgid "Remaining"
-msgstr "مانده"
-
-msgid "Record Repayment"
-msgstr "ثبت بازپرداخت"
-
-msgid "Repayment Amount"
-msgstr "مبلغ بازپرداخت"
-
-msgid "Open"
-msgstr "باز"
-
-msgid "Partially Paid"
-msgstr "پرداخت جزئی"
-
-msgid "Paid"
-msgstr "پرداخت شده"
-
-#. module: fmcg_pos_terminal
-msgid "POS Terminals"
-msgstr "دستگاه‌های پوز"
-
-msgid "Test Connection"
-msgstr "تست اتصال"
-
-msgid "Connection Timeout (seconds)"
-msgstr "مهلت اتصال (ثانیه)"
-
-msgid "Transaction Timeout (seconds)"
-msgstr "مهلت تراکنش (ثانیه)"
-
-msgid "Connected"
-msgstr "متصل"
-
-msgid "Disconnected"
-msgstr "قطع"
-
-msgid "Error"
-msgstr "خطا"
-
-#. General
-msgid "Save"
-msgstr "ذخیره"
-
-msgid "Discard"
-msgstr "لغو"
-
-msgid "Confirm"
-msgstr "تأیید"
-
-msgid "Cancel"
-msgstr "انصراف"
-
-msgid "Draft"
-msgstr "پیش‌نویس"
-
-msgid "Confirmed"
-msgstr "تأیید شده"
-
-msgid "Date"
-msgstr "تاریخ"
-
-msgid "Amount"
-msgstr "مبلغ"
-
-msgid "Note"
-msgstr "یادداشت"
-
-msgid "Customer"
-msgstr "مشتری"
-
-msgid "Product"
-msgstr "محصول"
-
-msgid "Quantity"
-msgstr "تعداد"
-
-msgid "Invoice Reference"
-msgstr "مرجع فاکتور"
+#. module: fmcg_persian
+#: model:ir.model,name:fmcg_persian.model_fmcg_jalali_utils
+msgid "Jalali Calendar Utilities"
+msgstr "ابزارهای تقویم شمسی"
