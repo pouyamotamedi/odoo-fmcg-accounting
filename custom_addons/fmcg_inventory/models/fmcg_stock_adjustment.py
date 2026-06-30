@@ -82,30 +82,31 @@ class FmcgStockAdjustment(models.Model):
             product = record.product_id
             record.product_qty_before = product.qty_available
 
-            # Create a stock move to reduce inventory
-            stock_location = self.env.ref('stock.stock_location_stock')
-            inventory_loss_location = self.env.ref('stock.stock_location_inventory')
+            # Use stock quant to adjust inventory (Odoo 18 recommended approach)
+            stock_location = self.env['stock.warehouse'].search(
+                [('company_id', '=', self.env.company.id)], limit=1
+            ).lot_stock_id
 
-            move_vals = {
-                'name': f'FMCG Adjustment: {record.reason} - {product.name}',
-                'product_id': product.id,
-                'product_uom_qty': record.quantity,
-                'product_uom': product.uom_id.id,
-                'location_id': stock_location.id,
-                'location_dest_id': inventory_loss_location.id,
-                'origin': f'FMCG-ADJ/{record.id}',
-                'move_line_ids': [(0, 0, {
-                    'product_id': product.id,
-                    'location_id': stock_location.id,
-                    'location_dest_id': inventory_loss_location.id,
-                    'quantity': record.quantity,
-                })],
-            }
-            move = self.env['stock.move'].create(move_vals)
-            move._action_confirm()
-            move._action_done()
+            if not stock_location:
+                raise UserError("No stock location found. Please configure a warehouse first.")
 
-            record.product_qty_after = product.qty_available
+            # Use Odoo's built-in inventory adjustment via stock.quant
+            quant = self.env['stock.quant'].search([
+                ('product_id', '=', product.id),
+                ('location_id', '=', stock_location.id),
+            ], limit=1)
+
+            current_qty = quant.quantity if quant else 0.0
+            new_qty = current_qty - record.quantity
+
+            # Apply inventory adjustment using Odoo's standard method
+            self.env['stock.quant'].with_context(
+                inventory_mode=True
+            )._update_available_quantity(
+                product, stock_location, -record.quantity
+            )
+
+            record.product_qty_after = product.with_context(force_company=self.env.company.id).qty_available
             record.state = 'confirmed'
 
     def action_reset_to_draft(self):

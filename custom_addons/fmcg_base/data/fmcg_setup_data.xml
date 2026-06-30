@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <!-- Iranian Rial currency (if not exists) -->
+    <record id="IRR" model="res.currency" forcecreate="0">
+        <field name="name">IRR</field>
+        <field name="symbol">ریال</field>
+        <field name="rounding">1</field>
+        <field name="decimal_places">0</field>
+        <field name="active">True</field>
+    </record>
+
+    <!-- Toman (custom unit = 10 Rial) -->
+    <record id="IRT" model="res.currency" forcecreate="0">
+        <field name="name">IRT</field>
+        <field name="symbol">تومان</field>
+        <field name="rounding">1</field>
+        <field name="decimal_places">0</field>
+        <field name="active">True</field>
+    </record>
+</odoo>

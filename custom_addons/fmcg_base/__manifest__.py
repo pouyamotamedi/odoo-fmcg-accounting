@@ -18,6 +18,7 @@
     ],
     'data': [
         'security/ir.model.access.csv',
+        'data/fmcg_setup_data.xml',
         'views/res_config_settings_views.xml',
         'views/res_users_views.xml',
     ],
