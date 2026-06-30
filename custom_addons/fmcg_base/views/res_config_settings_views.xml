@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_fmcg" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.fmcg</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="FMCG Shop" string="FMCG Shop">
+                    <block title="General Settings">
+                        <setting string="Default Locale" help="Set the default language for the shop interface">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="fmcg_default_locale" class="col-lg-3 o_light_label"/>
+                                    <field name="fmcg_default_locale"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="Jalali Calendar" help="Use Solar Hijri calendar for date display">
+                            <div class="content-group">
+                                <field name="fmcg_jalali_calendar"/>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Hardware Integration">
+                        <setting string="POS Terminal" help="Enable automatic amount transmission to bank POS terminal">
+                            <div class="content-group">
+                                <field name="fmcg_pos_terminal_enabled"/>
+                            </div>
+                        </setting>
+                        <setting string="Offline Mode" help="Continue working without internet, sync when connected">
+                            <div class="content-group">
+                                <field name="fmcg_offline_mode_enabled"/>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>
