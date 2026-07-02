@@ -10,6 +10,7 @@ const menuItems = [
   { href: '/admin/inventory', label: 'انبار و کالاها', icon: '📦' },
   { href: '/admin/people', label: 'اشخاص', icon: '👥' },
   { href: '/admin/credits', label: 'حساب مشتریان', icon: '🤝' },
+  { href: '/admin/treasury', label: 'بانک و صندوق', icon: '🏦' },
   { href: '/admin/reports', label: 'گزارش‌ها', icon: '📈' },
   { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️' },
   { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️' },

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { saveOnboardingData } from '@/lib/odoo-api';
 
 interface Person { name: string; role: string; phone: string }
 interface BankAccount { bankName: string; accountNumber: string; cashBalance: string }
@@ -25,6 +26,8 @@ export default function OnboardingPage() {
   // Step 4: Products
   const [products, setProducts] = useState<Product[]>([]);
   const [productForm, setProductForm] = useState<Product>({ name: '', barcode: '', buyPrice: '', sellPrice: '' });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   function addPerson() {
     if (personForm.name) {
@@ -40,10 +43,16 @@ export default function OnboardingPage() {
     }
   }
 
-  function handleFinish() {
-    // TODO: Save all to Odoo via API
-    alert(`راه‌اندازی کامل شد!\n${people.length} شخص، ${products.length} کالا ثبت شد.`);
-    router.push('/admin');
+  async function handleFinish() {
+    setSaving(true);
+    setSaveError('');
+    try {
+      await saveOnboardingData({ people, bank, terminal, products });
+      router.push('/admin');
+    } catch (e: any) {
+      setSaveError(e.message || 'خطا در ذخیره اطلاعات در سرور');
+      setSaving(false);
+    }
   }
 
   const steps = [
@@ -199,11 +208,15 @@ export default function OnboardingPage() {
             <p className="text-gray-500 text-sm mb-6">
               {people.length} شخص و {products.length} کالا ثبت شد. الان میتونید شروع کنید!
             </p>
+            {saveError && (
+              <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{saveError}</div>
+            )}
             <button
               onClick={handleFinish}
-              className="bg-indigo-500 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-600 transition"
+              disabled={saving}
+              className="bg-indigo-500 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-600 transition disabled:opacity-50"
             >
-              ورود به پنل مدیریت ←
+              {saving ? 'در حال ذخیره...' : 'ثبت و ورود به پنل مدیریت ←'}
             </button>
           </div>
         )}

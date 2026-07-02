@@ -6,8 +6,6 @@
 const ODOO_URL = process.env.NEXT_PUBLIC_ODOO_URL || '/api';
 const ODOO_DB = process.env.NEXT_PUBLIC_ODOO_DB || 'fmcg_shop';
 
-let sessionId: string | null = null;
-
 interface JsonRpcResponse {
   jsonrpc: string;
   id: number;
@@ -66,7 +64,6 @@ export async function login(username: string, password: string) {
 
 export async function logout() {
   await jsonRpc('/web/session/destroy', {});
-  sessionId = null;
 }
 
 // ============ CRUD Operations ============
@@ -128,29 +125,413 @@ export async function callMethod(model: string, method: string, args: any[] = []
   });
 }
 
-// ============ Specific API Helpers ============
+// ============ Products ============
 
-export async function getProducts() {
-  return searchRead('product.product', [['active', '=', true], ['type', '=', 'product']], [
-    'name', 'barcode', 'list_price', 'standard_price', 'qty_available',
-  ]);
+export async function getProducts(limit?: number) {
+  return searchRead(
+    'product.product',
+    [['active', '=', true], ['type', '=', 'product']],
+    ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'fmcg_is_low_stock'],
+    limit
+  );
 }
+
+export async function createProduct(values: {
+  name: string;
+  barcode?: string;
+  list_price: number;
+  standard_price: number;
+  type?: string;
+  fmcg_reorder_threshold?: number;
+}) {
+  return create('product.product', {
+    name: values.name,
+    barcode: values.barcode || false,
+    list_price: values.list_price,
+    standard_price: values.standard_price,
+    type: values.type || 'product',
+    fmcg_reorder_threshold: values.fmcg_reorder_threshold || 10,
+  });
+}
+
+export async function updateProduct(id: number, values: Record<string, any>) {
+  return write('product.product', [id], values);
+}
+
+export async function deleteProduct(id: number) {
+  return write('product.product', [id], { active: false });
+}
+
+// ============ Partners (People) ============
 
 export async function getPartners(role?: string) {
-  const domain: any[] = [];
+  const domain: any[] = [['active', '=', true]];
   if (role === 'supplier') domain.push(['supplier_rank', '>', 0]);
   if (role === 'customer') domain.push(['customer_rank', '>', 0]);
-  return searchRead('res.partner', domain, ['name', 'phone', 'supplier_rank', 'customer_rank']);
-}
-
-export async function getCustomerCredits() {
-  return searchRead('fmcg.customer.credit', [['state', 'in', ['open', 'partial']]], [
-    'partner_id', 'amount', 'remaining', 'date', 'state', 'note',
+  return searchRead('res.partner', domain, [
+    'name', 'phone', 'mobile', 'supplier_rank', 'customer_rank', 'email', 'comment',
   ]);
 }
+
+export async function createPartner(values: {
+  name: string;
+  phone?: string;
+  mobile?: string;
+  supplier_rank?: number;
+  customer_rank?: number;
+  comment?: string;
+}) {
+  return create('res.partner', {
+    name: values.name,
+    phone: values.phone || false,
+    mobile: values.mobile || false,
+    supplier_rank: values.supplier_rank || 0,
+    customer_rank: values.customer_rank || 0,
+    comment: values.comment || false,
+  });
+}
+
+export async function updatePartner(id: number, values: Record<string, any>) {
+  return write('res.partner', [id], values);
+}
+
+// ============ Seller Users (POS-only access) ============
+
+export async function createSellerUser(values: {
+  name: string;
+  login: string;
+  password: string;
+  phone?: string;
+}) {
+  return callMethod('res.users', 'fmcg_create_seller', [], {
+    name: values.name,
+    login: values.login,
+    password: values.password,
+    phone: values.phone || false,
+  });
+}
+
+export async function getSellerUsers() {
+  return searchRead('res.users', [['share', '=', false]], ['name', 'login', 'fmcg_is_seller']);
+}
+
+// ============ Customer Credits ============
+
+export async function getCustomerCredits(state?: string) {
+  const domain: any[] = [];
+  if (state) {
+    domain.push(['state', '=', state]);
+  } else {
+    domain.push(['state', 'in', ['open', 'partial']]);
+  }
+  return searchRead('fmcg.customer.credit', domain, [
+    'partner_id', 'amount', 'remaining', 'paid_amount', 'date', 'state', 'note', 'invoice_ref',
+  ]);
+}
+
+export async function createCustomerCredit(values: {
+  partner_id: number;
+  amount: number;
+  note?: string;
+  invoice_ref?: string;
+}) {
+  return create('fmcg.customer.credit', {
+    partner_id: values.partner_id,
+    amount: values.amount,
+    note: values.note || false,
+    invoice_ref: values.invoice_ref || false,
+  });
+}
+
+export async function recordRepayment(values: {
+  credit_id: number;
+  amount: number;
+  note?: string;
+}) {
+  return create('fmcg.credit.repayment', {
+    credit_id: values.credit_id,
+    amount: values.amount,
+    note: values.note || false,
+  });
+}
+
+// ============ Bank & Cash ============
 
 export async function getBankCashBalances() {
   return searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
-    'name', 'type', 'fmcg_running_balance', 'fmcg_is_active',
+    'name', 'type', 'fmcg_running_balance', 'fmcg_is_active', 'fmcg_opening_balance',
+    'fmcg_account_holder', 'fmcg_account_number',
   ]);
+}
+
+// ============ POS Orders ============
+
+export async function createPosOrder(values: {
+  lines: Array<{ product_id: number; qty: number; price_unit: number }>;
+  payment_method: 'cash' | 'card' | 'credit';
+  partner_id?: number;
+  note?: string;
+}) {
+  // Create as account.move (invoice) since standard POS may not be installed
+  const invoice_lines = values.lines.map((line) => [
+    0, 0, {
+      product_id: line.product_id,
+      quantity: line.qty,
+      price_unit: line.price_unit,
+    },
+  ]);
+
+  return create('account.move', {
+    move_type: 'out_invoice',
+    partner_id: values.partner_id || false,
+    invoice_line_ids: invoice_lines,
+    narration: values.note || false,
+  });
+}
+
+export async function confirmInvoice(invoiceId: number) {
+  return callMethod('account.move', 'action_post', [[invoiceId]]);
+}
+
+// ============ PAX S800 Card Terminal ============
+
+/**
+ * Send a card payment amount to the PAX S800 terminal via the Odoo bridge.
+ * The browser cannot open TCP sockets, so this posts to an Odoo controller
+ * that forwards the amount to the terminal over the POSLink protocol.
+ */
+export async function payWithPaxTerminal(amount: number, transType: 'sale' | 'return' = 'sale', ecrRef = '1') {
+  return jsonRpc('/fmcg/pax/pay', {
+    amount,
+    trans_type: transType,
+    ecr_ref: ecrRef,
+  });
+}
+
+// ============ Purchase Invoices ============
+
+export async function getPurchaseInvoices(state?: string) {
+  const domain: any[] = [['move_type', '=', 'in_invoice']];
+  if (state === 'posted') domain.push(['state', '=', 'posted']);
+  else if (state === 'draft') domain.push(['state', '=', 'draft']);
+  if (state === 'paid') {
+    domain.push(['state', '=', 'posted']);
+    domain.push(['payment_state', '=', 'paid']);
+  }
+  return searchRead('account.move', domain, [
+    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'payment_state',
+  ], 50, 0, 'create_date desc');
+}
+
+export async function createPurchaseInvoice(values: {
+  partner_id: number;
+  lines: Array<{ product_id: number; quantity: number; price_unit: number }>;
+  payment_method: 'cash' | 'bank' | 'credit';
+  note?: string;
+}) {
+  const invoice_lines = values.lines.map((line) => [
+    0, 0, {
+      product_id: line.product_id,
+      quantity: line.quantity,
+      price_unit: line.price_unit,
+    },
+  ]);
+
+  const invoiceId = await create('account.move', {
+    move_type: 'in_invoice',
+    partner_id: values.partner_id,
+    invoice_line_ids: invoice_lines,
+    narration: values.note || false,
+  });
+
+  // Auto-confirm the purchase invoice
+  await confirmInvoice(invoiceId);
+
+  return invoiceId;
+}
+
+// ============ Stock Adjustment ============
+
+export async function createStockAdjustment(values: {
+  product_id: number;
+  quantity: number;
+  reason: 'damaged' | 'expired' | 'lost' | 'other';
+  note: string;
+}) {
+  const id = await create('fmcg.stock.adjustment', {
+    product_id: values.product_id,
+    quantity: values.quantity,
+    reason: values.reason,
+    note: values.note,
+  });
+  // Auto-confirm
+  await callMethod('fmcg.stock.adjustment', 'action_confirm', [[id]]);
+  return id;
+}
+
+// ============ Sales Returns ============
+
+export async function createSalesReturn(values: {
+  partner_id?: number;
+  lines: Array<{ product_id: number; quantity: number; price_unit: number }>;
+  return_to_stock: boolean;
+  refund_method: 'cash' | 'bank' | 'credit';
+  note?: string;
+}) {
+  // Create credit note (refund)
+  const refund_lines = values.lines.map((line) => [
+    0, 0, {
+      product_id: line.product_id,
+      quantity: line.quantity,
+      price_unit: line.price_unit,
+    },
+  ]);
+
+  const refundId = await create('account.move', {
+    move_type: 'out_refund',
+    partner_id: values.partner_id || false,
+    invoice_line_ids: refund_lines,
+    narration: values.note || false,
+  });
+
+  await confirmInvoice(refundId);
+
+  return refundId;
+}
+
+// ============ Reports ============
+
+export async function getDailySalesReport(dateFrom: string, dateTo: string) {
+  return searchRead(
+    'account.move',
+    [
+      ['move_type', '=', 'out_invoice'],
+      ['state', '=', 'posted'],
+      ['invoice_date', '>=', dateFrom],
+      ['invoice_date', '<=', dateTo],
+    ],
+    ['name', 'partner_id', 'amount_total', 'invoice_date', 'payment_state'],
+    0, 0, 'invoice_date desc'
+  );
+}
+
+export async function getInventoryReport() {
+  return searchRead(
+    'product.product',
+    [['active', '=', true], ['type', '=', 'product']],
+    ['name', 'qty_available', 'standard_price', 'list_price', 'fmcg_is_low_stock', 'fmcg_reorder_threshold'],
+    0, 0, 'name asc'
+  );
+}
+
+export async function getCreditAgingReport() {
+  return searchRead(
+    'fmcg.customer.credit',
+    [['state', 'in', ['open', 'partial']]],
+    ['partner_id', 'amount', 'remaining', 'date', 'state'],
+    0, 0, 'date asc'
+  );
+}
+
+export async function getCashFlowReport(dateFrom: string, dateTo: string) {
+  return searchRead(
+    'account.move',
+    [
+      ['state', '=', 'posted'],
+      ['date', '>=', dateFrom],
+      ['date', '<=', dateTo],
+    ],
+    ['name', 'move_type', 'amount_total', 'date', 'journal_id'],
+    0, 0, 'date desc'
+  );
+}
+
+// ============ Company Settings ============
+
+export async function getCompanySettings() {
+  const companies = await searchRead('res.company', [], [
+    'name', 'currency_id', 'fmcg_pos_terminal_enabled', 'fmcg_pax_terminal_ip', 'fmcg_pax_terminal_port',
+  ], 1);
+  return companies && companies.length > 0 ? companies[0] : null;
+}
+
+export async function updateCompanySettings(id: number, values: Record<string, any>) {
+  return write('res.company', [id], values);
+}
+
+export async function changePassword(newPassword: string) {
+  // Updates the current user's password
+  return callMethod('res.users', 'change_password', ['', newPassword]);
+}
+
+// ============ Onboarding ============
+
+export async function saveOnboardingData(data: {
+  people: Array<{ name: string; role: string; phone: string }>;
+  bank: { bankName: string; accountNumber: string; cashBalance: string };
+  terminal: { model: string; port: string; protocol: string };
+  products: Array<{ name: string; barcode: string; buyPrice: string; sellPrice: string }>;
+}) {
+  const results: any = { people: [], products: [] };
+
+  // Create partners
+  for (const person of data.people) {
+    const id = await createPartner({
+      name: person.name,
+      phone: person.phone,
+      supplier_rank: person.role === 'تامین‌کننده' ? 1 : 0,
+      customer_rank: person.role === 'مشتری' ? 1 : 0,
+    });
+    results.people.push(id);
+  }
+
+  // Create bank journal if provided
+  if (data.bank.bankName && data.bank.accountNumber) {
+    await create('account.journal', {
+      name: data.bank.bankName,
+      type: 'bank',
+      fmcg_account_number: data.bank.accountNumber,
+      fmcg_opening_balance: parseFloat(data.bank.cashBalance.replace(/[^\d.]/g, '')) || 0,
+    });
+  }
+
+  // Set cash opening balance if provided
+  if (data.bank.cashBalance) {
+    const cashJournals = await searchRead('account.journal', [['type', '=', 'cash']], ['id'], 1);
+    if (cashJournals && cashJournals.length > 0) {
+      await write('account.journal', [cashJournals[0].id], {
+        fmcg_opening_balance: parseFloat(data.bank.cashBalance.replace(/[^\d.]/g, '')) || 0,
+      });
+    }
+  }
+
+  // Create products
+  for (const product of data.products) {
+    const id = await createProduct({
+      name: product.name,
+      barcode: product.barcode || undefined,
+      standard_price: parseFloat(product.buyPrice.replace(/[^\d.]/g, '')) || 0,
+      list_price: parseFloat(product.sellPrice.replace(/[^\d.]/g, '')) || 0,
+    });
+    results.products.push(id);
+  }
+
+  return results;
+}
+
+// ============ Dashboard Helpers ============
+
+export async function getTodaySales() {
+  const today = new Date().toISOString().split('T')[0];
+  const sales = await searchRead(
+    'account.move',
+    [
+      ['move_type', '=', 'out_invoice'],
+      ['state', '=', 'posted'],
+      ['invoice_date', '=', today],
+    ],
+    ['amount_total'],
+  );
+  const totalAmount = sales?.reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0) || 0;
+  return { totalAmount, count: sales?.length || 0 };
 }

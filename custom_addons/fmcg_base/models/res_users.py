@@ -1,9 +1,14 @@
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class ResUsers(models.Model):
     _inherit = 'res.users'
 
+    fmcg_is_seller = fields.Boolean(
+        string='Is Seller (POS-only)',
+        default=False,
+        help='This user is a seller with POS-only access',
+    )
     fmcg_can_process_sales = fields.Boolean(
         string='Can Process Sales',
         default=True,
@@ -29,3 +34,27 @@ class ResUsers(models.Model):
         default=True,
         help='Display interface in Persian with RTL layout for this user',
     )
+
+    @api.model
+    def fmcg_create_seller(self, name, login, password, phone=False):
+        """Create a seller user with POS-only (limited) access.
+
+        The seller is added to the internal user group but flagged as a
+        seller so the frontend routes them straight to the POS screen.
+        """
+        group_user = self.env.ref('base.group_user')
+        vals = {
+            'name': name,
+            'login': login,
+            'password': password,
+            'phone': phone,
+            'fmcg_is_seller': True,
+            'fmcg_can_process_sales': True,
+            'fmcg_can_issue_refunds': False,
+            'fmcg_can_modify_inventory': False,
+            'fmcg_can_view_reports': False,
+            'groups_id': [(6, 0, [group_user.id])],
+        }
+        user = self.sudo().create(vals)
+        return {'id': user.id, 'login': user.login, 'name': user.name}
+
