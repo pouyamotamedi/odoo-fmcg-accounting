@@ -132,14 +132,14 @@ export async function getProducts(limit?: number) {
   try {
     return await searchRead(
       'product.product',
-      [['active', '=', true], ['type', '=', 'product']],
+      [['active', '=', true], ['type', '=', 'consu']],
       ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'fmcg_is_low_stock'],
       limit
     );
   } catch {
     return await searchRead(
       'product.product',
-      [['active', '=', true], ['type', '=', 'product']],
+      [['active', '=', true], ['type', '=', 'consu']],
       ['name', 'barcode', 'list_price', 'standard_price', 'qty_available'],
       limit
     );
@@ -159,7 +159,7 @@ export async function createProduct(values: {
     barcode: values.barcode || false,
     list_price: values.list_price,
     standard_price: values.standard_price,
-    type: values.type || 'product',
+    type: values.type || 'consu',
     fmcg_reorder_threshold: values.fmcg_reorder_threshold || 10,
   });
 }
@@ -444,14 +444,14 @@ export async function getInventoryReport() {
   try {
     return await searchRead(
       'product.product',
-      [['active', '=', true], ['type', '=', 'product']],
+      [['active', '=', true], ['type', '=', 'consu']],
       ['name', 'qty_available', 'standard_price', 'list_price', 'fmcg_is_low_stock', 'fmcg_reorder_threshold'],
       0, 0, 'name asc'
     );
   } catch {
     return await searchRead(
       'product.product',
-      [['active', '=', true], ['type', '=', 'product']],
+      [['active', '=', true], ['type', '=', 'consu']],
       ['name', 'qty_available', 'standard_price', 'list_price'],
       0, 0, 'name asc'
     );
