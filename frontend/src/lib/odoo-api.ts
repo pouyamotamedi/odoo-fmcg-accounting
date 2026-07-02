@@ -128,12 +128,22 @@ export async function callMethod(model: string, method: string, args: any[] = []
 // ============ Products ============
 
 export async function getProducts(limit?: number) {
-  return searchRead(
-    'product.product',
-    [['active', '=', true], ['type', '=', 'product']],
-    ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'fmcg_is_low_stock'],
-    limit
-  );
+  // First try with FMCG fields, fallback to basic fields if module not installed
+  try {
+    return await searchRead(
+      'product.product',
+      [['active', '=', true], ['type', '=', 'product']],
+      ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'fmcg_is_low_stock'],
+      limit
+    );
+  } catch {
+    return await searchRead(
+      'product.product',
+      [['active', '=', true], ['type', '=', 'product']],
+      ['name', 'barcode', 'list_price', 'standard_price', 'qty_available'],
+      limit
+    );
+  }
 }
 
 export async function createProduct(values: {
@@ -224,9 +234,17 @@ export async function getCustomerCredits(state?: string) {
   } else {
     domain.push(['state', 'in', ['open', 'partial']]);
   }
-  return searchRead('fmcg.customer.credit', domain, [
-    'partner_id', 'amount', 'remaining', 'paid_amount', 'date', 'state', 'note', 'invoice_ref',
-  ]);
+  try {
+    return await searchRead('fmcg.customer.credit', domain, [
+      'partner_id', 'amount', 'remaining', 'paid_amount', 'date', 'state', 'note', 'invoice_ref',
+    ]);
+  } catch (e: any) {
+    // Model may not exist if module not installed
+    if (e.message?.includes('404') || e.message?.includes('not found') || e.message?.includes('does not exist')) {
+      return [];
+    }
+    throw e;
+  }
 }
 
 export async function createCustomerCredit(values: {
@@ -258,10 +276,17 @@ export async function recordRepayment(values: {
 // ============ Bank & Cash ============
 
 export async function getBankCashBalances() {
-  return searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
-    'name', 'type', 'fmcg_running_balance', 'fmcg_is_active', 'fmcg_opening_balance',
-    'fmcg_account_holder', 'fmcg_account_number',
-  ]);
+  // Try with FMCG fields first, fallback to basic fields
+  try {
+    return await searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
+      'name', 'type', 'fmcg_running_balance', 'fmcg_is_active', 'fmcg_opening_balance',
+      'fmcg_account_holder', 'fmcg_account_number',
+    ]);
+  } catch {
+    return await searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
+      'name', 'type',
+    ]);
+  }
 }
 
 // ============ POS Orders ============
@@ -416,21 +441,34 @@ export async function getDailySalesReport(dateFrom: string, dateTo: string) {
 }
 
 export async function getInventoryReport() {
-  return searchRead(
-    'product.product',
-    [['active', '=', true], ['type', '=', 'product']],
-    ['name', 'qty_available', 'standard_price', 'list_price', 'fmcg_is_low_stock', 'fmcg_reorder_threshold'],
-    0, 0, 'name asc'
-  );
+  try {
+    return await searchRead(
+      'product.product',
+      [['active', '=', true], ['type', '=', 'product']],
+      ['name', 'qty_available', 'standard_price', 'list_price', 'fmcg_is_low_stock', 'fmcg_reorder_threshold'],
+      0, 0, 'name asc'
+    );
+  } catch {
+    return await searchRead(
+      'product.product',
+      [['active', '=', true], ['type', '=', 'product']],
+      ['name', 'qty_available', 'standard_price', 'list_price'],
+      0, 0, 'name asc'
+    );
+  }
 }
 
 export async function getCreditAgingReport() {
-  return searchRead(
-    'fmcg.customer.credit',
-    [['state', 'in', ['open', 'partial']]],
-    ['partner_id', 'amount', 'remaining', 'date', 'state'],
-    0, 0, 'date asc'
-  );
+  try {
+    return await searchRead(
+      'fmcg.customer.credit',
+      [['state', 'in', ['open', 'partial']]],
+      ['partner_id', 'amount', 'remaining', 'date', 'state'],
+      0, 0, 'date asc'
+    );
+  } catch {
+    return [];
+  }
 }
 
 export async function getCashFlowReport(dateFrom: string, dateTo: string) {
@@ -450,9 +488,25 @@ export async function getCashFlowReport(dateFrom: string, dateTo: string) {
 
 export async function getCompanySettings() {
   const companies = await searchRead('res.company', [], [
-    'name', 'currency_id', 'fmcg_pos_terminal_enabled', 'fmcg_pax_terminal_ip', 'fmcg_pax_terminal_port',
+    'name', 'currency_id',
   ], 1);
-  return companies && companies.length > 0 ? companies[0] : null;
+  if (!companies || companies.length === 0) return null;
+  
+  const company = companies[0];
+  
+  // Try to read FMCG-specific fields (may not exist if module not installed)
+  try {
+    const fmcgData = await searchRead('res.company', [['id', '=', company.id]], [
+      'fmcg_pos_terminal_enabled', 'fmcg_pax_terminal_ip', 'fmcg_pax_terminal_port',
+    ], 1);
+    if (fmcgData && fmcgData.length > 0) {
+      return { ...company, ...fmcgData[0] };
+    }
+  } catch {
+    // FMCG fields not available - module not installed
+  }
+  
+  return company;
 }
 
 export async function updateCompanySettings(id: number, values: Record<string, any>) {
@@ -468,7 +522,7 @@ export async function changePassword(newPassword: string) {
 
 export async function saveOnboardingData(data: {
   people: Array<{ name: string; role: string; phone: string }>;
-  bank: { bankName: string; accountNumber: string; cashBalance: string };
+  bank: { bankName: string; accountNumber: string; bankBalance: string; cashBalance: string };
   terminal: { model: string; port: string; protocol: string };
   products: Array<{ name: string; barcode: string; buyPrice: string; sellPrice: string }>;
 }) {
@@ -490,8 +544,8 @@ export async function saveOnboardingData(data: {
     await create('account.journal', {
       name: data.bank.bankName,
       type: 'bank',
-      fmcg_account_number: data.bank.accountNumber,
-      fmcg_opening_balance: parseFloat(data.bank.cashBalance.replace(/[^\d.]/g, '')) || 0,
+      fmcg_account_number: data.bank.accountNumber.replace(/[^\d]/g, ''),
+      fmcg_opening_balance: parseFloat(data.bank.bankBalance.replace(/[^\d.]/g, '')) || 0,
     });
   }
 

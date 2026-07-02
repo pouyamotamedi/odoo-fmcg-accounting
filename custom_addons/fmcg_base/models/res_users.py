@@ -36,12 +36,17 @@ class ResUsers(models.Model):
     )
 
     @api.model
-    def fmcg_create_seller(self, name, login, password, phone=False):
+    def fmcg_create_seller(self, name=False, login=False, password=False, phone=False):
         """Create a seller user with POS-only (limited) access.
 
         The seller is added to the internal user group but flagged as a
         seller so the frontend routes them straight to the POS screen.
+        Accepts both positional and keyword arguments for JSON-RPC compatibility.
         """
+        if not name or not login or not password:
+            raise models.ValidationError(
+                "Name, login and password are required to create a seller."
+            )
         group_user = self.env.ref('base.group_user')
         vals = {
             'name': name,

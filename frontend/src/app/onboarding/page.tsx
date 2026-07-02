@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { saveOnboardingData } from '@/lib/odoo-api';
 
 interface Person { name: string; role: string; phone: string }
-interface BankAccount { bankName: string; accountNumber: string; cashBalance: string }
+interface BankAccount { bankName: string; accountNumber: string; bankBalance: string; cashBalance: string }
 interface Terminal { model: string; port: string; protocol: string }
 interface Product { name: string; barcode: string; buyPrice: string; sellPrice: string }
 
@@ -18,7 +18,7 @@ export default function OnboardingPage() {
   const [personForm, setPersonForm] = useState<Person>({ name: '', role: 'فروشنده', phone: '' });
 
   // Step 2: Bank/Cash
-  const [bank, setBank] = useState<BankAccount>({ bankName: '', accountNumber: '', cashBalance: '' });
+  const [bank, setBank] = useState<BankAccount>({ bankName: '', accountNumber: '', bankBalance: '', cashBalance: '' });
 
   // Step 3: Terminal
   const [terminal, setTerminal] = useState<Terminal>({ model: '', port: 'COM3', protocol: 'serial' });
@@ -129,6 +129,10 @@ export default function OnboardingPage() {
               <div>
                 <label className="block text-xs text-gray-500 mb-1">شماره حساب</label>
                 <input type="text" placeholder="۱۲۳۴۵۶۷۸۹۰" value={bank.accountNumber} onChange={(e) => setBank({...bank, accountNumber: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">موجودی اولیه حساب بانکی (تومان)</label>
+                <input type="text" placeholder="۱۰,۰۰۰,۰۰۰" value={bank.bankBalance} onChange={(e) => setBank({...bank, bankBalance: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">موجودی اولیه صندوق نقدی (تومان)</label>
