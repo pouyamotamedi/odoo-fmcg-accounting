@@ -3,7 +3,7 @@
  * Handles all communication with Odoo backend
  */
 
-const ODOO_URL = process.env.NEXT_PUBLIC_ODOO_URL || 'http://localhost:8069';
+const ODOO_URL = process.env.NEXT_PUBLIC_ODOO_URL || '/api';
 const ODOO_DB = process.env.NEXT_PUBLIC_ODOO_DB || 'fmcg_shop';
 
 let sessionId: string | null = null;
@@ -20,16 +20,11 @@ interface JsonRpcResponse {
 }
 
 async function jsonRpc(url: string, params: any): Promise<any> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (sessionId) {
-    headers['Cookie'] = `session_id=${sessionId}`;
-  }
-
   const response = await fetch(`${ODOO_URL}${url}`, {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+    },
     credentials: 'include',
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -38,13 +33,6 @@ async function jsonRpc(url: string, params: any): Promise<any> {
       params,
     }),
   });
-
-  // Extract session cookie
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie) {
-    const match = setCookie.match(/session_id=([^;]+)/);
-    if (match) sessionId = match[1];
-  }
 
   const data: JsonRpcResponse = await response.json();
 
