@@ -600,6 +600,43 @@ export async function saveOnboardingData(data: {
   return results;
 }
 
+// ============ Product Categories ============
+
+export async function getCategories() {
+  return searchRead('product.category', [], ['name', 'parent_id'], 0, 0, 'name asc');
+}
+
+export async function createCategory(name: string, parent_id?: number) {
+  return create('product.category', { name, parent_id: parent_id || false });
+}
+
+// ============ Product Variants (Attributes) ============
+
+export async function getProductAttributes() {
+  return searchRead('product.attribute', [], ['name'], 0, 0, 'name asc');
+}
+
+export async function createProductAttribute(name: string) {
+  return create('product.attribute', { name });
+}
+
+export async function getProductAttributeValues(attributeId: number) {
+  return searchRead('product.attribute.value', [['attribute_id', '=', attributeId]], ['name', 'attribute_id']);
+}
+
+export async function addAttributeToProduct(productTmplId: number, attributeId: number, valueIds: number[]) {
+  // Add attribute line to product template
+  return create('product.template.attribute.line', {
+    product_tmpl_id: productTmplId,
+    attribute_id: attributeId,
+    value_ids: [[6, 0, valueIds]],
+  });
+}
+
+export async function getProductVariants(productTmplId: number) {
+  return searchRead('product.product', [['product_tmpl_id', '=', productTmplId]], ['name', 'barcode', 'product_template_variant_value_ids', 'list_price', 'qty_available']);
+}
+
 // ============ Dashboard Helpers ============
 
 export async function getTodaySales() {

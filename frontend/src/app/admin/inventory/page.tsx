@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getProducts, createProduct, updateProduct, deleteProduct, createStockAdjustment } from '@/lib/odoo-api';
+import { getProducts, createProduct, updateProduct, deleteProduct, createStockAdjustment, getCategories, createCategory, searchRead } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 
 interface Product {
@@ -13,6 +13,12 @@ interface Product {
   qty_available: number;
   fmcg_reorder_threshold: number;
   fmcg_is_low_stock: boolean;
+  categ_id: [number, string] | false;
+}
+
+interface Category {
+  id: number;
+  name: string;
 }
 
 interface ProductForm {
@@ -21,6 +27,7 @@ interface ProductForm {
   list_price: string;
   standard_price: string;
   fmcg_reorder_threshold: string;
+  categ_id: number;
 }
 
 interface AdjustmentForm {
@@ -39,9 +46,13 @@ export default function InventoryPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [filterCategory, setFilterCategory] = useState(0);
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   const [form, setForm] = useState<ProductForm>({
-    name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10',
+    name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10', categ_id: 0,
   });
 
   const [adjForm, setAdjForm] = useState<AdjustmentForm>({
@@ -52,7 +63,13 @@ export default function InventoryPage() {
     try {
       setLoading(true);
       const data = await getProducts();
-      setProducts(data || []);
+      // Re-fetch with categ_id field
+      const fullData = await searchRead(
+        'product.product',
+        [['active', '=', true], ['type', '=', 'consu']],
+        ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'fmcg_is_low_stock', 'categ_id'],
+      );
+      setProducts(fullData || data || []);
       setError('');
     } catch (e: any) {
       setError(e.message || 'خطا در دریافت اطلاعات');
@@ -61,10 +78,17 @@ export default function InventoryPage() {
     }
   }
 
-  useEffect(() => { fetchProducts(); }, []);
+  async function fetchCategories() {
+    try {
+      const data = await getCategories();
+      setCategories(data || []);
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => { fetchProducts(); fetchCategories(); }, []);
 
   function openNewForm() {
-    setForm({ name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10' });
+    setForm({ name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10', categ_id: 0 });
     setEditingId(null);
     setShowForm(true);
   }
@@ -76,6 +100,7 @@ export default function InventoryPage() {
       list_price: String(product.list_price),
       standard_price: String(product.standard_price),
       fmcg_reorder_threshold: String(product.fmcg_reorder_threshold),
+      categ_id: product.categ_id ? product.categ_id[0] : 0,
     });
     setEditingId(product.id);
     setShowForm(true);
@@ -93,13 +118,14 @@ export default function InventoryPage() {
     }
     setSaving(true);
     try {
-      const values = {
+      const values: any = {
         name: form.name,
         barcode: form.barcode || undefined,
         list_price: parseFloat(form.list_price),
         standard_price: parseFloat(form.standard_price),
         fmcg_reorder_threshold: parseInt(form.fmcg_reorder_threshold) || 10,
       };
+      if (form.categ_id) values.categ_id = form.categ_id;
 
       if (editingId) {
         await updateProduct(editingId, values);
@@ -148,7 +174,11 @@ export default function InventoryPage() {
   }
 
   const filtered = products.filter(
-    (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
+    (p) => {
+      const matchSearch = p.name.includes(search) || (p.barcode && p.barcode.includes(search));
+      const matchCategory = !filterCategory || (p.categ_id && p.categ_id[0] === filterCategory);
+      return matchSearch && matchCategory;
+    }
   );
 
   return (
@@ -166,15 +196,28 @@ export default function InventoryPage() {
         </button>
       </div>
 
-      {/* Search */}
-      <div className="mb-4">
+      {/* Search & Category Filter */}
+      <div className="mb-4 flex gap-3 flex-wrap items-center">
         <input
           type="text"
           placeholder="🔍 جستجوی نام یا بارکد..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full max-w-md p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
+          className="flex-1 max-w-md p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
         />
+        <select
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(Number(e.target.value))}
+          className="p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
+        >
+          <option value={0}>همه دسته‌بندی‌ها</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <button onClick={() => setShowCategoryForm(true)} className="text-xs bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200">
+          + دسته‌بندی
+        </button>
       </div>
 
       {error && (
@@ -194,6 +237,7 @@ export default function InventoryPage() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-right p-3 font-medium text-gray-600">نام کالا</th>
+                <th className="text-right p-3 font-medium text-gray-600">دسته</th>
                 <th className="text-right p-3 font-medium text-gray-600">بارکد</th>
                 <th className="text-right p-3 font-medium text-gray-600">قیمت خرید</th>
                 <th className="text-right p-3 font-medium text-gray-600">قیمت فروش</th>
@@ -213,6 +257,7 @@ export default function InventoryPage() {
                       <span className="mr-2 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">کمبود</span>
                     )}
                   </td>
+                  <td className="p-3 text-xs text-gray-500">{product.categ_id ? product.categ_id[1] : '—'}</td>
                   <td className="p-3 text-gray-500">{product.barcode || '—'}</td>
                   <td className="p-3">{formatPrice(product.standard_price)}</td>
                   <td className="p-3">{formatPrice(product.list_price)}</td>
@@ -293,6 +338,19 @@ export default function InventoryPage() {
                   className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
                 />
               </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">دسته‌بندی</label>
+                <select
+                  value={form.categ_id}
+                  onChange={(e) => setForm({ ...form, categ_id: Number(e.target.value) })}
+                  className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
+                >
+                  <option value={0}>— بدون دسته‌بندی —</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="flex gap-3 mt-5">
               <button
@@ -366,6 +424,44 @@ export default function InventoryPage() {
                 onClick={() => setShowAdjustment(false)}
                 className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300"
               >
+                انصراف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Category Form Modal */}
+      {showCategoryForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="text-lg font-bold mb-4">+ دسته‌بندی جدید</h3>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">نام دسته‌بندی *</label>
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="مثلاً: نوشیدنی، لبنیات، تنقلات..."
+                className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
+              />
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={async () => {
+                  if (!newCategoryName) { alert('نام دسته الزامی است'); return; }
+                  try {
+                    await createCategory(newCategoryName);
+                    setNewCategoryName('');
+                    setShowCategoryForm(false);
+                    await fetchCategories();
+                  } catch (e:any) { alert(e.message || 'خطا'); }
+                }}
+                className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold hover:bg-indigo-600"
+              >
+                ثبت دسته
+              </button>
+              <button onClick={() => setShowCategoryForm(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">
                 انصراف
               </button>
             </div>
