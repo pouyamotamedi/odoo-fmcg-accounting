@@ -306,9 +306,32 @@ export async function createPosOrder(values: {
     },
   ]);
 
+  const today = new Date().toISOString().split('T')[0];
+
+  // For cash/card sales without a specific customer, use a default walk-in partner
+  // or skip partner_id (some Odoo configs require it).
+  let partner_id = values.partner_id || false;
+  
+  // If partner is required, find or create a generic "مشتری عمومی" partner
+  if (!partner_id) {
+    try {
+      const existing = await searchRead('res.partner', [['name', '=', 'مشتری عمومی']], ['id'], 1);
+      if (existing && existing.length > 0) {
+        partner_id = existing[0].id;
+      } else {
+        partner_id = await create('res.partner', { name: 'مشتری عمومی', customer_rank: 1 });
+      }
+    } catch {
+      // If all else fails, try without partner
+      partner_id = false;
+    }
+  }
+
   return create('account.move', {
     move_type: 'out_invoice',
-    partner_id: values.partner_id || false,
+    partner_id: partner_id,
+    invoice_date: today,
+    date: today,
     invoice_line_ids: invoice_lines,
     narration: values.note || false,
   });
@@ -362,9 +385,13 @@ export async function createPurchaseInvoice(values: {
     },
   ]);
 
+  const today = new Date().toISOString().split('T')[0];
+
   const invoiceId = await create('account.move', {
     move_type: 'in_invoice',
     partner_id: values.partner_id,
+    invoice_date: today,
+    date: today,
     invoice_line_ids: invoice_lines,
     narration: values.note || false,
   });

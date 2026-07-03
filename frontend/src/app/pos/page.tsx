@@ -28,6 +28,11 @@ export default function PosPage() {
   const [msg, setMsg] = useState('');
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [showSplit, setShowSplit] = useState(false);
+  const [splitCash, setSplitCash] = useState('');
+  const [splitCard, setSplitCard] = useState('');
+  const [splitCredit, setSplitCredit] = useState('');
+  const [splitCustomer, setSplitCustomer] = useState(0);
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -207,6 +212,50 @@ export default function PosPage() {
     setSubmitting(false);
   }
 
+  async function handleSplitPayment() {
+    const cashAmt = Number(splitCash) || 0;
+    const cardAmt = Number(splitCard) || 0;
+    const creditAmt = Number(splitCredit) || 0;
+    const totalSplit = cashAmt + cardAmt + creditAmt;
+
+    if (totalSplit !== cartTotal) {
+      alert(`مجموع مبالغ (${formatPrice(totalSplit)}) با جمع فاکتور (${formatPrice(cartTotal)}) برابر نیست`);
+      return;
+    }
+    if (creditAmt > 0 && !splitCustomer) {
+      alert('برای بخش اعتباری، انتخاب مشتری الزامی است');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      // Load customers if credit amount > 0 and not loaded
+      if (creditAmt > 0 && customers.length === 0) {
+        const cust = await getPartners('customer');
+        setCustomers(cust?.map((c:any) => ({id:c.id, name:c.name})) || []);
+      }
+
+      const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
+      const partnerId = creditAmt > 0 ? splitCustomer : undefined;
+      const invoiceId = await createPosOrder({ lines, payment_method: 'cash', partner_id: partnerId });
+      await confirmInvoice(invoiceId);
+
+      // Record credit portion if applicable
+      if (creditAmt > 0 && splitCustomer) {
+        await createCustomerCredit({ partner_id: splitCustomer, amount: creditAmt, note: `پرداخت ترکیبی - بخش اعتباری`, invoice_ref: `INV-${invoiceId}` });
+      }
+
+      clearCart();
+      setShowSplit(false);
+      setSplitCash(''); setSplitCard(''); setSplitCredit(''); setSplitCustomer(0);
+      setMsg('✅ پرداخت ترکیبی ثبت شد');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (e:any) {
+      alert(e.message || 'خطا در ثبت');
+    }
+    setSubmitting(false);
+  }
+
   return (
     <div className="flex h-screen">
       {/* Products Area */}
@@ -334,7 +383,7 @@ export default function PosPage() {
         </div>
 
         {/* Payment Buttons */}
-        <div className="grid grid-cols-3 gap-2 p-3">
+        <div className="grid grid-cols-2 gap-2 p-3">
           <button
             onClick={() => handlePayment('cash')}
             disabled={items.length === 0 || submitting}
@@ -355,6 +404,17 @@ export default function PosPage() {
             className="py-3 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 disabled:opacity-40 transition"
           >
             🤝 اعتباری
+          </button>
+          <button
+            onClick={async () => {
+              try { const cust = await getPartners('customer'); setCustomers(cust?.map((c:any) => ({id:c.id, name:c.name})) || []); } catch {}
+              setSplitCash(''); setSplitCard(''); setSplitCredit(''); setSplitCustomer(0);
+              setShowSplit(true);
+            }}
+            disabled={items.length === 0 || submitting}
+            className="py-3 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 disabled:opacity-40 transition"
+          >
+            🔀 ترکیبی
           </button>
         </div>
       </div>
@@ -402,6 +462,54 @@ export default function PosPage() {
                 onClick={() => setShowCredit(false)}
                 className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300"
               >
+                انصراف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Split Payment Dialog */}
+      {showSplit && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h3 className="text-lg font-bold mb-4">🔀 پرداخت ترکیبی</h3>
+            <div className="mb-3 text-sm text-gray-600">جمع کل: <b>{formatPrice(cartTotal)} تومان</b></div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">💵 مبلغ نقدی</label>
+                <input type="number" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">💳 مبلغ کارت</label>
+                <input type="number" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">🤝 مبلغ اعتباری (نسیه)</label>
+                <input type="number" value={splitCredit} onChange={(e) => setSplitCredit(e.target.value)} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+              </div>
+              {Number(splitCredit) > 0 && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">مشتری (برای بخش اعتباری) *</label>
+                  <select value={splitCustomer} onChange={(e) => setSplitCustomer(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
+                    <option value={0}>— انتخاب —</option>
+                    {customers.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                  </select>
+                </div>
+              )}
+              <div className="bg-gray-50 p-2 rounded-lg text-xs text-gray-500">
+                مجموع وارد شده: {formatPrice((Number(splitCash) || 0) + (Number(splitCard) || 0) + (Number(splitCredit) || 0))} از {formatPrice(cartTotal)}
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={handleSplitPayment}
+                disabled={submitting}
+                className="flex-1 py-2 bg-purple-600 text-white rounded-lg text-sm font-bold hover:bg-purple-700 disabled:opacity-50"
+              >
+                {submitting ? 'در حال ثبت...' : 'ثبت پرداخت ترکیبی'}
+              </button>
+              <button onClick={() => setShowSplit(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">
                 انصراف
               </button>
             </div>
