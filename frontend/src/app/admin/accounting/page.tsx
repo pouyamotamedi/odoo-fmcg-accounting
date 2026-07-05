@@ -58,7 +58,7 @@ function getCurrentJalaliMonthRange(): { dateFrom: string; dateTo: string } {
 }
 
 export default function AccountingPage() {
-  const defaultRange = getCurrentJalaliMonthRange();
+  const [initialRange] = useState(() => getCurrentJalaliMonthRange());
 
   const [entries, setEntries] = useState<AccountEntry[]>([]);
   const [journals, setJournals] = useState<Journal[]>([]);
@@ -75,8 +75,8 @@ export default function AccountingPage() {
   const [searchText, setSearchText] = useState('');
 
   // Date range filter state
-  const [dateFrom, setDateFrom] = useState(defaultRange.dateFrom);
-  const [dateTo, setDateTo] = useState(defaultRange.dateTo);
+  const [dateFrom, setDateFrom] = useState(initialRange.dateFrom);
+  const [dateTo, setDateTo] = useState(initialRange.dateTo);
 
   // Partner filter state (0 = all)
   const [filterPartnerId, setFilterPartnerId] = useState(0);
@@ -138,9 +138,9 @@ export default function AccountingPage() {
     } catch { setAccounts([]); }
   }
 
-  useEffect(() => { fetchEntries(); fetchJournals(); fetchPartners(); fetchAccounts(); }, []);
+  useEffect(() => { fetchJournals(); fetchPartners(); fetchAccounts(); }, []);
 
-  // Re-fetch entries when date or partner filter changes
+  // Fetch entries on mount and re-fetch when date or partner filter changes
   useEffect(() => { fetchEntries(); }, [dateFrom, dateTo, filterPartnerId]);
 
   function getMoveTypeLabel(entry: AccountEntry): string {
@@ -217,6 +217,29 @@ export default function AccountingPage() {
       const amount = parseFloat(form.amount) || 0;
       if (amount <= 0) { alert('مبلغ باید بزرگتر از صفر باشد'); setSaving(false); return; }
 
+      // Resolve partner_id: use selected partner or find/create default "مشتری عمومی"
+      let resolvedPartnerId = form.partner_id;
+      if (!resolvedPartnerId) {
+        try {
+          const defaultPartners = await searchRead(
+            'res.partner',
+            [['name', '=', 'مشتری عمومی']],
+            ['id'],
+            1
+          );
+          if (defaultPartners && defaultPartners.length > 0) {
+            resolvedPartnerId = defaultPartners[0].id;
+          } else {
+            // Create the default partner if it doesn't exist
+            resolvedPartnerId = await create('res.partner', { name: 'مشتری عمومی', customer_rank: 1, supplier_rank: 1 });
+          }
+        } catch {
+          alert('خطا در دریافت شخص پیش‌فرض. لطفاً یک شخص انتخاب کنید.');
+          setSaving(false);
+          return;
+        }
+      }
+
       // Build memo
       const selectedAccount = accounts.find(a => a.id === form.account_id);
       let memo = form.description || selectedAccount?.name || '';
@@ -228,9 +251,7 @@ export default function AccountingPage() {
 
       // Use account.payment for proper accounting
       const paymentType = formType === 'payment' ? 'outbound' : 'inbound';
-      const partnerType = form.partner_id
-        ? (formType === 'payment' ? 'supplier' : 'customer')
-        : 'supplier';
+      const partnerType = formType === 'payment' ? 'supplier' : 'customer';
 
       const paymentData: any = {
         payment_type: paymentType,
@@ -240,11 +261,8 @@ export default function AccountingPage() {
         date: form.date,
         memo: memo,
         destination_account_id: form.account_id,
+        partner_id: resolvedPartnerId,
       };
-
-      if (form.partner_id) {
-        paymentData.partner_id = form.partner_id;
-      }
 
       const paymentId = await create('account.payment', paymentData);
       await callMethod('account.payment', 'action_post', [[paymentId]]);
@@ -261,8 +279,18 @@ export default function AccountingPage() {
 
   // Client-side filter on type and search text (date + partner are server-side)
   const filtered = entries.filter((e) => {
-    if (filterType === 'in' && e.move_type !== 'entry') return false;
-    if (filterType === 'out' && e.move_type !== 'entry') return false;
+    if (filterType === 'in') {
+      // Receipts: entry-type moves with narration/ref containing 'دریافت' or inbound payment indicator
+      if (e.move_type !== 'entry') return false;
+      const text = `${e.narration || ''} ${e.ref || ''}`;
+      if (!text.includes('دریافت') && !text.includes('inbound')) return false;
+    }
+    if (filterType === 'out') {
+      // Payments: entry-type moves with narration/ref containing 'پرداخت' or outbound payment indicator
+      if (e.move_type !== 'entry') return false;
+      const text = `${e.narration || ''} ${e.ref || ''}`;
+      if (!text.includes('پرداخت') && !text.includes('outbound')) return false;
+    }
     if (filterType === 'invoice' && e.move_type === 'entry') return false;
     if (searchText) {
       const text = `${e.name} ${e.narration || ''} ${e.partner_id ? e.partner_id[1] : ''} ${e.ref || ''} ${e.journal_id ? e.journal_id[1] : ''}`.toLowerCase();
@@ -275,6 +303,17 @@ export default function AccountingPage() {
   function findAccountByKeyword(keyword: string): number {
     const found = accounts.find(a => a.name.includes(keyword));
     return found?.id || 0;
+  }
+
+  function handleQuickAction(type: DocType, keyword: string, description: string, fallbackKeyword?: string) {
+    const accountId = findAccountByKeyword(keyword) || (fallbackKeyword ? findAccountByKeyword(fallbackKeyword) : 0);
+    if (!accountId) {
+      setMsg(`⚠️ حساب مرتبط با "${keyword}" یافت نشد. ابتدا حساب‌ها را بررسی کنید.`);
+      setTimeout(() => setMsg(''), 4000);
+      return;
+    }
+    openForm(type, accountId);
+    setForm(f => ({...f, description}));
   }
 
   return (
@@ -335,15 +374,15 @@ export default function AccountingPage() {
 
       {/* Quick Action Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <button onClick={() => { openForm('payment', findAccountByKeyword('پیک')); setForm(f => ({...f, description: 'هزینه پیک'})); }} className="bg-white rounded-xl p-4 border border-gray-100 hover:border-red-300 transition text-center">
+        <button onClick={() => handleQuickAction('payment', 'پیک', 'هزینه پیک')} className="bg-white rounded-xl p-4 border border-gray-100 hover:border-red-300 transition text-center">
           <div className="text-2xl">🏍️</div>
           <div className="text-xs text-gray-600 mt-1">هزینه پیک</div>
         </button>
-        <button onClick={() => { openForm('payment', findAccountByKeyword('برداشت') || findAccountByKeyword('سهام')); setForm(f => ({...f, description: 'برداشت شرکا'})); }} className="bg-white rounded-xl p-4 border border-gray-100 hover:border-red-300 transition text-center">
+        <button onClick={() => handleQuickAction('payment', 'برداشت', 'برداشت شرکا', 'سهام')} className="bg-white rounded-xl p-4 border border-gray-100 hover:border-red-300 transition text-center">
           <div className="text-2xl">💰</div>
           <div className="text-xs text-gray-600 mt-1">برداشت شرکا</div>
         </button>
-        <button onClick={() => { openForm('receipt', findAccountByKeyword('سرمایه') || findAccountByKeyword('سهام')); setForm(f => ({...f, description: 'افزایش سرمایه'})); }} className="bg-white rounded-xl p-4 border border-gray-100 hover:border-green-300 transition text-center">
+        <button onClick={() => handleQuickAction('receipt', 'سرمایه', 'افزایش سرمایه', 'سهام')} className="bg-white rounded-xl p-4 border border-gray-100 hover:border-green-300 transition text-center">
           <div className="text-2xl">📈</div>
           <div className="text-xs text-gray-600 mt-1">افزایش سرمایه</div>
         </button>

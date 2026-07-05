@@ -136,8 +136,9 @@ export default function ChartOfAccountsPage() {
     if (!confirm('آیا از تغییر نام حساب‌ها به فارسی مطمئن هستید؟')) return;
     setRenaming(true);
     let successCount = 0;
-    try {
-      for (const mapping of RENAME_MAPPINGS) {
+    const errors: string[] = [];
+    for (const mapping of RENAME_MAPPINGS) {
+      try {
         const results = await searchRead(
           'account.account',
           [['code', '=', mapping.code]],
@@ -148,11 +149,16 @@ export default function ChartOfAccountsPage() {
           await updateAccount(results[0].id, { name: mapping.persianName });
           successCount++;
         }
+      } catch (e: any) {
+        errors.push(`${mapping.code} (${mapping.persianName}): ${e.message || 'خطا'}`);
       }
+    }
+    if (errors.length > 0) {
+      alert(`خطا در تغییر نام ${toPersianDigits(String(errors.length))} حساب:\n${errors.join('\n')}`);
+    }
+    if (successCount > 0) {
       showMessage(`${toPersianDigits(String(successCount))} حساب با موفقیت تغییر نام یافت`);
       await load();
-    } catch (e: any) {
-      alert(e.message || 'خطا در تغییر نام حساب‌ها');
     }
     setRenaming(false);
   }
