@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Rewrite the accounting page (frontend/src/app/admin/accounting/page.tsx) to add: (1) Date range filter with JalaliDatePicker defaulting to current Jalali month, sending date range to Odoo query. (2) Partner/person dropdown filter that filters account.move by partner_id server-side. (3) Replace the hardcoded DocReason dropdown with a dynamic chart-of-accounts dropdown fetched via getExpenseIncomeAccounts(), using destination_account_id on account.payment. Keep the partner option so users can pick a partner AND an account.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "In frontend/src/app/admin/accounting/page.tsx, import getExpenseIncomeAccounts from odoo-api.ts and import jalaali-js for Jalali date computation",
     "Add state for dateFrom/dateTo (ISO strings), defaulting to the start and end of the current Jalali month. Use jalaali.toJalaali(now) to get current Jalali year/month, then jalaali.toGregorian(jy, jm, 1) for start, and jalaali.toGregorian(jy, jm+1, 1) minus 1 day or jalaali.jalaaliMonthLength(jy, jm) for end",
