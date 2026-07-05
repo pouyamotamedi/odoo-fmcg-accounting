@@ -1,12 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { getPartnerBalances, getBankCashBalances, create, callMethod } from '@/lib/odoo-api';
 import { formatPrice } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
 
 export default function AccountsPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-gray-400">بارگذاری...</div>}>
+      <AccountsPageContent />
+    </Suspense>
+  );
+}
+
+function AccountsPageContent() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Create the Chart of Accounts management page at /admin/chart-of-accounts/ and add its link in the Sidebar after 'اسناد حسابداری'. Also add a rename-accounts script/utility for one-time Persian renaming of English account names.",
+  "status": "pending",
+  "steps": [
+    "Create frontend/src/app/admin/chart-of-accounts/page.tsx with: (a) List all accounts from Odoo using getAccounts() - display code, name, account_type. (b) Add new account form (name, code, account_type dropdown with options: expense, expense_direct_cost, income, income_other, equity, asset_current, liability_current). (c) Edit account name inline or via modal. (d) Delete (deprecate) account button calling deleteAccount(id). (e) RTL Persian UI matching existing page patterns.",
+    "In frontend/src/components/Sidebar.tsx, add { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️' } after the 'اسناد حسابداری' entry (index 6, insert at index 7)",
+    "Create frontend/src/app/admin/chart-of-accounts/rename-accounts.ts (or include as a button/function in the page) that renames accounts: 400000->فروش کالا, 500000->بهای تمام شده کالای فروش رفته, 600000->هزینه‌ها, 611000->خرید تجهیزات, 612000->اجاره, 620000->کارمزد بانکی, 630000->حقوق و دستمزد, 301000->سرمایه, 302000->سود تقسیمی شرکا. Use searchRead to find each account by code, then updateAccount to rename it. Expose this as a button on the chart-of-accounts page labeled 'تغییر نام حساب‌ها به فارسی'."
+  ],
+  "acceptance_criteria": [
+    "frontend/src/app/admin/chart-of-accounts/page.tsx exists and renders a full CRUD page for accounts",
+    "The Sidebar shows 'سرفصل حساب‌ها' link with icon '🗂️' after 'اسناد حسابداری'",
+    "The page has a button to rename English accounts to Persian (the 9 specified mappings)",
+    "Users can add, edit name, and deprecate accounts from the page",
+    "`npm run build` passes with no TypeScript errors"
+  ],
+  "verification": [
+    "cd /projects/sandbox/odoo-fmcg-accounting/frontend && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

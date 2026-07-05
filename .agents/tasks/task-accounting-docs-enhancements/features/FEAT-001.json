@@ -1,0 +1,18 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Install node_modules and verify baseline build compiles without errors.",
+  "status": "in_progress",
+  "steps": [
+    "Run `npm install` in /projects/sandbox/odoo-fmcg-accounting/frontend/ to install all dependencies",
+    "Run `npm run build` to verify the current code compiles without TypeScript errors"
+  ],
+  "acceptance_criteria": [
+    "`npm run build` completes without errors (exit code 0)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/odoo-fmcg-accounting/frontend && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
