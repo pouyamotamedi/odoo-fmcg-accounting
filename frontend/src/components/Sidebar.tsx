@@ -15,6 +15,7 @@ const menuItems = [
   { href: '/admin/accounts', label: 'حساب اشخاص', icon: '📒' },
   { href: '/admin/treasury', label: 'بانک و صندوق', icon: '🏦' },
   { href: '/admin/accounting', label: 'اسناد حسابداری', icon: '📋' },
+  { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️' },
   { href: '/admin/reports', label: 'گزارش‌ها', icon: '📈' },
   { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️' },
   { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️' },

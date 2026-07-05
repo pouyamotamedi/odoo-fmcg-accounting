@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Create the Chart of Accounts management page at /admin/chart-of-accounts/ and add its link in the Sidebar after 'اسناد حسابداری'. Also add a rename-accounts script/utility for one-time Persian renaming of English account names.",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "Create frontend/src/app/admin/chart-of-accounts/page.tsx with: (a) List all accounts from Odoo using getAccounts() - display code, name, account_type. (b) Add new account form (name, code, account_type dropdown with options: expense, expense_direct_cost, income, income_other, equity, asset_current, liability_current). (c) Edit account name inline or via modal. (d) Delete (deprecate) account button calling deleteAccount(id). (e) RTL Persian UI matching existing page patterns.",
     "In frontend/src/components/Sidebar.tsx, add { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️' } after the 'اسناد حسابداری' entry (index 6, insert at index 7)",
@@ -19,5 +19,5 @@
     "cd /projects/sandbox/odoo-fmcg-accounting/frontend && npm run build"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Build passes cleanly. The write import from odoo-api.ts is unused in the page (searchRead and updateAccount handle all rename logic), but TypeScript tree-shaking handles it. The page renders as a static route."
 }
