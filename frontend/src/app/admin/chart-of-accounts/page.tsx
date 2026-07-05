@@ -51,6 +51,7 @@ export default function ChartOfAccountsPage() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<string>('all');
 
   // Add form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -63,8 +64,8 @@ export default function ChartOfAccountsPage() {
   const [editAccount, setEditAccount] = useState<any>(null);
   const [editName, setEditName] = useState('');
 
-  // Rename state
-  const [renaming, setRenaming] = useState(false);
+  // Rename state (unused now)
+  const [renaming] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -164,6 +165,7 @@ export default function ChartOfAccountsPage() {
   }
 
   const filtered = accounts.filter((a) => {
+    if (activeTab !== 'all' && a.account_type !== activeTab) return false;
     if (!search) return true;
     return a.name.includes(search) || a.code.includes(search);
   });
@@ -185,13 +187,32 @@ export default function ChartOfAccountsPage() {
         </div>
       )}
 
+      {/* Account type tabs */}
+      <div className="flex gap-1.5 mb-4 flex-wrap">
+        {[
+          { key: 'all', label: 'همه' },
+          { key: 'expense', label: 'هزینه' },
+          { key: 'expense_direct_cost', label: 'بهای تمام شده' },
+          { key: 'income', label: 'درآمد' },
+          { key: 'income_other', label: 'درآمد متفرقه' },
+          { key: 'equity', label: 'حقوق صاحبان سهام' },
+          { key: 'asset_current', label: 'دارایی جاری' },
+          { key: 'asset_receivable', label: 'دریافتنی' },
+          { key: 'liability_current', label: 'بدهی جاری' },
+          { key: 'liability_payable', label: 'پرداختنی' },
+          { key: 'asset_cash', label: 'نقد و بانک' },
+        ].map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${activeTab === tab.key ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Action buttons */}
       <div className="flex gap-2 mb-4 flex-wrap items-center">
         <button onClick={() => setShowAddForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-500 text-white hover:bg-indigo-600">
           ➕ افزودن حساب جدید
-        </button>
-        <button onClick={handleRenameAccounts} disabled={renaming} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
-          {renaming ? 'در حال تغییر نام...' : '🔤 تغییر نام حساب‌ها به فارسی'}
         </button>
         <button onClick={load} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-100 text-gray-600 hover:bg-gray-200">🔄 بروزرسانی</button>
         <input

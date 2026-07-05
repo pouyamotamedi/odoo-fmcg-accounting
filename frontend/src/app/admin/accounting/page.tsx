@@ -71,7 +71,7 @@ export default function AccountingPage() {
   const [msg, setMsg] = useState('');
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
   const [entryLines, setEntryLines] = useState<any[]>([]);
-  const [filterType, setFilterType] = useState<'all' | 'in' | 'out' | 'invoice'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'in' | 'out' | 'invoice' | 'out_invoice' | 'in_invoice' | 'out_refund' | 'in_refund'>('all');
   const [searchText, setSearchText] = useState('');
 
   // Date range filter state
@@ -106,6 +106,15 @@ export default function AccountingPage() {
       if (filterPartnerId > 0) {
         domain.push(['partner_id', '=', filterPartnerId]);
       }
+      // Move type filter (server-side)
+      if (filterType === 'out_invoice') domain.push(['move_type', '=', 'out_invoice']);
+      else if (filterType === 'in_invoice') domain.push(['move_type', '=', 'in_invoice']);
+      else if (filterType === 'out_refund') domain.push(['move_type', '=', 'out_refund']);
+      else if (filterType === 'in_refund') domain.push(['move_type', '=', 'in_refund']);
+      else if (filterType === 'invoice') domain.push(['move_type', 'in', ['out_invoice', 'in_invoice', 'out_refund', 'in_refund']]);
+      else if (filterType === 'in') domain.push(['move_type', '=', 'entry']);
+      else if (filterType === 'out') domain.push(['move_type', '=', 'entry']);
+
       const data = await searchRead(
         'account.move',
         domain,
@@ -140,8 +149,8 @@ export default function AccountingPage() {
 
   useEffect(() => { fetchJournals(); fetchPartners(); fetchAccounts(); }, []);
 
-  // Fetch entries on mount and re-fetch when date or partner filter changes
-  useEffect(() => { fetchEntries(); }, [dateFrom, dateTo, filterPartnerId]);
+  // Fetch entries on mount and re-fetch when filters change
+  useEffect(() => { fetchEntries(); }, [dateFrom, dateTo, filterPartnerId, filterType]);
 
   function getMoveTypeLabel(entry: AccountEntry): string {
     if (entry.move_type === 'out_invoice') return 'فاکتور فروش';
@@ -277,21 +286,8 @@ export default function AccountingPage() {
     setSaving(false);
   }
 
-  // Client-side filter on type and search text (date + partner are server-side)
+  // Client-side filter: only search text (type/date/partner are server-side now)
   const filtered = entries.filter((e) => {
-    if (filterType === 'in') {
-      // Receipts: entry-type moves with narration/ref containing 'دریافت' or inbound payment indicator
-      if (e.move_type !== 'entry') return false;
-      const text = `${e.narration || ''} ${e.ref || ''}`;
-      if (!text.includes('دریافت') && !text.includes('inbound')) return false;
-    }
-    if (filterType === 'out') {
-      // Payments: entry-type moves with narration/ref containing 'پرداخت' or outbound payment indicator
-      if (e.move_type !== 'entry') return false;
-      const text = `${e.narration || ''} ${e.ref || ''}`;
-      if (!text.includes('پرداخت') && !text.includes('outbound')) return false;
-    }
-    if (filterType === 'invoice' && e.move_type === 'entry') return false;
     if (searchText) {
       const text = `${e.name} ${e.narration || ''} ${e.partner_id ? e.partner_id[1] : ''} ${e.ref || ''} ${e.journal_id ? e.journal_id[1] : ''}`.toLowerCase();
       if (!text.includes(searchText.toLowerCase()) && !text.includes(searchText)) return false;
@@ -361,13 +357,21 @@ export default function AccountingPage() {
 
       {/* Type Filters and Search */}
       <div className="flex gap-2 mb-4 flex-wrap items-center">
-        {([['all', 'همه اسناد'], ['invoice', 'فاکتورها'], ['in', 'دریافت‌ها'], ['out', 'پرداخت‌ها']] as const).map(([key, label]) => (
+        {([
+          ['all', 'همه'],
+          ['out_invoice', 'فروش'],
+          ['in_invoice', 'خرید'],
+          ['out_refund', 'برگشت فروش'],
+          ['in_refund', 'برگشت خرید'],
+          ['in', 'دریافت‌ها'],
+          ['out', 'پرداخت‌ها'],
+        ] as const).map(([key, label]) => (
           <button key={key} onClick={() => setFilterType(key as any)}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold ${filterType === key ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             {label}
           </button>
         ))}
-        <input type="text" placeholder="جستجو (نام، شماره، شخص...)" value={searchText}
+        <input type="text" placeholder="🔍 جستجو..." value={searchText}
           onChange={e => setSearchText(e.target.value)}
           className="mr-auto p-1.5 px-3 border rounded-lg text-sm w-64" />
       </div>
