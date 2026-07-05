@@ -18,6 +18,15 @@ class ResCompany(models.Model):
         default=False,
         help='Enable automatic amount transmission to bank POS terminal device',
     )
+    fmcg_pax_terminal_ip = fields.Char(
+        string='PAX Terminal IP',
+        help='IP address of the PAX S800 payment terminal (TCP/IP semi-integrated mode)',
+    )
+    fmcg_pax_terminal_port = fields.Integer(
+        string='PAX Terminal Port',
+        default=10009,
+        help='TCP port the PAX S800 listens on for ECR commands (default 10009)',
+    )
     fmcg_offline_mode_enabled = fields.Boolean(
         string='Offline Mode',
         default=True,

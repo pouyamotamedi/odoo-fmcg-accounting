@@ -1,0 +1,26 @@
+{
+  "project_type": "Next.js 16 + React 19 + TypeScript frontend for Odoo 18 accounting system (FMCG shop)",
+  "language": "TypeScript/React",
+  "build_system": "npm with Next.js - no test framework installed",
+  "test_framework": "None - no test files exist in the project",
+  "build_command": "cd /projects/sandbox/odoo-fmcg-accounting/frontend && npm run build",
+  "test_command": "N/A - no tests configured",
+  "verification_instructions": "1. Run npm install in frontend/ to install deps. 2. Run npm run build to check TypeScript compilation. 3. Verify no build errors.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/odoo-fmcg-accounting/frontend && npm install",
+  "environment_constraints": "node_modules not installed yet - need npm install first. Odoo backend at localhost:8069 not available in sandbox. Verification limited to TypeScript build.",
+  "contribution_requirements": "AGENTS.md says to read node_modules/next/dist/docs/ before writing code (but that dir does not exist). All UI must be RTL Persian with Vazirmatn font. Use existing patterns from odoo-api.ts, PriceInput, JalaliDatePicker.",
+  "key_patterns": "Pages are 'use client' components in src/app/admin/<name>/page.tsx. API calls via odoo-api.ts functions (searchRead, create, write, callMethod, jsonRpc). State with useState/useEffect. Modals are fixed overlay divs. Filters use button groups. Tables with thead/tbody. Persian digits via toPersianDigits/formatPrice. Jalali dates via toJalali. Price inputs via PriceInput component. RTL layout with Tailwind classes.",
+  "relevant_files": [
+    "frontend/src/app/admin/accounting/page.tsx",
+    "frontend/src/components/Sidebar.tsx",
+    "frontend/src/lib/odoo-api.ts",
+    "frontend/src/lib/utils.ts",
+    "frontend/src/components/JalaliDatePicker.tsx",
+    "frontend/src/components/PriceInput.tsx",
+    "frontend/src/app/admin/accounts/page.tsx",
+    "frontend/src/app/admin/layout.tsx",
+    "frontend/package.json"
+  ],
+  "directory_structure": "frontend/src/app/admin/ - admin pages (accounting, accounts, credits, inventory, etc.). frontend/src/components/ - shared components (Sidebar, JalaliDatePicker, PriceInput). frontend/src/lib/ - utilities (odoo-api.ts, utils.ts). frontend/src/stores/ - zustand stores."
+}

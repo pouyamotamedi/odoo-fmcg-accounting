@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { searchRead, getBankCashBalances, getCustomerCredits } from '@/lib/odoo-api';
+import { searchRead, getBankCashBalances, getTodaySales, getProducts, getPartnerBalances } from '@/lib/odoo-api';
 
 interface DashData {
   todaySales: number;
@@ -34,22 +35,36 @@ function ActionButton({ href, icon, label }: { href: string; icon: string; label
 }
 
 export default function AdminDashboard() {
+  const router = useRouter();
   const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
       try {
+        // Check if any products exist — if not, redirect to onboarding
+        const products = await getProducts(1);
+        if (!products || products.length === 0) {
+          router.replace('/onboarding');
+          return;
+        }
+
         // Try fetching from Odoo
-        const [balances, credits] = await Promise.all([
+        const [balances, partners, todaySalesData] = await Promise.all([
           getBankCashBalances(),
-          getCustomerCredits(),
+          getPartnerBalances(),
+          getTodaySales(),
         ]);
         const cashBalance = balances
           ?.filter((b: any) => b.type === 'cash')
           .reduce((sum: number, b: any) => sum + (b.fmcg_running_balance || 0), 0) || 0;
-        const outstanding = credits?.reduce((sum: number, c: any) => sum + (c.remaining || 0), 0) || 0;
-        setData({ todaySales: 0, txCount: 0, cashBalance, outstanding });
+        const outstanding = partners?.reduce((sum: number, p: any) => sum + (p.receivable || 0), 0) || 0;
+        setData({
+          todaySales: todaySalesData?.totalAmount || 0,
+          txCount: todaySalesData?.count || 0,
+          cashBalance,
+          outstanding,
+        });
       } catch {
         // Fallback demo data if Odoo not connected
         setData({ todaySales: 12500000, txCount: 47, cashBalance: 8200000, outstanding: 3800000 });
@@ -78,7 +93,7 @@ export default function AdminDashboard() {
         <ActionButton href="/admin/purchase" icon="🛒" label="فاکتور خرید" />
         <ActionButton href="/admin/inventory" icon="📦" label="ثبت کالای جدید" />
         <ActionButton href="/admin/people" icon="👤" label="شخص جدید" />
-        <ActionButton href="/admin/credits" icon="💰" label="حساب مشتریان" />
+        <ActionButton href="/admin/accounts" icon="💰" label="حساب اشخاص" />
         <ActionButton href="/admin/returns" icon="↩️" label="برگشت از فروش" />
         <ActionButton href="/pos" icon="🖥️" label="صندوق فروش" />
       </div>

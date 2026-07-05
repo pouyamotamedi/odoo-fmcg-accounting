@@ -19,9 +19,19 @@ export function toPersianDigits(input: string | number): string {
 /**
  * Format number with thousand separators and Persian digits
  */
-export function formatPrice(amount: number): string {
-  const formatted = Math.round(amount).toLocaleString('fa-IR');
-  return formatted;
+export function formatPrice(amount: number | undefined | null): string {
+  if (amount == null || isNaN(amount)) return '۰';
+  // Use explicit regex-based formatting for consistent SSR/client behavior
+  const rounded = Math.round(amount);
+  const isNegative = rounded < 0;
+  const absStr = Math.abs(rounded).toString();
+  // Add thousand separators (comma every 3 digits from right)
+  const withSeparators = absStr.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  // Convert to Persian digits and Persian comma separator
+  const persian = withSeparators
+    .replace(/[0-9]/g, (d) => PERSIAN_DIGITS[d] || d)
+    .replace(/,/g, '٬');
+  return isNegative ? `-${persian}` : persian;
 }
 
 /**

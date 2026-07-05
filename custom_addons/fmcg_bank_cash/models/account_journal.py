@@ -29,7 +29,7 @@ class AccountJournal(models.Model):
     fmcg_running_balance = fields.Monetary(
         string='Running Balance',
         compute='_compute_running_balance',
-        store=False,
+        store=True,
         help='Current balance = Opening balance + sum of all transactions',
     )
 

@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Rewrite the accounting page (frontend/src/app/admin/accounting/page.tsx) to add: (1) Date range filter with JalaliDatePicker defaulting to current Jalali month, sending date range to Odoo query. (2) Partner/person dropdown filter that filters account.move by partner_id server-side. (3) Replace the hardcoded DocReason dropdown with a dynamic chart-of-accounts dropdown fetched via getExpenseIncomeAccounts(), using destination_account_id on account.payment. Keep the partner option so users can pick a partner AND an account.",
+  "status": "completed",
+  "steps": [
+    "In frontend/src/app/admin/accounting/page.tsx, import getExpenseIncomeAccounts from odoo-api.ts and import jalaali-js for Jalali date computation",
+    "Add state for dateFrom/dateTo (ISO strings), defaulting to the start and end of the current Jalali month. Use jalaali.toJalaali(now) to get current Jalali year/month, then jalaali.toGregorian(jy, jm, 1) for start, and jalaali.toGregorian(jy, jm+1, 1) minus 1 day or jalaali.jalaaliMonthLength(jy, jm) for end",
+    "Add state for filterPartnerId (number, 0 = all)",
+    "Add state for accounts (fetched from getExpenseIncomeAccounts) and replace DocReason type with account-based selection",
+    "Add a filter bar above the entries list with two JalaliDatePicker fields (from/to) and a partner dropdown populated from the existing partners state",
+    "Modify fetchEntries() to include date range in the Odoo domain: ['date', '>=', dateFrom], ['date', '<=', dateTo]. Also add ['partner_id', '=', filterPartnerId] if filterPartnerId > 0",
+    "Replace the 'reason' select in the form modal with a dynamic account dropdown. Fetch accounts on mount using getExpenseIncomeAccounts(). Display account name (e.g., 'هزینه پیک', 'اجاره', 'حقوق') in the dropdown. Store selected account_id in form state",
+    "In handleSubmit(), add destination_account_id: form.account_id to the account.payment creation data when an account is selected",
+    "Keep the partner_id field in the form visible always (not just when reason=partner). Allow users to optionally select a partner AND an account",
+    "Remove the old DocReason type, REASON_LABELS constant, and related hardcoded logic",
+    "Update quick action cards to pre-select appropriate accounts instead of reasons (e.g., the delivery expense card should preselect the delivery expense account if found)"
+  ],
+  "acceptance_criteria": [
+    "The accounting page shows two JalaliDatePicker fields for date filtering, defaulting to the current Jalali month",
+    "A partner dropdown filter is visible that sends partner_id filter to Odoo",
+    "The form modal has a dynamic accounts dropdown fetched from Odoo instead of hardcoded DocReason",
+    "The form sends destination_account_id when creating account.payment",
+    "Users can select both a partner and an account simultaneously",
+    "`npm run build` passes with no TypeScript errors"
+  ],
+  "verification": [
+    "cd /projects/sandbox/odoo-fmcg-accounting/frontend && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Build passes cleanly with all 18 static pages. Used jalaali-js getCurrentJalaliMonthRange() helper for default date range. The useEffect for fetchEntries depends on dateFrom/dateTo/filterPartnerId to trigger server-side refetch. Removed DocReason type and REASON_LABELS entirely. Quick action cards use findAccountByKeyword() to preselect matching accounts - will silently fall back to 0 if no match found in the fetched accounts."
+}

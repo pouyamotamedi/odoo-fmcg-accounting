@@ -2,14 +2,20 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { useCompanyStore } from '@/stores/company-store';
+import { getCompanySettings } from '@/lib/odoo-api';
 
 const menuItems = [
   { href: '/admin', label: 'داشبورد', icon: '📊' },
   { href: '/admin/purchase', label: 'فاکتور خرید', icon: '🛒' },
   { href: '/admin/inventory', label: 'انبار و کالاها', icon: '📦' },
   { href: '/admin/people', label: 'اشخاص', icon: '👥' },
-  { href: '/admin/credits', label: 'حساب مشتریان', icon: '🤝' },
+  { href: '/admin/accounts', label: 'حساب اشخاص', icon: '📒' },
+  { href: '/admin/treasury', label: 'بانک و صندوق', icon: '🏦' },
+  { href: '/admin/accounting', label: 'اسناد حسابداری', icon: '📋' },
+  { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️' },
   { href: '/admin/reports', label: 'گزارش‌ها', icon: '📈' },
   { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️' },
   { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️' },
@@ -17,12 +23,21 @@ const menuItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { name: companyName, setCompany } = useCompanyStore();
+
+  useEffect(() => {
+    if (!companyName) {
+      getCompanySettings().then((data) => {
+        if (data) setCompany(data.id, data.name);
+      }).catch(() => {});
+    }
+  }, [companyName, setCompany]);
 
   return (
     <aside className="w-60 bg-slate-800 text-white min-h-screen flex flex-col">
       {/* Logo */}
       <div className="p-5 border-b border-slate-700 text-center">
-        <h2 className="text-lg font-bold">🏪 فروشگاه من</h2>
+        <h2 className="text-lg font-bold">🏪 {companyName || 'فروشگاه من'}</h2>
         <p className="text-xs text-slate-400 mt-1">پنل مدیریت</p>
       </div>
 

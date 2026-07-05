@@ -26,6 +26,14 @@
                         <setting string="POS Terminal" help="Enable automatic amount transmission to bank POS terminal">
                             <div class="content-group">
                                 <field name="fmcg_pos_terminal_enabled"/>
+                                <div class="row mt16" invisible="not fmcg_pos_terminal_enabled">
+                                    <label for="fmcg_pax_terminal_ip" string="PAX Terminal IP" class="col-lg-3 o_light_label"/>
+                                    <field name="fmcg_pax_terminal_ip" placeholder="192.168.1.50"/>
+                                </div>
+                                <div class="row mt16" invisible="not fmcg_pos_terminal_enabled">
+                                    <label for="fmcg_pax_terminal_port" string="PAX Terminal Port" class="col-lg-3 o_light_label"/>
+                                    <field name="fmcg_pax_terminal_port"/>
+                                </div>
                             </div>
                         </setting>
                         <setting string="Offline Mode" help="Continue working without internet, sync when connected">
