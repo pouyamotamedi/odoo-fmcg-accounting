@@ -1,18 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore, UserRole } from '@/stores/auth-store';
-import { login as odooLogin } from '@/lib/odoo-api';
+import { useCompanyStore } from '@/stores/company-store';
+import { login as odooLogin, getCompanySettings } from '@/lib/odoo-api';
 
 export default function LoginPage() {
   const router = useRouter();
   const authLogin = useAuthStore((s) => s.login);
+  const { name: companyName, setCompany } = useCompanyStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('admin');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!companyName) {
+      getCompanySettings().then((data) => {
+        if (data) setCompany(data.id, data.name);
+      }).catch(() => {});
+    }
+  }, [companyName, setCompany]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -42,7 +52,7 @@ export default function LoginPage() {
         className="bg-white rounded-2xl shadow-2xl p-10 w-full max-w-sm"
       >
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">🏪 فروشگاه من</h1>
+          <h1 className="text-2xl font-bold text-gray-800">🏪 {companyName || 'فروشگاه من'}</h1>
           <p className="text-gray-500 text-sm mt-1">نرم‌افزار مدیریت فروشگاه</p>
         </div>
 

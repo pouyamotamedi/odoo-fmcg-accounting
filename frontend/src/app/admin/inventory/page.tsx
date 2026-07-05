@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { getProducts, createProduct, updateProduct, deleteProduct, createStockAdjustment, getCategories, createCategory, searchRead } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
+import PriceInput from '@/components/PriceInput';
 
 interface Product {
   id: number;
@@ -309,21 +310,19 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">قیمت خرید (تومان) *</label>
-                  <input
-                    type="number"
+                  <PriceInput
                     value={form.standard_price}
-                    onChange={(e) => setForm({ ...form, standard_price: e.target.value })}
-                    placeholder="۲۵۰۰۰"
+                    onChange={(v) => setForm({ ...form, standard_price: v })}
+                    placeholder="۲۵٬۰۰۰"
                     className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">قیمت فروش (تومان) *</label>
-                  <input
-                    type="number"
+                  <PriceInput
                     value={form.list_price}
-                    onChange={(e) => setForm({ ...form, list_price: e.target.value })}
-                    placeholder="۳۲۰۰۰"
+                    onChange={(v) => setForm({ ...form, list_price: v })}
+                    placeholder="۳۲٬۰۰۰"
                     className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
                   />
                 </div>

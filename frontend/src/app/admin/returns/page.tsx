@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProducts, getPartners, createSalesReturn } from '@/lib/odoo-api';
-import { formatPrice, toPersianDigits } from '@/lib/utils';
+import { getProducts, getPartners, createSalesReturn, getSalesReturns } from '@/lib/odoo-api';
+import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 
 interface ReturnItem {
   id: number;
@@ -31,6 +31,8 @@ export default function ReturnsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [returnHistory, setReturnHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   async function loadData() {
     try {
@@ -41,7 +43,12 @@ export default function ReturnsPage() {
     setLoading(false);
   }
 
-  useEffect(() => { loadData(); }, []);
+  async function loadHistory() {
+    try { setReturnHistory(await getSalesReturns() || []); }
+    catch { setReturnHistory([]); }
+  }
+
+  useEffect(() => { loadData(); loadHistory(); }, []);
 
   const filteredProducts = products.filter(
     (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
@@ -66,7 +73,6 @@ export default function ReturnsPage() {
 
   async function handleSubmit() {
     if (items.length === 0) { alert('حداقل یک کالا انتخاب کنید'); return; }
-    if (refundMethod === 'credit' && !customer) { alert('برای بازگشت به اعتبار، مشتری را انتخاب کنید'); return; }
     setSubmitting(true);
     try {
       await createSalesReturn({
@@ -82,6 +88,7 @@ export default function ReturnsPage() {
       setShowForm(false);
       setMsg('✅ برگشت از فروش ثبت شد');
       setTimeout(() => setMsg(''), 4000);
+      await loadHistory();
     } catch (e: any) {
       alert(e.message || 'خطا در ثبت برگشت');
     }
@@ -107,9 +114,45 @@ export default function ReturnsPage() {
       </div>
 
       {!showForm && (
-        <div className="bg-white rounded-xl p-8 text-center text-gray-400 border border-dashed border-gray-300">
-          <div className="text-4xl mb-3">↩️</div>
-          <p>برای ثبت مرجوعی، دکمه «ثبت برگشت» را بزنید</p>
+        <div className="space-y-4">
+          {/* History toggle */}
+          <div className="flex gap-2">
+            <button onClick={() => setShowHistory(!showHistory)} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold">
+              {showHistory ? '← بستن سوابق' : '📋 سوابق برگشت‌ها'}
+            </button>
+          </div>
+
+          {showHistory && returnHistory.length > 0 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b"><tr>
+                  <th className="text-right p-3">شماره</th>
+                  <th className="text-right p-3">مشتری</th>
+                  <th className="text-right p-3">مبلغ</th>
+                  <th className="text-right p-3">تاریخ</th>
+                  <th className="text-right p-3">دلیل</th>
+                </tr></thead>
+                <tbody>{returnHistory.map((r:any) => (
+                  <tr key={r.id} className="border-b hover:bg-gray-50">
+                    <td className="p-3">{r.name}</td>
+                    <td className="p-3">{r.partner_id?r.partner_id[1]:'مشتری عمومی'}</td>
+                    <td className="p-3 font-bold">{formatPrice(r.amount_total)}</td>
+                    <td className="p-3">{r.invoice_date ? toJalali(r.invoice_date) : '—'}</td>
+                    <td className="p-3 text-xs text-gray-500">{r.narration||'—'}</td>
+                  </tr>))}</tbody>
+              </table>
+            </div>
+          )}
+          {showHistory && returnHistory.length === 0 && (
+            <div className="text-center py-6 text-gray-400 text-sm">سابقه‌ای یافت نشد</div>
+          )}
+
+          {!showHistory && (
+            <div className="bg-white rounded-xl p-8 text-center text-gray-400 border border-dashed border-gray-300">
+              <div className="text-4xl mb-3">↩️</div>
+              <p>برای ثبت مرجوعی، دکمه «ثبت برگشت» را بزنید</p>
+            </div>
+          )}
         </div>
       )}
 

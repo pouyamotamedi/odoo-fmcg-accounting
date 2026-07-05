@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import Link from 'next/link';
 
@@ -33,6 +33,11 @@ export default function PosPage() {
   const [splitCard, setSplitCard] = useState('');
   const [splitCredit, setSplitCredit] = useState('');
   const [splitCustomer, setSplitCustomer] = useState(0);
+  const [showSalesHistory, setShowSalesHistory] = useState(false);
+  const [salesHistory, setSalesHistory] = useState<any[]>([]);
+  const [expandedSale, setExpandedSale] = useState<number | null>(null);
+  const [saleLines, setSaleLines] = useState<any[]>([]);
+  const [posJournals, setPosJournals] = useState<{id:number;name:string;type:string}[]>([]);
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -79,13 +84,11 @@ export default function PosPage() {
           partner_id: tx.partner_id,
         });
         await confirmInvoice(invoiceId);
-        if (tx.payment_method === 'credit' && tx.partner_id) {
-          await createCustomerCredit({
-            partner_id: tx.partner_id,
-            amount: tx.total,
-            note: tx.credit_note,
-            invoice_ref: `INV-${invoiceId}`,
-          });
+        if (tx.payment_method !== 'credit') {
+          const cashJ = posJournals.find(j => j.type === 'cash');
+          const bankJ = posJournals.find(j => j.type === 'bank');
+          const jId = tx.payment_method === 'card' ? bankJ?.id : cashJ?.id;
+          if (jId) await registerInvoicePayment(invoiceId, jId, tx.total);
         }
       });
       if (result.success > 0) {
@@ -101,8 +104,9 @@ export default function PosPage() {
   useEffect(() => {
     async function load() {
       try {
-        const data = await getProducts();
+        const [data, jrnls] = await Promise.all([getProducts(), getBankCashBalances()]);
         setProducts(data || []);
+        setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
       } catch { setProducts([]); }
       setLoading(false);
     }
@@ -154,6 +158,17 @@ export default function PosPage() {
       const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
       const invoiceId = await createPosOrder({ lines, payment_method: method });
       await confirmInvoice(invoiceId);
+      // Register payment to actually affect bank/cash balance
+      const cashJournal = posJournals.find(j => j.type === 'cash');
+      const bankJournal = posJournals.find(j => j.type === 'bank');
+      const journalId = method === 'card' ? bankJournal?.id : cashJournal?.id;
+      if (journalId) {
+        await registerInvoicePayment(invoiceId, journalId, cartTotal);
+      }
+      // Create stock delivery to reduce inventory
+      try {
+        await createStockDelivery(lines);
+      } catch { /* best effort */ }
       clearCart();
       setMsg('✅ فاکتور ثبت شد');
       setTimeout(() => setMsg(''), 3000);
@@ -201,7 +216,11 @@ export default function PosPage() {
       const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
       const invoiceId = await createPosOrder({ lines, payment_method: 'credit', partner_id: selectedCustomer });
       await confirmInvoice(invoiceId);
-      await createCustomerCredit({ partner_id: selectedCustomer, amount: cartTotal, note: creditNote || undefined, invoice_ref: `INV-${invoiceId}` });
+      // فاکتور فروش تأیید شده خودش receivable ایجاد میکنه - نیازی به ثبت جداگانه نیست
+      // Create stock delivery to reduce inventory
+      try {
+        await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
+      } catch { /* best effort */ }
       clearCart();
       setShowCredit(false);
       setMsg('✅ فروش اعتباری ثبت شد');
@@ -237,13 +256,37 @@ export default function PosPage() {
 
       const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
       const partnerId = creditAmt > 0 ? splitCustomer : undefined;
+
+      // If card amount > 0, send to PAX terminal first
+      if (cardAmt > 0) {
+        setMsg('💳 مبلغ کارت به دستگاه کارتخوان ارسال شد...');
+        const pax = await payWithPaxTerminal(cardAmt, 'sale');
+        if (!pax?.success) {
+          setMsg('');
+          alert(pax?.error || 'تراکنش کارتخوان ناموفق بود');
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const invoiceId = await createPosOrder({ lines, payment_method: 'cash', partner_id: partnerId });
       await confirmInvoice(invoiceId);
 
-      // Record credit portion if applicable
-      if (creditAmt > 0 && splitCustomer) {
-        await createCustomerCredit({ partner_id: splitCustomer, amount: creditAmt, note: `پرداخت ترکیبی - بخش اعتباری`, invoice_ref: `INV-${invoiceId}` });
+      // Only register payment for cash/card portions
+      if (cashAmt > 0 || cardAmt > 0) {
+        const cashJournal = posJournals.find(j => j.type === 'cash');
+        const bankJournal = posJournals.find(j => j.type === 'bank');
+        if (cashAmt > 0 && cashJournal) {
+          await registerInvoicePayment(invoiceId, cashJournal.id, cashAmt);
+        }
+        if (cardAmt > 0 && bankJournal) {
+          await registerInvoicePayment(invoiceId, bankJournal.id, cardAmt);
+        }
       }
+      // Create stock delivery to reduce inventory
+      try {
+        await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
+      } catch { /* best effort */ }
 
       clearCart();
       setShowSplit(false);
@@ -276,6 +319,10 @@ export default function PosPage() {
             <Link href="/admin" className="text-xs text-slate-400 hover:text-white">
               بازگشت به پنل ←
             </Link>
+            <button onClick={async () => {
+              try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','payment_state'], 30, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
+              setShowSalesHistory(true);
+            }} className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded">📋 سوابق</button>
           </div>
         </header>
 
@@ -478,15 +525,15 @@ export default function PosPage() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">💵 مبلغ نقدی</label>
-                <input type="number" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                <input type="text" value={splitCash ? Number(splitCash).toLocaleString() : ''} onChange={(e) => setSplitCash(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">💳 مبلغ کارت</label>
-                <input type="number" value={splitCard} onChange={(e) => setSplitCard(e.target.value)} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                <input type="text" value={splitCard ? Number(splitCard).toLocaleString() : ''} onChange={(e) => setSplitCard(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">🤝 مبلغ اعتباری (نسیه)</label>
-                <input type="number" value={splitCredit} onChange={(e) => setSplitCredit(e.target.value)} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                <input type="text" value={splitCredit ? Number(splitCredit).toLocaleString() : ''} onChange={(e) => setSplitCredit(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
               {Number(splitCredit) > 0 && (
                 <div>
@@ -513,6 +560,39 @@ export default function PosPage() {
                 انصراف
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Sales History Modal */}
+      {showSalesHistory && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">📋 سوابق فاکتورهای فروش</h3>
+              <button onClick={() => setShowSalesHistory(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            {salesHistory.length === 0 ? <p className="text-center text-gray-400 py-8">فاکتوری یافت نشد</p> : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b"><tr>
+                  <th className="text-right p-2">شماره</th><th className="text-right p-2">مشتری</th><th className="text-right p-2">مبلغ</th><th className="text-right p-2">وضعیت</th><th className="text-right p-2">جزئیات</th>
+                </tr></thead>
+                <tbody>{salesHistory.map((inv:any) => (<React.Fragment key={inv.id}>
+                  <tr className="border-b hover:bg-gray-50">
+                    <td className="p-2">{inv.name}</td>
+                    <td className="p-2">{inv.partner_id?inv.partner_id[1]:'—'}</td>
+                    <td className="p-2 font-bold">{formatPrice(inv.amount_total)}</td>
+                    <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inv.payment_state==='paid'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{inv.payment_state==='paid'?'پرداخت شده':'تأیید شده'}</span></td>
+                    <td className="p-2"><button onClick={async()=>{if(expandedSale===inv.id){setExpandedSale(null);setSaleLines([]);return;} try{const l=await getPurchaseInvoiceLines(inv.id);setSaleLines(l||[]);setExpandedSale(inv.id);}catch{setSaleLines([]);}}} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">مشاهده</button></td>
+                  </tr>
+                  {expandedSale===inv.id&&(<tr key={`d-${inv.id}`}><td colSpan={5} className="p-2 bg-gray-50">
+                    {saleLines.length===0?<p className="text-xs text-gray-400">بدون آیتم</p>:(
+                      <table className="w-full text-xs"><thead><tr><th className="text-right p-1">کالا</th><th className="text-right p-1">تعداد</th><th className="text-right p-1">قیمت</th><th className="text-right p-1">جمع</th></tr></thead>
+                      <tbody>{saleLines.map((l:any)=>(<tr key={l.id}><td className="p-1">{l.product_id?.[1]||l.name}</td><td className="p-1">{l.quantity}</td><td className="p-1">{formatPrice(l.price_unit)}</td><td className="p-1">{formatPrice(l.price_subtotal)}</td></tr>))}</tbody></table>
+                    )}
+                  </td></tr>)}
+                </React.Fragment>))}</tbody>
+              </table>
+            )}
           </div>
         </div>
       )}

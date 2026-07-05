@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { getBankCashBalances, write, create, unlink, searchRead } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
+import PriceInput from '@/components/PriceInput';
 
 interface Journal {
   id: number;
@@ -191,7 +192,7 @@ export default function TreasuryPage() {
               )}
               <div>
                 <label className="block text-xs text-gray-500 mb-1">موجودی اولیه (تومان)</label>
-                <input type="text" value={form.fmcg_opening_balance} onChange={(e) => setForm({...form, fmcg_opening_balance: e.target.value})} placeholder="۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                <PriceInput value={form.fmcg_opening_balance} onChange={(v) => setForm({...form, fmcg_opening_balance: v})} placeholder="۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
             </div>
             <div className="flex gap-3 mt-5">

@@ -42,6 +42,7 @@ export default function PeoplePage() {
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<'all' | 'supplier' | 'customer' | 'seller'>('all');
   const [search, setSearch] = useState('');
+  const [sellerPartnerIds, setSellerPartnerIds] = useState<Set<number>>(new Set());
 
   const [form, setForm] = useState<PartnerForm>({
     name: '', phone: '', mobile: '', role: 'customer', comment: '', login: '', password: '',
@@ -59,6 +60,14 @@ export default function PeoplePage() {
         const data = await getPartners(role);
         setPartners(data || []);
         setSellers([]);
+        // Load seller users to identify seller partners in "all" tab
+        if (filter === 'all') {
+          try {
+            const sellerUsers = await searchRead('res.users', [['fmcg_is_seller', '=', true]], ['partner_id']);
+            const ids = new Set<number>((sellerUsers || []).map((u: any) => u.partner_id?.[0]).filter(Boolean));
+            setSellerPartnerIds(ids);
+          } catch { setSellerPartnerIds(new Set()); }
+        }
       }
       setError('');
     } catch (e: any) {
@@ -155,12 +164,15 @@ export default function PeoplePage() {
     if (partner.supplier_rank > 0 && partner.customer_rank > 0) return 'تامین‌کننده / مشتری';
     if (partner.supplier_rank > 0) return 'تامین‌کننده';
     if (partner.customer_rank > 0) return 'مشتری';
+    // Check if this partner is a seller user
+    if (sellerPartnerIds.has(partner.id)) return 'فروشنده';
     return 'سایر';
   }
 
   function getRoleBadgeColor(partner: Partner): string {
     if (partner.supplier_rank > 0) return 'bg-orange-100 text-orange-700';
     if (partner.customer_rank > 0) return 'bg-blue-100 text-blue-700';
+    if (sellerPartnerIds.has(partner.id)) return 'bg-green-100 text-green-700';
     return 'bg-gray-100 text-gray-600';
   }
 

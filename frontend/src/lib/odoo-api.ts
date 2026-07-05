@@ -153,15 +153,22 @@ export async function createProduct(values: {
   standard_price: number;
   type?: string;
   fmcg_reorder_threshold?: number;
+  categ_id?: number;
 }) {
-  return create('product.product', {
+  const data: any = {
     name: values.name,
     barcode: values.barcode || false,
     list_price: values.list_price,
     standard_price: values.standard_price,
-    type: values.type || 'consu',
-    fmcg_reorder_threshold: values.fmcg_reorder_threshold || 10,
-  });
+    type: 'consu',
+    is_storable: true,
+  };
+  // Only set categ_id if a valid one is provided (not 0/false)
+  if (values.categ_id) {
+    data.categ_id = values.categ_id;
+  }
+  try { data.fmcg_reorder_threshold = values.fmcg_reorder_threshold || 10; } catch {}
+  return create('product.product', data);
 }
 
 export async function updateProduct(id: number, values: Record<string, any>) {
@@ -276,17 +283,43 @@ export async function recordRepayment(values: {
 // ============ Bank & Cash ============
 
 export async function getBankCashBalances() {
-  // Try with FMCG fields first, fallback to basic fields
+  // Get journals
+  let journals: any[];
   try {
-    return await searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
+    journals = await searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
       'name', 'type', 'fmcg_running_balance', 'fmcg_is_active', 'fmcg_opening_balance',
-      'fmcg_account_holder', 'fmcg_account_number',
+      'fmcg_account_holder', 'fmcg_account_number', 'default_account_id',
     ]);
   } catch {
-    return await searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
-      'name', 'type',
+    journals = await searchRead('account.journal', [['type', 'in', ['bank', 'cash']]], [
+      'name', 'type', 'default_account_id',
     ]);
   }
+
+  // Calculate real accounting balance for each journal from account.move.line
+  // In Odoo 18, payments go through "Outstanding Payments" account (asset_current),
+  // NOT directly to the journal's default_account_id (asset_cash).
+  // So we must sum ALL lines in the journal excluding payable/receivable counterparts.
+  for (const j of (journals || [])) {
+    try {
+      // Get all posted move lines for this journal, excluding the partner-side entries
+      // (payable/receivable). This gives us the liquidity side (cash/bank/outstanding).
+      const lines = await searchRead('account.move.line', [
+        ['journal_id', '=', j.id],
+        ['parent_state', '=', 'posted'],
+        ['account_id.account_type', 'not in', ['asset_receivable', 'liability_payable']],
+      ], ['debit', 'credit'], 0);
+      // Negative balance = money went out (outbound payments)
+      const balance = (lines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
+      j.computed_balance = balance;
+      // Use computed balance, adding opening balance
+      j.fmcg_running_balance = j.computed_balance + (j.fmcg_opening_balance || 0);
+    } catch {
+      // Keep existing fmcg_running_balance if calculation fails
+    }
+  }
+
+  return journals;
 }
 
 // ============ POS Orders ============
@@ -367,15 +400,29 @@ export async function getPurchaseInvoices(state?: string) {
     domain.push(['payment_state', '=', 'paid']);
   }
   return searchRead('account.move', domain, [
-    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'payment_state',
+    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'payment_state', 'invoice_line_ids',
   ], 50, 0, 'create_date desc');
+}
+
+export async function getPurchaseInvoiceLines(invoiceId: number) {
+  return searchRead('account.move.line', [['move_id', '=', invoiceId], ['display_type', '=', 'product']], [
+    'product_id', 'name', 'quantity', 'price_unit', 'price_subtotal',
+  ]);
+}
+
+export async function deletePurchaseInvoice(invoiceId: number) {
+  // First try to reset to draft, then delete
+  try {
+    await callMethod('account.move', 'button_draft', [[invoiceId]]);
+  } catch { /* may already be draft */ }
+  return unlink('account.move', [invoiceId]);
 }
 
 export async function createPurchaseInvoice(values: {
   partner_id: number;
   lines: Array<{ product_id: number; quantity: number; price_unit: number }>;
-  payment_method: 'cash' | 'bank' | 'credit';
   note?: string;
+  date?: string;
 }) {
   const invoice_lines = values.lines.map((line) => [
     0, 0, {
@@ -385,13 +432,13 @@ export async function createPurchaseInvoice(values: {
     },
   ]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const invoiceDate = values.date || new Date().toISOString().split('T')[0];
 
   const invoiceId = await create('account.move', {
     move_type: 'in_invoice',
     partner_id: values.partner_id,
-    invoice_date: today,
-    date: today,
+    invoice_date: invoiceDate,
+    date: invoiceDate,
     invoice_line_ids: invoice_lines,
     narration: values.note || false,
   });
@@ -400,6 +447,209 @@ export async function createPurchaseInvoice(values: {
   await confirmInvoice(invoiceId);
 
   return invoiceId;
+}
+
+/**
+ * Register payment for an invoice (reduces bank/cash balance)
+ * @param invoiceId - the confirmed invoice ID
+ * @param journalId - the specific bank/cash journal to pay from
+ * @param amount - the amount to pay (partial or full)
+ */
+export async function registerInvoicePayment(invoiceId: number, journalId: number, amount: number) {
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['amount_total', 'partner_id', 'move_type', 'amount_residual'], 1);
+  if (!invoice || invoice.length === 0) return;
+
+  const payAmount = amount || invoice[0].amount_residual || invoice[0].amount_total;
+  const paymentType = invoice[0].move_type === 'in_invoice' ? 'outbound' : 'inbound';
+  const partnerType = invoice[0].move_type === 'in_invoice' ? 'supplier' : 'customer';
+
+  const paymentId = await create('account.payment', {
+    payment_type: paymentType,
+    partner_type: partnerType,
+    partner_id: invoice[0].partner_id?.[0] || false,
+    amount: payAmount,
+    journal_id: journalId,
+  });
+  await callMethod('account.payment', 'action_post', [[paymentId]]);
+  return paymentId;
+}
+
+/**
+ * Create stock picking (warehouse receipt) for a purchase invoice
+ */
+export async function createStockReceipt(invoiceId: number) {
+  const lines = await getPurchaseInvoiceLines(invoiceId);
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['partner_id'], 1);
+  if (!lines || lines.length === 0) return null;
+
+  // Find the receipt picking type (incoming)
+  const pickingTypes = await searchRead('stock.picking.type', [['code', '=', 'incoming']], ['id', 'default_location_src_id', 'default_location_dest_id'], 1);
+  if (!pickingTypes || pickingTypes.length === 0) return null;
+
+  const pickingType = pickingTypes[0];
+  const srcLocation = pickingType.default_location_src_id?.[0] || false;
+  const destLocation = pickingType.default_location_dest_id?.[0] || false;
+
+  // Create stock.picking with move lines
+  const moveLines = lines.map((line: any) => [0, 0, {
+    product_id: line.product_id?.[0] || line.product_id,
+    name: line.name || 'Receipt',
+    product_uom_qty: line.quantity,
+    location_id: srcLocation,
+    location_dest_id: destLocation,
+  }]);
+
+  const pickingId = await create('stock.picking', {
+    picking_type_id: pickingType.id,
+    partner_id: invoice?.[0]?.partner_id?.[0] || false,
+    origin: `Purchase Invoice ${invoiceId}`,
+    location_id: srcLocation,
+    location_dest_id: destLocation,
+    move_ids_without_package: moveLines,
+  });
+
+  // Confirm the picking
+  await callMethod('stock.picking', 'action_confirm', [[pickingId]]);
+  
+  // Set quantities done on stock.move.line (Odoo 18 way)
+  // First try setting quantity on stock.move directly
+  const moves = await searchRead('stock.move', [['picking_id', '=', pickingId]], ['id', 'product_uom_qty']);
+  for (const move of (moves || [])) {
+    try {
+      await write('stock.move', [move.id], { quantity: move.product_uom_qty });
+    } catch {
+      // Try quantity_done for older API
+      try { await write('stock.move', [move.id], { quantity_done: move.product_uom_qty }); } catch {}
+    }
+  }
+
+  // Validate picking
+  try {
+    await callMethod('stock.picking', 'button_validate', [[pickingId]]);
+  } catch {
+    try {
+      await jsonRpc('/web/dataset/call_kw', {
+        model: 'stock.picking',
+        method: 'button_validate',
+        args: [[pickingId]],
+        kwargs: { context: { skip_backorder: true, picking_ids_not_to_backorder: [pickingId] } },
+      });
+    } catch { /* best effort */ }
+  }
+
+  return pickingId;
+}
+
+/**
+ * Create stock delivery (outgoing) for a sales invoice - reduces inventory
+ */
+export async function createStockDelivery(invoiceLines: Array<{ product_id: number; qty: number }>, partnerId?: number) {
+  if (!invoiceLines || invoiceLines.length === 0) return null;
+
+  // Find the delivery picking type (outgoing)
+  const pickingTypes = await searchRead('stock.picking.type', [['code', '=', 'outgoing']], ['id', 'default_location_src_id', 'default_location_dest_id'], 1);
+  if (!pickingTypes || pickingTypes.length === 0) return null;
+
+  const pickingType = pickingTypes[0];
+  const srcLocation = pickingType.default_location_src_id?.[0] || false;
+  const destLocation = pickingType.default_location_dest_id?.[0] || false;
+
+  const moveLines = invoiceLines.map((line) => [0, 0, {
+    product_id: line.product_id,
+    name: 'Delivery',
+    product_uom_qty: line.qty,
+    location_id: srcLocation,
+    location_dest_id: destLocation,
+  }]);
+
+  const pickingId = await create('stock.picking', {
+    picking_type_id: pickingType.id,
+    partner_id: partnerId || false,
+    origin: 'POS Sale',
+    location_id: srcLocation,
+    location_dest_id: destLocation,
+    move_ids_without_package: moveLines,
+  });
+
+  await callMethod('stock.picking', 'action_confirm', [[pickingId]]);
+
+  const moves = await searchRead('stock.move', [['picking_id', '=', pickingId]], ['id', 'product_uom_qty']);
+  for (const move of (moves || [])) {
+    try {
+      await write('stock.move', [move.id], { quantity: move.product_uom_qty });
+    } catch {
+      try { await write('stock.move', [move.id], { quantity_done: move.product_uom_qty }); } catch {}
+    }
+  }
+
+  try {
+    await callMethod('stock.picking', 'button_validate', [[pickingId]]);
+  } catch {
+    try {
+      await jsonRpc('/web/dataset/call_kw', {
+        model: 'stock.picking',
+        method: 'button_validate',
+        args: [[pickingId]],
+        kwargs: { context: { skip_backorder: true, picking_ids_not_to_backorder: [pickingId] } },
+      });
+    } catch { /* best effort */ }
+  }
+
+  return pickingId;
+}
+
+/**
+ * Get partner account balances (receivable/payable)
+ */
+export async function getPartnerBalances() {
+  // Get all partners
+  const partners = await searchRead('res.partner', [
+    ['active', '=', true],
+    '|', ['customer_rank', '>', 0], ['supplier_rank', '>', 0]
+  ], ['name', 'phone', 'mobile', 'supplier_rank', 'customer_rank']);
+  
+  if (!partners || partners.length === 0) return [];
+
+  // Get ALL receivable/payable lines in ONE query (instead of N+1)
+  const allLines = await searchRead('account.move.line', [
+    ['partner_id', 'in', partners.map((p: any) => p.id)],
+    ['parent_state', '=', 'posted'],
+    ['account_id.account_type', 'in', ['asset_receivable', 'liability_payable']],
+  ], ['partner_id', 'debit', 'credit', 'account_type'], 0);
+
+  // Group by partner
+  const balanceMap: Record<number, { receivable: number; payable: number }> = {};
+  for (const line of (allLines || [])) {
+    const pid = line.partner_id?.[0] || line.partner_id;
+    if (!pid) continue;
+    if (!balanceMap[pid]) balanceMap[pid] = { receivable: 0, payable: 0 };
+    if (line.account_type === 'asset_receivable') {
+      balanceMap[pid].receivable += (line.debit - line.credit);
+    } else if (line.account_type === 'liability_payable') {
+      balanceMap[pid].payable += (line.credit - line.debit);
+    }
+  }
+
+  return partners.map((partner: any) => {
+    const bal = balanceMap[partner.id] || { receivable: 0, payable: 0 };
+    // Net balance: positive = they owe us, negative = we owe them
+    const net = bal.receivable - bal.payable;
+    return {
+      ...partner,
+      receivable: net > 0 ? net : 0,
+      payable: net < 0 ? -net : 0,
+      balance: net,
+    };
+  });
+}
+
+/**
+ * Get sales returns (credit notes) history
+ */
+export async function getSalesReturns() {
+  return searchRead('account.move', [['move_type', '=', 'out_refund']], [
+    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'narration', 'create_date',
+  ], 50, 0, 'create_date desc');
 }
 
 // ============ Stock Adjustment ============
@@ -439,14 +689,80 @@ export async function createSalesReturn(values: {
     },
   ]);
 
+  // If no partner, use "مشتری عمومی"
+  let partner_id = values.partner_id || false;
+  if (!partner_id) {
+    try {
+      const existing = await searchRead('res.partner', [['name', '=', 'مشتری عمومی']], ['id'], 1);
+      if (existing && existing.length > 0) {
+        partner_id = existing[0].id;
+      } else {
+        partner_id = await create('res.partner', { name: 'مشتری عمومی', customer_rank: 1 });
+      }
+    } catch {
+      partner_id = false;
+    }
+  }
+
   const refundId = await create('account.move', {
     move_type: 'out_refund',
-    partner_id: values.partner_id || false,
+    partner_id: partner_id,
     invoice_line_ids: refund_lines,
     narration: values.note || false,
   });
 
   await confirmInvoice(refundId);
+
+  // If return_to_stock, create a stock return (incoming picking)
+  if (values.return_to_stock) {
+    try {
+      // Find the receipt picking type (incoming)
+      const pickingTypes = await searchRead('stock.picking.type', [['code', '=', 'incoming']], ['id', 'default_location_src_id', 'default_location_dest_id'], 1);
+      if (pickingTypes && pickingTypes.length > 0) {
+        const pickingType = pickingTypes[0];
+        const srcLocation = pickingType.default_location_src_id?.[0] || false;
+        const destLocation = pickingType.default_location_dest_id?.[0] || false;
+
+        const moveLines = values.lines.map((line) => [0, 0, {
+          product_id: line.product_id,
+          name: 'Return',
+          product_uom_qty: line.quantity,
+          location_id: srcLocation,
+          location_dest_id: destLocation,
+        }]);
+
+        const pickingId = await create('stock.picking', {
+          picking_type_id: pickingType.id,
+          partner_id: partner_id || false,
+          origin: `Sales Return ${refundId}`,
+          location_id: srcLocation,
+          location_dest_id: destLocation,
+          move_ids_without_package: moveLines,
+        });
+
+        await callMethod('stock.picking', 'action_confirm', [[pickingId]]);
+        
+        // Set quantities done
+        const moves = await searchRead('stock.move', [['picking_id', '=', pickingId]], ['id', 'product_uom_qty']);
+        for (const move of (moves || [])) {
+          await write('stock.move', [move.id], { quantity: move.product_uom_qty });
+        }
+
+        try {
+          await callMethod('stock.picking', 'button_validate', [[pickingId]]);
+        } catch {
+          try {
+            await jsonRpc('/web/dataset/call_kw', {
+              model: 'stock.picking',
+              method: 'button_validate',
+              args: [[pickingId]],
+              kwargs: { context: { skip_backorder: true, picking_ids_not_to_backorder: [pickingId] } },
+            });
+          } catch { /* best effort */ }
+        }
+      }
+    } catch { /* stock return failed, but refund is done */ }
+  }
 
   return refundId;
 }
@@ -635,6 +951,46 @@ export async function addAttributeToProduct(productTmplId: number, attributeId: 
 
 export async function getProductVariants(productTmplId: number) {
   return searchRead('product.product', [['product_tmpl_id', '=', productTmplId]], ['name', 'barcode', 'product_template_variant_value_ids', 'list_price', 'qty_available']);
+}
+
+// ============ Chart of Accounts ============
+
+export async function getAccounts(accountTypes?: string[]) {
+  const domain: any[] = [];
+  if (accountTypes && accountTypes.length > 0) {
+    domain.push(['account_type', 'in', accountTypes]);
+  }
+  return searchRead('account.account', domain, [
+    'name', 'code', 'account_type', 'reconcile', 'deprecated',
+  ], 0, 0, 'code asc');
+}
+
+export async function getExpenseIncomeAccounts() {
+  return searchRead('account.account', [
+    ['account_type', 'in', ['expense', 'expense_direct_cost', 'income', 'income_other', 'equity']],
+    ['deprecated', '=', false],
+  ], ['name', 'code', 'account_type'], 0, 0, 'code asc');
+}
+
+export async function createAccount(values: {
+  name: string;
+  code: string;
+  account_type: string;
+}) {
+  return create('account.account', {
+    name: values.name,
+    code: values.code,
+    account_type: values.account_type,
+  });
+}
+
+export async function updateAccount(id: number, values: Record<string, any>) {
+  return write('account.account', [id], values);
+}
+
+export async function deleteAccount(id: number) {
+  // Mark as deprecated instead of deleting (safer)
+  return write('account.account', [id], { deprecated: true });
 }
 
 // ============ Dashboard Helpers ============

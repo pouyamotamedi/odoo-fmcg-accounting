@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getCompanySettings, updateCompanySettings, changePassword } from '@/lib/odoo-api';
+import { getCompanySettings, updateCompanySettings, changePassword, searchRead, write } from '@/lib/odoo-api';
+import { useCompanyStore } from '@/stores/company-store';
 import Link from 'next/link';
 
 export default function SettingsPage() {
@@ -15,6 +16,9 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [connected, setConnected] = useState<boolean | null>(null);
+  const { setCompany } = useCompanyStore();
+  const [taxEnabled, setTaxEnabled] = useState(true);
+  const [taxRate, setTaxRate] = useState('9');
 
   useEffect(() => {
     async function load() {
@@ -45,6 +49,7 @@ export default function SettingsPage() {
         fmcg_pax_terminal_ip: paxIp || false,
         fmcg_pax_terminal_port: parseInt(paxPort) || 10009,
       });
+      setCompany(companyId, name);
       setMsg('✅ تنظیمات ذخیره شد');
       setTimeout(() => setMsg(''), 3000);
     } catch (e: any) {
@@ -92,6 +97,58 @@ export default function SettingsPage() {
             <label className="block text-xs text-gray-500 mb-1">نام فروشگاه</label>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full max-w-sm p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
           </div>
+        </div>
+
+        {/* Tax Settings */}
+        <div className="bg-white rounded-xl p-6 border border-gray-100">
+          <h3 className="font-bold text-sm mb-4">💰 تنظیمات مالیات</h3>
+          <label className="flex items-center gap-2 mb-3 cursor-pointer">
+            <input type="checkbox" checked={taxEnabled} onChange={(e) => setTaxEnabled(e.target.checked)} className="w-4 h-4 rounded" />
+            <span className="text-sm">فعال‌سازی مالیات بر ارزش افزوده</span>
+          </label>
+          {taxEnabled && (
+            <div className="flex items-center gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">نرخ مالیات (%)</label>
+                <input type="number" value={taxRate} onChange={(e) => setTaxRate(e.target.value)} placeholder="9" className="w-24 p-2 border border-gray-200 rounded-lg text-sm" />
+              </div>
+              <button onClick={async () => {
+                try {
+                  // Find sale tax and update or disable
+                  const taxes = await searchRead('account.tax', [['type_tax_use','=','sale']], ['id','amount'], 5);
+                  if (taxes && taxes.length > 0) {
+                    for (const tax of taxes) {
+                      await write('account.tax', [tax.id], { amount: parseFloat(taxRate) || 0, active: taxEnabled });
+                    }
+                  }
+                  const purchaseTaxes = await searchRead('account.tax', [['type_tax_use','=','purchase']], ['id'], 5);
+                  if (purchaseTaxes && purchaseTaxes.length > 0) {
+                    for (const tax of purchaseTaxes) {
+                      await write('account.tax', [tax.id], { amount: parseFloat(taxRate) || 0, active: taxEnabled });
+                    }
+                  }
+                  setMsg('✅ مالیات بروز شد');
+                  setTimeout(() => setMsg(''), 3000);
+                } catch(e:any) { alert(e.message || 'خطا'); }
+              }} className="mt-4 px-4 py-2 bg-indigo-500 text-white rounded-lg text-xs font-bold hover:bg-indigo-600">
+                اعمال تغییرات مالیات
+              </button>
+            </div>
+          )}
+          {!taxEnabled && (
+            <button onClick={async () => {
+              try {
+                const taxes = await searchRead('account.tax', [], ['id'], 20);
+                if (taxes && taxes.length > 0) {
+                  for (const tax of taxes) { await write('account.tax', [tax.id], { active: false }); }
+                }
+                setMsg('✅ مالیات غیرفعال شد');
+                setTimeout(() => setMsg(''), 3000);
+              } catch(e:any) { alert(e.message || 'خطا'); }
+            }} className="px-4 py-2 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600">
+              غیرفعال کردن همه مالیات‌ها
+            </button>
+          )}
         </div>
 
         {/* PAX Terminal */}
