@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProducts, getPartners, createSalesReturn, getSalesReturns } from '@/lib/odoo-api';
+import { getProducts, getPartners, createSalesReturn, getSalesReturns, getBankCashBalances } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 
 interface ReturnItem {
@@ -18,27 +18,40 @@ interface OdooProduct {
   list_price: number;
 }
 
+interface Journal {
+  id: number;
+  name: string;
+  type: string;
+  fmcg_running_balance?: number;
+}
+
 export default function ReturnsPage() {
   const [products, setProducts] = useState<OdooProduct[]>([]);
   const [customers, setCustomers] = useState<{ id: number; name: string }[]>([]);
+  const [journals, setJournals] = useState<Journal[]>([]);
   const [items, setItems] = useState<ReturnItem[]>([]);
   const [search, setSearch] = useState('');
   const [customer, setCustomer] = useState<number>(0);
   const [returnToStock, setReturnToStock] = useState(true);
   const [refundMethod, setRefundMethod] = useState<'cash' | 'bank' | 'credit'>('cash');
+  const [selectedJournal, setSelectedJournal] = useState<number>(0);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [returnHistory, setReturnHistory] = useState<any[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
 
   async function loadData() {
     try {
-      const [prods, custs] = await Promise.all([getProducts(), getPartners('customer')]);
+      const [prods, custs, jrnls] = await Promise.all([
+        getProducts(),
+        getPartners('customer'),
+        getBankCashBalances(),
+      ]);
       setProducts(prods || []);
       setCustomers(custs?.map((c: any) => ({ id: c.id, name: c.name })) || []);
+      setJournals(jrnls || []);
     } catch { /* ignore */ }
     setLoading(false);
   }
@@ -49,6 +62,11 @@ export default function ReturnsPage() {
   }
 
   useEffect(() => { loadData(); loadHistory(); }, []);
+
+  // Filter journals based on refund method
+  const filteredJournals = journals.filter((j) =>
+    refundMethod === 'cash' ? j.type === 'cash' : refundMethod === 'bank' ? j.type === 'bank' : false
+  );
 
   const filteredProducts = products.filter(
     (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
@@ -73,6 +91,9 @@ export default function ReturnsPage() {
 
   async function handleSubmit() {
     if (items.length === 0) { alert('حداقل یک کالا انتخاب کنید'); return; }
+    if (refundMethod === 'credit' && !customer) { alert('برای اعتبار مشتری، انتخاب مشتری الزامی است'); return; }
+    if ((refundMethod === 'cash' || refundMethod === 'bank') && !selectedJournal) { alert('لطفاً حساب بانکی/صندوق را انتخاب کنید'); return; }
+
     setSubmitting(true);
     try {
       await createSalesReturn({
@@ -80,10 +101,12 @@ export default function ReturnsPage() {
         lines: items.map((i) => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })),
         return_to_stock: returnToStock,
         refund_method: refundMethod,
+        journal_id: selectedJournal,
         note: note || undefined,
       });
       setItems([]);
       setCustomer(0);
+      setSelectedJournal(0);
       setNote('');
       setShowForm(false);
       setMsg('✅ برگشت از فروش ثبت شد');
@@ -113,17 +136,14 @@ export default function ReturnsPage() {
         </div>
       </div>
 
+      {/* History table always visible when form is not shown */}
       {!showForm && (
         <div className="space-y-4">
-          {/* History toggle */}
-          <div className="flex gap-2">
-            <button onClick={() => setShowHistory(!showHistory)} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold">
-              {showHistory ? '← بستن سوابق' : '📋 سوابق برگشت‌ها'}
-            </button>
-          </div>
-
-          {showHistory && returnHistory.length > 0 && (
+          {returnHistory.length > 0 ? (
             <div className="bg-white rounded-xl border overflow-hidden">
+              <div className="px-4 py-3 bg-gray-50 border-b">
+                <h3 className="text-sm font-bold text-slate-700">📋 سوابق برگشت‌ها</h3>
+              </div>
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b"><tr>
                   <th className="text-right p-3">شماره</th>
@@ -132,25 +152,20 @@ export default function ReturnsPage() {
                   <th className="text-right p-3">تاریخ</th>
                   <th className="text-right p-3">دلیل</th>
                 </tr></thead>
-                <tbody>{returnHistory.map((r:any) => (
+                <tbody>{returnHistory.map((r: any) => (
                   <tr key={r.id} className="border-b hover:bg-gray-50">
                     <td className="p-3">{r.name}</td>
-                    <td className="p-3">{r.partner_id?r.partner_id[1]:'مشتری عمومی'}</td>
+                    <td className="p-3">{r.partner_id ? r.partner_id[1] : 'مشتری عمومی'}</td>
                     <td className="p-3 font-bold">{formatPrice(r.amount_total)}</td>
                     <td className="p-3">{r.invoice_date ? toJalali(r.invoice_date) : '—'}</td>
-                    <td className="p-3 text-xs text-gray-500">{r.narration||'—'}</td>
+                    <td className="p-3 text-xs text-gray-500">{r.narration || '—'}</td>
                   </tr>))}</tbody>
               </table>
             </div>
-          )}
-          {showHistory && returnHistory.length === 0 && (
-            <div className="text-center py-6 text-gray-400 text-sm">سابقه‌ای یافت نشد</div>
-          )}
-
-          {!showHistory && (
+          ) : (
             <div className="bg-white rounded-xl p-8 text-center text-gray-400 border border-dashed border-gray-300">
               <div className="text-4xl mb-3">↩️</div>
-              <p>برای ثبت مرجوعی، دکمه «ثبت برگشت» را بزنید</p>
+              <p>هنوز سابقه برگشتی ثبت نشده. برای ثبت مرجوعی، دکمه «ثبت برگشت» را بزنید</p>
             </div>
           )}
         </div>
@@ -210,7 +225,7 @@ export default function ReturnsPage() {
 
             <div className="space-y-3 border-t pt-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">مشتری (اختیاری)</label>
+                <label className="block text-xs text-gray-500 mb-1">مشتری {refundMethod === 'credit' ? '(الزامی)' : '(اختیاری)'}</label>
                 <select
                   value={customer}
                   onChange={(e) => setCustomer(Number(e.target.value))}
@@ -245,7 +260,7 @@ export default function ReturnsPage() {
                 <label className="block text-xs text-gray-500 mb-1">روش بازگشت وجه</label>
                 <select
                   value={refundMethod}
-                  onChange={(e) => setRefundMethod(e.target.value as 'cash' | 'bank' | 'credit')}
+                  onChange={(e) => { setRefundMethod(e.target.value as 'cash' | 'bank' | 'credit'); setSelectedJournal(0); }}
                   className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
                 >
                   <option value="cash">نقد</option>
@@ -253,6 +268,27 @@ export default function ReturnsPage() {
                   <option value="credit">اعتبار مشتری</option>
                 </select>
               </div>
+
+              {/* Journal selection for cash/bank */}
+              {(refundMethod === 'cash' || refundMethod === 'bank') && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    {refundMethod === 'cash' ? 'صندوق' : 'حساب بانکی'}
+                  </label>
+                  <select
+                    value={selectedJournal}
+                    onChange={(e) => setSelectedJournal(Number(e.target.value))}
+                    className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
+                  >
+                    <option value={0}>— انتخاب کنید —</option>
+                    {filteredJournals.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.name} {j.fmcg_running_balance != null ? `(${formatPrice(j.fmcg_running_balance)})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs text-gray-500 mb-1">دلیل / یادداشت</label>

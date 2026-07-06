@@ -64,8 +64,8 @@ export default function ChartOfAccountsPage() {
   const [editAccount, setEditAccount] = useState<any>(null);
   const [editName, setEditName] = useState('');
 
-  // Rename state (unused now)
-  const [renaming] = useState(false);
+  // Rename state
+  const [renaming, setRenaming] = useState(false);
 
   async function load() {
     setLoading(true);

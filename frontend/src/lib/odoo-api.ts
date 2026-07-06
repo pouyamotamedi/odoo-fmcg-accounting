@@ -678,6 +678,7 @@ export async function createSalesReturn(values: {
   lines: Array<{ product_id: number; quantity: number; price_unit: number }>;
   return_to_stock: boolean;
   refund_method: 'cash' | 'bank' | 'credit';
+  journal_id: number;
   note?: string;
 }) {
   // Create credit note (refund)
@@ -712,6 +713,58 @@ export async function createSalesReturn(values: {
   });
 
   await confirmInvoice(refundId);
+
+  // Register payment for the credit note (so money actually leaves bank/cash)
+  // For out_refund, we are PAYING the customer back, so payment_type must be 'outbound'
+  if (values.journal_id && (values.refund_method === 'cash' || values.refund_method === 'bank')) {
+    const totalAmount = values.lines.reduce((sum, l) => sum + l.quantity * l.price_unit, 0);
+    // Create outbound payment directly (not using registerInvoicePayment which gets direction wrong for refunds)
+    const paymentId = await create('account.payment', {
+      payment_type: 'outbound',
+      partner_type: 'customer',
+      partner_id: partner_id || false,
+      amount: totalAmount,
+      journal_id: values.journal_id,
+    });
+    await callMethod('account.payment', 'action_post', [[paymentId]]);
+  }
+
+  // If credit method: record customer credit so balance shows on their account
+  if (values.refund_method === 'credit' && values.partner_id) {
+    try {
+      const totalAmount = values.lines.reduce((sum, l) => sum + l.quantity * l.price_unit, 0);
+      await create('fmcg.customer.credit', {
+        partner_id: values.partner_id,
+        amount: totalAmount,
+        note: values.note || 'بابت برگشت از فروش',
+        invoice_ref: String(refundId),
+      });
+    } catch { /* fmcg.customer.credit module may not be installed */ }
+  }
+
+  // If waste (not return to stock), record an expense journal entry
+  // so the cost goes to the expense account (code 600000)
+  if (!values.return_to_stock) {
+    try {
+      // Find expense account with code 600000
+      const expenseAccounts = await searchRead('account.account', [['code', '=', '600000']], ['id'], 1);
+      if (expenseAccounts && expenseAccounts.length > 0 && values.journal_id) {
+        const expenseAccountId = expenseAccounts[0].id;
+        const totalAmount = values.lines.reduce((sum, l) => sum + l.quantity * l.price_unit, 0);
+
+        // Create an outbound payment to expense account
+        const expensePaymentId = await create('account.payment', {
+          payment_type: 'outbound',
+          partner_type: 'supplier',
+          partner_id: partner_id || false,
+          amount: totalAmount,
+          journal_id: values.journal_id,
+          destination_account_id: expenseAccountId,
+        });
+        await callMethod('account.payment', 'action_post', [[expensePaymentId]]);
+      }
+    } catch { /* expense recording failed, refund still done */ }
+  }
 
   // If return_to_stock, create a stock return (incoming picking)
   if (values.return_to_stock) {
