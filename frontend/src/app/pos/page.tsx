@@ -14,6 +14,8 @@ interface OdooProduct {
   list_price: number;
   qty_available: number;
   image_512?: string | false;
+  display_name?: string;
+  product_tmpl_id?: [number, string] | number;
 }
 
 export default function PosPage() {
@@ -147,7 +149,15 @@ export default function PosPage() {
   }
 
   const filteredProducts = products.filter(
-    (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
+    (p) => {
+      if (!search) return true;
+      if (p.name.includes(search)) return true;
+      if (p.barcode) {
+        const barcodes = String(p.barcode).split(',').map(b => b.trim());
+        if (barcodes.some(b => b.includes(search))) return true;
+      }
+      return false;
+    }
   );
 
   // Group products by template for display (show templates, not individual variants)
@@ -165,10 +175,15 @@ export default function PosPage() {
 
   // If searching by barcode, check for exact barcode match -> add directly
   useEffect(() => {
-    if (search.length >= 8) {
-      const match = products.find((p) => p.barcode === search);
+    if (search.length >= 6) {
+      // Support comma-separated barcodes
+      const match = products.find((p) => {
+        if (!p.barcode) return false;
+        const barcodes = String(p.barcode).split(',').map(b => b.trim());
+        return barcodes.includes(search.trim());
+      });
       if (match) {
-        addItem({ id: match.id, name: match.name, price: getEffectivePrice(match) });
+        addItem({ id: match.id, name: match.display_name || match.name, price: getEffectivePrice(match) });
         setSearch('');
       }
     }

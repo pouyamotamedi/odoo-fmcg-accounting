@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment } from '@/lib/odoo-api';
+import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, setDiscountPrice } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
 
@@ -19,6 +19,8 @@ interface OdooProduct {
   barcode: string | false;
   list_price: number;
   standard_price: number;
+  product_tmpl_id?: [number, string] | number;
+  image_512?: string | false;
 }
 
 export default function PurchasePage() {
@@ -56,6 +58,7 @@ export default function PurchasePage() {
   const [showPayment, setShowPayment] = useState(false);
   const [paymentJournal, setPaymentJournal] = useState<number>(0);
   const [pendingInvoiceId, setPendingInvoiceId] = useState<number>(0);
+  const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
 
   async function loadData() {
     try {
@@ -92,6 +95,52 @@ export default function PurchasePage() {
     );
     return nameMatch || barcodeMatch;
   });
+
+  // Group by template for display
+  const displayProducts = (() => {
+    const tmplMap = new Map<number, OdooProduct & {variantCount: number}>();
+    for (const p of filteredProducts) {
+      const tmplId = (p as any).product_tmpl_id?.[0] || (p as any).product_tmpl_id || p.id;
+      if (!tmplMap.has(tmplId)) {
+        tmplMap.set(tmplId, { ...p, variantCount: 0 });
+      }
+      tmplMap.get(tmplId)!.variantCount++;
+    }
+    return Array.from(tmplMap.values());
+  })();
+
+  // Barcode auto-add: if search matches a barcode exactly, add it directly
+  useEffect(() => {
+    if (search.length >= 6) {
+      // Support comma-separated barcodes
+      const match = products.find((p) => {
+        if (!p.barcode) return false;
+        const barcodes = String(p.barcode).split(',').map(b => b.trim());
+        return barcodes.includes(search.trim());
+      });
+      if (match) {
+        addItem({ id: match.id, name: match.name, price: match.standard_price });
+        setSearch('');
+      }
+    }
+  }, [search]);
+
+  async function handleProductClick(product: OdooProduct & {variantCount?: number}) {
+    const tmplId = (product as any).product_tmpl_id?.[0] || (product as any).product_tmpl_id;
+    if (product.variantCount && product.variantCount > 1 && tmplId) {
+      const vars = await getProductVariants(tmplId);
+      if (vars && vars.length > 1) {
+        setVariantPopup({ tmplId, name: product.name, variants: vars });
+        return;
+      }
+    }
+    addItem({ id: product.id, name: product.name, price: product.standard_price });
+  }
+
+  function selectVariant(variant: any) {
+    addItem({ id: variant.id, name: variant.display_name || variant.name, price: variant.standard_price || 0 });
+    setVariantPopup(null);
+  }
 
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
@@ -425,10 +474,10 @@ export default function PurchasePage() {
             <div className="text-center py-12 text-gray-400">در حال بارگذاری...</div>
           ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {filteredProducts.map((product: any) => (
+            {displayProducts.map((product: any) => (
               <div key={product.id} className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-orange-400 transition-all shadow-sm aspect-square">
                 <button
-                  onClick={() => addItem({ id: product.id, name: product.name, price: product.standard_price })}
+                  onClick={() => handleProductClick(product)}
                   className="w-full h-full"
                 >
                   {product.image_512 ? (
@@ -440,6 +489,9 @@ export default function PurchasePage() {
                   )}
                   <div className="absolute inset-0 bg-black/40 group-hover:bg-black/10 transition-all flex flex-col items-center justify-center p-2">
                     <div className="text-white text-xs font-bold text-center group-hover:opacity-0 transition-opacity leading-tight">{product.name}</div>
+                    {product.variantCount > 1 && (
+                      <div className="text-purple-200 text-[10px] mt-1 group-hover:opacity-0 transition-opacity">{toPersianDigits(product.variantCount)} نوع</div>
+                    )}
                     <div className="text-white text-xs font-bold mt-1 bg-orange-600/80 px-2 py-0.5 rounded group-hover:opacity-0 transition-opacity">
                       {formatPrice(product.standard_price)}
                     </div>
@@ -451,6 +503,34 @@ export default function PurchasePage() {
           </div>
           )}
         </div>
+
+        {/* Variant Popup */}
+        {variantPopup && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold">{variantPopup.name}</h3>
+                <button onClick={() => setVariantPopup(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">کدام نوع؟</p>
+              <div className="space-y-2 max-h-60 overflow-auto">
+                {variantPopup.variants.map((v: any) => {
+                  const tmplName = variantPopup.name;
+                  const dl = v.display_name || v.name;
+                  const shortLabel = dl.startsWith(tmplName) && dl.length > tmplName.length
+                    ? dl.slice(tmplName.length).replace(/^\s*[\(\[,]\s*/, '').replace(/[\)\]]\s*$/, '') : dl;
+                  return (
+                    <button key={v.id} onClick={() => selectVariant(v)}
+                      className="w-full text-right p-3 bg-gray-50 rounded-lg hover:bg-orange-50 hover:border-orange-300 border border-gray-200 transition">
+                      <div className="font-medium text-sm">{shortLabel || dl}</div>
+                      <div className="text-xs text-gray-500 mt-1">موجودی: {toPersianDigits(Math.round(v.qty_available || 0))}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
           </>
         )}
       </div>
