@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { getPartners, createPartner, updatePartner, createSellerUser, searchRead, unlink } from '@/lib/odoo-api';
 import { toPersianDigits } from '@/lib/utils';
 
@@ -33,6 +34,7 @@ interface PartnerForm {
 }
 
 export default function PeoplePage() {
+  const router = useRouter();
   const [partners, setPartners] = useState<Partner[]>([]);
   const [sellers, setSellers] = useState<SellerUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -259,13 +261,18 @@ export default function PeoplePage() {
           {filtered.map((partner) => (
             <div key={partner.id} className="bg-white rounded-xl p-4 border border-gray-100 hover:border-indigo-200 transition">
               <div className="flex justify-between items-start">
-                <div className="cursor-pointer flex-1" onClick={() => openEditForm(partner)}>
+                <div className="cursor-pointer flex-1" onClick={() => router.push(`/admin/people/${partner.id}`)}>
                   <div className="font-bold text-sm text-slate-800">{partner.name}</div>
                   <div className="text-xs text-gray-500 mt-1">
                     {partner.phone || partner.mobile || 'بدون شماره'}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openEditForm(partner); }}
+                    className="text-indigo-400 hover:text-indigo-600 text-xs"
+                    title="ویرایش"
+                  >✏️</button>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getRoleBadgeColor(partner)}`}>
                     {getRoleLabel(partner)}
                   </span>

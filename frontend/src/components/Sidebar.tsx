@@ -18,6 +18,7 @@ const menuItems = [
   { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️' },
   { href: '/admin/reports', label: 'گزارش‌ها', icon: '📈' },
   { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️' },
+  { href: '/admin/stock-count', label: 'انبارگردانی', icon: '📋' },
   { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️' },
 ];
 
