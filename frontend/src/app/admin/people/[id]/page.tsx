@@ -84,7 +84,6 @@ export default function PersonDetailPage() {
       // Load payments
       const pays = await searchRead('account.payment', [
         ['partner_id', '=', partnerId],
-        ['state', '=', 'posted'],
       ], ['name', 'date', 'payment_type', 'amount', 'journal_id', 'state'], 100, 0, 'date desc');
       setPayments(pays || []);
 
