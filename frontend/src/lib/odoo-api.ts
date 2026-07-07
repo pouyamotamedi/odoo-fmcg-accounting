@@ -179,6 +179,15 @@ export async function deleteProduct(id: number) {
   return write('product.product', [id], { active: false });
 }
 
+export async function deleteProductTemplate(id: number) {
+  // Deactivate all variants + the template itself
+  const variants = await searchRead('product.product', [['product_tmpl_id', '=', id]], ['id']);
+  if (variants && variants.length > 0) {
+    await write('product.product', variants.map((v: any) => v.id), { active: false });
+  }
+  return write('product.template', [id], { active: false });
+}
+
 // ============ Partners (People) ============
 
 export async function getPartners(role?: string) {

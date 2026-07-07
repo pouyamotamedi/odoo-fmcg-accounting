@@ -6,7 +6,8 @@ import {
   getCategories, createCategory, searchRead, getProductAttributes,
   getAttributeValues, createProductAttribute, createAttributeValue,
   getProductVariants, getTemplateAttributeLines, addAttributeToTemplate,
-  updateVariantBarcode,
+  updateVariantBarcode, deleteProductTemplate, write,
+  getDiscountCategories, getDiscountLines, setDiscountPrice,
 } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
@@ -78,6 +79,10 @@ export default function InventoryPage() {
   // Image upload
   const [imageFile, setImageFile] = useState<File | null>(null);
 
+  // Discount prices per category
+  const [discountCats, setDiscountCats] = useState<{id:number;name:string;is_fixed_percent:boolean}[]>([]);
+  const [discountPrices, setDiscountPrices] = useState<Record<number, string>>({});
+
   // Stock adjustment
   const [showAdjustment, setShowAdjustment] = useState(false);
   const [adjProductId, setAdjProductId] = useState(0);
@@ -88,10 +93,30 @@ export default function InventoryPage() {
   async function fetchTemplates() {
     setLoading(true);
     try {
-      const data = await searchRead('product.template', [['type', '=', 'consu']], [
-        'name', 'list_price', 'standard_price', 'categ_id', 'product_variant_count', 'image_128',
+      // Read product.product (same as POS/purchase) with active filter
+      // Then group by product_tmpl_id for display
+      const data = await searchRead('product.product', [['active', '=', true], ['type', '=', 'consu']], [
+        'name', 'product_tmpl_id', 'list_price', 'standard_price', 'categ_id', 'qty_available', 'image_128', 'barcode',
       ], 0, 0, 'name asc');
-      setTemplates(data || []);
+
+      // Group by template
+      const tmplMap = new Map<number, ProductTemplate>();
+      for (const p of (data || [])) {
+        const tmplId = p.product_tmpl_id?.[0] || p.product_tmpl_id;
+        if (!tmplMap.has(tmplId)) {
+          tmplMap.set(tmplId, {
+            id: tmplId,
+            name: p.product_tmpl_id?.[1] || p.name,
+            list_price: p.list_price,
+            standard_price: p.standard_price,
+            categ_id: p.categ_id || false,
+            product_variant_count: 0,
+            image_128: p.image_128 || false,
+          });
+        }
+        tmplMap.get(tmplId)!.product_variant_count++;
+      }
+      setTemplates(Array.from(tmplMap.values()));
       setError('');
     } catch (e: any) { setError(e.message || 'خطا'); }
     setLoading(false);
@@ -99,6 +124,7 @@ export default function InventoryPage() {
 
   async function fetchCategories() {
     try { const data = await getCategories(); setCategories(data || []); } catch {}
+    try { const dc = await getDiscountCategories(); setDiscountCats((dc||[]).filter((c:any) => !c.is_fixed_percent)); } catch {}
   }
 
   useEffect(() => { fetchTemplates(); fetchCategories(); }, []);
@@ -116,12 +142,34 @@ export default function InventoryPage() {
 
   function openNewForm() {
     setForm({ name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10', categ_id: 0 });
-    setEditingId(null); setImageFile(null); setShowForm(true);
+    setEditingId(null); setImageFile(null);
+    // Default discount prices = empty (will default to list_price)
+    setDiscountPrices({});
+    setShowForm(true);
   }
 
   function openEditForm(t: ProductTemplate) {
     setForm({ name: t.name, barcode: '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: '10', categ_id: t.categ_id ? t.categ_id[0] : 0 });
-    setEditingId(t.id); setImageFile(null); setShowForm(true);
+    setEditingId(t.id); setImageFile(null);
+    // Load existing discount prices for this product
+    loadDiscountPricesForTemplate(t.id);
+    setShowForm(true);
+  }
+
+  async function loadDiscountPricesForTemplate(tmplId: number) {
+    const prices: Record<number, string> = {};
+    // Find first variant of this template
+    const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id'], 1);
+    if (vars && vars.length > 0) {
+      const prodId = vars[0].id;
+      for (const cat of discountCats) {
+        const lines = await searchRead('fmcg.discount.line', [['category_id', '=', cat.id], ['product_id', '=', prodId]], ['discount_price'], 1);
+        if (lines && lines.length > 0) {
+          prices[cat.id] = String(lines[0].discount_price);
+        }
+      }
+    }
+    setDiscountPrices(prices);
   }
 
   async function handleSave() {
@@ -140,11 +188,28 @@ export default function InventoryPage() {
         values.image_1920 = base64;
       }
       if (editingId) {
-        await searchRead('product.template', [['id', '=', editingId]], ['id'], 1).then(() => {
-          return import('@/lib/odoo-api').then(api => api.write('product.template', [editingId], values));
-        });
+        await write('product.template', [editingId], values);
+        // Save discount prices
+        const vars = await searchRead('product.product', [['product_tmpl_id', '=', editingId], ['active', '=', true]], ['id'], 1);
+        if (vars && vars.length > 0) {
+          for (const cat of discountCats) {
+            const price = parseFloat(discountPrices[cat.id] || '');
+            if (price && price !== parseFloat(form.list_price)) {
+              await setDiscountPrice(cat.id, vars[0].id, price);
+            }
+          }
+        }
       } else {
-        await createProduct(values);
+        const newId = await createProduct(values);
+        // Save discount prices for new product
+        if (newId) {
+          for (const cat of discountCats) {
+            const price = parseFloat(discountPrices[cat.id] || '');
+            if (price && price !== parseFloat(form.list_price)) {
+              await setDiscountPrice(cat.id, newId, price);
+            }
+          }
+        }
       }
       setShowForm(false); await fetchTemplates();
     } catch (e: any) { alert(e.message || 'خطا'); }
@@ -165,7 +230,7 @@ export default function InventoryPage() {
 
   async function handleDelete(id: number) {
     if (!confirm('حذف این کالا؟')) return;
-    try { await deleteProduct(id); await fetchTemplates(); } catch (e: any) { alert(e.message || 'خطا'); }
+    try { await deleteProductTemplate(id); await fetchTemplates(); } catch (e: any) { alert(e.message || 'خطا'); }
   }
 
   async function handleAdjustment() {
@@ -366,6 +431,25 @@ export default function InventoryPage() {
                 <label className="block text-xs text-gray-500 mb-1">تصویر محصول</label>
                 <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="w-full text-sm" />
               </div>
+              {/* Discount prices */}
+              {discountCats.length > 0 && (
+                <div className="border-t pt-3 mt-3">
+                  <label className="block text-xs text-gray-500 mb-2">قیمت‌های تخفیفی (پیش‌فرض = قیمت فروش)</label>
+                  <div className="space-y-2">
+                    {discountCats.map((cat) => (
+                      <div key={cat.id} className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600 w-28 truncate">{cat.name}:</span>
+                        <PriceInput
+                          value={discountPrices[cat.id] || ''}
+                          onChange={(v) => setDiscountPrices({...discountPrices, [cat.id]: v})}
+                          placeholder={form.list_price || '= قیمت فروش'}
+                          className="flex-1 p-2 border border-gray-200 rounded-lg text-xs focus:border-indigo-400 focus:outline-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={handleSave} disabled={saving} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold hover:bg-indigo-600 disabled:opacity-50">{saving ? 'ذخیره...' : 'ذخیره'}</button>
@@ -457,6 +541,20 @@ export default function InventoryPage() {
               <button onClick={async () => { if (!newCategoryName) return; try { await createCategory(newCategoryName); setNewCategoryName(''); setShowCategoryForm(false); await fetchCategories(); } catch(e:any){alert(e.message||'خطا');} }} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold">ثبت</button>
               <button onClick={() => setShowCategoryForm(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">انصراف</button>
             </div>
+            {/* Category list with edit/delete */}
+            {categories.length > 0 && (
+              <div className="mt-4 border-t pt-3">
+                <div className="text-xs text-gray-500 mb-2">دسته‌بندی‌های موجود:</div>
+                <div className="space-y-1 max-h-40 overflow-auto">
+                  {categories.map((c) => (
+                    <div key={c.id} className="flex justify-between items-center py-1 px-2 rounded hover:bg-gray-50">
+                      <span className="text-xs">{c.name}</span>
+                      <button onClick={async () => { if(!confirm(`حذف دسته "${c.name}"?`)) return; try { await write('product.category', [c.id], {active: false}); await fetchCategories(); } catch(e:any){alert(e.message||'خطا');} }} className="text-xs text-red-400 hover:text-red-600">حذف</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
