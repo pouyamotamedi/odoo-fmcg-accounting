@@ -13,6 +13,7 @@ interface OdooProduct {
   barcode: string | false;
   list_price: number;
   qty_available: number;
+  image_128?: string | false;
 }
 
 export default function PosPage() {
@@ -408,6 +409,9 @@ export default function PosPage() {
                 onClick={() => addItem({ id: product.id, name: product.name, price: getEffectivePrice(product) })}
                 className="bg-white rounded-xl p-4 text-center border-2 border-transparent hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm"
               >
+                {product.image_128 && (
+                  <img src={`data:image/png;base64,${product.image_128}`} alt="" className="w-12 h-12 mx-auto rounded-lg object-cover mb-2" />
+                )}
                 <div className="text-sm font-medium text-gray-800">{product.name}</div>
                 <div className="text-sm text-green-600 font-bold mt-2">
                   {formatPrice(getEffectivePrice(product))}

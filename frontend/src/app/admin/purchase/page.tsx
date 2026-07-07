@@ -425,12 +425,15 @@ export default function PurchasePage() {
             <div className="text-center py-12 text-gray-400">در حال بارگذاری...</div>
           ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {filteredProducts.map((product) => (
+            {filteredProducts.map((product: any) => (
               <div key={product.id} className="bg-white rounded-xl p-4 text-center border-2 border-transparent hover:border-orange-400 transition-all shadow-sm relative">
                 <button
                   onClick={() => addItem({ id: product.id, name: product.name, price: product.standard_price })}
                   className="w-full"
                 >
+                  {product.image_128 && (
+                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="w-10 h-10 mx-auto rounded-lg object-cover mb-1" />
+                  )}
                   <div className="text-sm font-medium text-gray-800">{product.name}</div>
                   <div className="text-xs text-orange-600 font-bold mt-2">
                     خرید: {formatPrice(product.standard_price)}
