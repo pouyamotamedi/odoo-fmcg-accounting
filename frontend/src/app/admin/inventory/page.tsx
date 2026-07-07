@@ -278,7 +278,24 @@ export default function InventoryPage() {
     if (!selectedAttr || selectedValues.length === 0) { alert('ویژگی و مقادیر را انتخاب کنید'); return; }
     setSaving(true);
     try {
-      await addAttributeToTemplate(attrTemplateId, selectedAttr, selectedValues);
+      // Check if this attribute already exists on the template - if so, add values to existing line
+      const existingLines = await searchRead('product.template.attribute.line', [
+        ['product_tmpl_id', '=', attrTemplateId],
+        ['attribute_id', '=', selectedAttr],
+      ], ['id', 'value_ids'], 1);
+
+      if (existingLines && existingLines.length > 0) {
+        // Merge new values with existing
+        const existingValueIds = existingLines[0].value_ids || [];
+        const mergedValues = [...new Set([...existingValueIds, ...selectedValues])];
+        await write('product.template.attribute.line', [existingLines[0].id], {
+          value_ids: [[6, 0, mergedValues]],
+        });
+      } else {
+        // Create new attribute line
+        await addAttributeToTemplate(attrTemplateId, selectedAttr, selectedValues);
+      }
+
       setShowAttrForm(false); await fetchTemplates();
       if (expandedId === attrTemplateId) { const vars = await getProductVariants(attrTemplateId); setVariants(vars || []); }
     } catch (e: any) { alert(e.message || 'خطا'); }
