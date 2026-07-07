@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import Link from 'next/link';
 
@@ -42,6 +42,7 @@ export default function PosPage() {
   const [discountCategories, setDiscountCategories] = useState<{id:number;name:string}[]>([]);
   const [activeDiscount, setActiveDiscount] = useState<number>(0);
   const [discountPrices, setDiscountPrices] = useState<Map<number, number>>(new Map());
+  const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -148,6 +149,53 @@ export default function PosPage() {
   const filteredProducts = products.filter(
     (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
   );
+
+  // Group products by template for display (show templates, not individual variants)
+  const displayProducts = (() => {
+    const tmplMap = new Map<number, OdooProduct & {variantCount: number}>();
+    for (const p of filteredProducts) {
+      const tmplId = (p as any).product_tmpl_id?.[0] || (p as any).product_tmpl_id || p.id;
+      if (!tmplMap.has(tmplId)) {
+        tmplMap.set(tmplId, { ...p, variantCount: 0 });
+      }
+      tmplMap.get(tmplId)!.variantCount++;
+    }
+    return Array.from(tmplMap.values());
+  })();
+
+  // If searching by barcode, check for exact barcode match -> add directly
+  useEffect(() => {
+    if (search.length >= 8) {
+      const match = products.find((p) => p.barcode === search);
+      if (match) {
+        addItem({ id: match.id, name: match.name, price: getEffectivePrice(match) });
+        setSearch('');
+      }
+    }
+  }, [search]);
+
+  async function handleProductClick(product: OdooProduct & {variantCount?: number}) {
+    const tmplId = (product as any).product_tmpl_id?.[0] || (product as any).product_tmpl_id;
+    if (product.variantCount && product.variantCount > 1 && tmplId) {
+      // Has variants - show popup
+      const vars = await getProductVariants(tmplId);
+      if (vars && vars.length > 1) {
+        setVariantPopup({ tmplId, name: product.name, variants: vars });
+        return;
+      }
+    }
+    // Single variant or no variants - add directly
+    addItem({ id: product.id, name: product.name, price: getEffectivePrice(product) });
+  }
+
+  function selectVariant(variant: any) {
+    const price = activeDiscount && discountPrices.has(variant.id) ? discountPrices.get(variant.id)! : variant.list_price;
+    // Extract short name for display
+    const tmplName = variantPopup?.name || '';
+    const shortName = variant.display_name || variant.name;
+    addItem({ id: variant.id, name: shortName, price });
+    setVariantPopup(null);
+  }
 
   const cartTotal = total();
 
@@ -403,20 +451,31 @@ export default function PosPage() {
             <div className="text-center py-12 text-gray-400">در حال بارگذاری محصولات...</div>
           ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {filteredProducts.map((product) => (
+            {displayProducts.map((product) => (
               <button
                 key={product.id}
-                onClick={() => addItem({ id: product.id, name: product.name, price: getEffectivePrice(product) })}
-                className="bg-white rounded-xl p-4 text-center border-2 border-transparent hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm"
+                onClick={() => handleProductClick(product)}
+                className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square"
               >
-                {product.image_128 && (
-                  <img src={`data:image/png;base64,${product.image_128}`} alt="" className="w-12 h-12 mx-auto rounded-lg object-cover mb-2" />
+                {/* Background image or placeholder */}
+                {product.image_128 ? (
+                  <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                ) : (
+                  <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                    <span className="text-3xl opacity-30">📦</span>
+                  </div>
                 )}
-                <div className="text-sm font-medium text-gray-800">{product.name}</div>
-                <div className="text-sm text-green-600 font-bold mt-2">
-                  {formatPrice(getEffectivePrice(product))}
+                {/* Overlay with name - hidden on hover */}
+                <div className="absolute inset-0 bg-black/40 group-hover:bg-black/10 transition-all flex flex-col items-center justify-center p-2">
+                  <div className="text-white text-xs font-bold text-center group-hover:opacity-0 transition-opacity leading-tight">{product.name}</div>
+                  {(product as any).variantCount > 1 && (
+                    <div className="text-purple-200 text-[10px] mt-1 group-hover:opacity-0 transition-opacity">{toPersianDigits((product as any).variantCount)} نوع</div>
+                  )}
+                  <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded group-hover:opacity-0 transition-opacity">
+                    {formatPrice(getEffectivePrice(product))}
+                  </div>
                   {activeDiscount && discountPrices.has(product.id) && (
-                    <span className="text-xs text-gray-400 line-through mr-1">{formatPrice(product.list_price)}</span>
+                    <span className="text-[10px] text-gray-300 line-through group-hover:opacity-0 transition-opacity">{formatPrice(product.list_price)}</span>
                   )}
                 </div>
               </button>
@@ -651,6 +710,40 @@ export default function PosPage() {
                 </React.Fragment>))}</tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Variant Selection Popup */}
+      {variantPopup && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">{variantPopup.name}</h3>
+              <button onClick={() => setVariantPopup(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">کدام نوع را انتخاب می‌کنید؟</p>
+            <div className="space-y-2 max-h-60 overflow-auto">
+              {variantPopup.variants.map((v: any) => {
+                const tmplName = variantPopup.name;
+                const displayLabel = (v.display_name || v.name);
+                const shortLabel = displayLabel.startsWith(tmplName) && displayLabel.length > tmplName.length
+                  ? displayLabel.slice(tmplName.length).replace(/^\s*[\(\[,]\s*/, '').replace(/[\)\]]\s*$/, '')
+                  : displayLabel;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => selectVariant(v)}
+                    className="w-full text-right p-3 bg-gray-50 rounded-lg hover:bg-indigo-50 hover:border-indigo-300 border border-gray-200 transition"
+                  >
+                    <div className="font-medium text-sm">{shortLabel || displayLabel}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      موجودی: {toPersianDigits(Math.round(v.qty_available))} | {v.barcode || 'بدون بارکد'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

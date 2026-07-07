@@ -364,9 +364,17 @@ export default function InventoryPage() {
                         <th className="text-right p-2">عملیات</th>
                       </tr></thead>
                       <tbody>
-                        {variants.map((v) => (
+                        {variants.map((v: any) => {
+                          // Extract variant attribute info from display_name or combination_indices
+                          const variantLabel = v.display_name || v.name;
+                          // Try to show only the variant-specific part (after template name)
+                          const templateName = t.name;
+                          const shortLabel = variantLabel.startsWith(templateName) && variantLabel.length > templateName.length
+                            ? variantLabel.slice(templateName.length).replace(/^\s*[\(\[,]\s*/, '').replace(/[\)\]]\s*$/, '')
+                            : variantLabel;
+                          return (
                           <tr key={v.id} className="border-t border-gray-200">
-                            <td className="p-2 font-medium">{v.name}</td>
+                            <td className="p-2 font-medium">{shortLabel || variantLabel}</td>
                             <td className="p-2">
                               {editingBarcode === v.id ? (
                                 <div className="flex gap-1">
@@ -381,11 +389,13 @@ export default function InventoryPage() {
                               )}
                             </td>
                             <td className="p-2 font-bold">{toPersianDigits(Math.round(v.qty_available))}</td>
-                            <td className="p-2">
+                            <td className="p-2 flex gap-2">
                               <button onClick={() => { setAdjProductId(v.id); setAdjQty(''); setAdjNote(''); setShowAdjustment(true); }} className="text-orange-600 hover:text-orange-800">تعدیل</button>
+                              <button onClick={async () => { if(!confirm('حذف این واریانت؟')) return; try { await write('product.product', [v.id], {active: false}); await toggleExpand(t.id); await fetchTemplates(); } catch(e:any){alert(e.message||'خطا');} }} className="text-red-500 hover:text-red-700">حذف</button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   )}
@@ -549,7 +559,10 @@ export default function InventoryPage() {
                   {categories.map((c) => (
                     <div key={c.id} className="flex justify-between items-center py-1 px-2 rounded hover:bg-gray-50">
                       <span className="text-xs">{c.name}</span>
-                      <button onClick={async () => { if(!confirm(`حذف دسته "${c.name}"?`)) return; try { await write('product.category', [c.id], {active: false}); await fetchCategories(); } catch(e:any){alert(e.message||'خطا');} }} className="text-xs text-red-400 hover:text-red-600">حذف</button>
+                      <div className="flex gap-2">
+                        <button onClick={async () => { const newName = prompt('نام جدید:', c.name); if(!newName) return; try { await write('product.category', [c.id], {name: newName}); await fetchCategories(); } catch(e:any){alert(e.message||'خطا');} }} className="text-xs text-blue-400 hover:text-blue-600">✏️</button>
+                        <button onClick={async () => { if(!confirm(`حذف دسته "${c.name}"?`)) return; try { await write('product.category', [c.id], {active: false}); await fetchCategories(); } catch(e:any){alert(e.message||'خطا');} }} className="text-xs text-red-400 hover:text-red-600">🗑️</button>
+                      </div>
                     </div>
                   ))}
                 </div>

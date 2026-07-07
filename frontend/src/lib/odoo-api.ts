@@ -133,14 +133,14 @@ export async function getProducts(limit?: number) {
     return await searchRead(
       'product.product',
       [['active', '=', true], ['type', '=', 'consu']],
-      ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'fmcg_is_low_stock', 'image_128'],
+      ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'fmcg_is_low_stock', 'image_128', 'product_tmpl_id'],
       limit
     );
   } catch {
     return await searchRead(
       'product.product',
       [['active', '=', true], ['type', '=', 'consu']],
-      ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'image_128'],
+      ['name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'image_128', 'product_tmpl_id'],
       limit
     );
   }
@@ -1079,10 +1079,10 @@ export async function createAttributeValue(attributeId: number, name: string) {
  * Get variants (product.product) for a product template
  */
 export async function getProductVariants(templateId: number) {
-  return searchRead('product.product', [['product_tmpl_id', '=', templateId]], [
+  return searchRead('product.product', [['product_tmpl_id', '=', templateId], ['active', '=', true]], [
     'name', 'barcode', 'list_price', 'standard_price', 'qty_available',
-    'product_template_variant_value_ids', 'combination_indices',
-  ], 0, 0, 'name asc');
+    'product_template_variant_value_ids', 'combination_indices', 'display_name',
+  ], 0, 0, 'id asc');
 }
 
 /**
