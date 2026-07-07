@@ -431,8 +431,8 @@ export default function PurchasePage() {
                   onClick={() => addItem({ id: product.id, name: product.name, price: product.standard_price })}
                   className="w-full h-full"
                 >
-                  {product.image_128 ? (
-                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  {product.image_512 ? (
+                    <img src={`data:image/png;base64,${product.image_512}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
                       <span className="text-3xl opacity-30">📦</span>

@@ -19,7 +19,7 @@ interface ProductTemplate {
   standard_price: number;
   categ_id: [number, string] | false;
   product_variant_count: number;
-  image_128: string | false;
+  image_512: string | false;
 }
 
 interface Variant {
@@ -71,7 +71,7 @@ export default function InventoryPage() {
   const [selectedValues, setSelectedValues] = useState<number[]>([]);
   const [newAttrName, setNewAttrName] = useState('');
   const [newValueName, setNewValueName] = useState('');
-
+  const [currentAttrLines, setCurrentAttrLines] = useState<any[]>([]);
   // Barcode editing
   const [editingBarcode, setEditingBarcode] = useState<number | null>(null);
   const [barcodeValue, setBarcodeValue] = useState('');
@@ -93,30 +93,19 @@ export default function InventoryPage() {
   async function fetchTemplates() {
     setLoading(true);
     try {
-      // Read product.product (same as POS/purchase) with active filter
-      // Then group by product_tmpl_id for display
-      const data = await searchRead('product.product', [['active', '=', true], ['type', '=', 'consu']], [
-        'name', 'product_tmpl_id', 'list_price', 'standard_price', 'categ_id', 'qty_available', 'image_128', 'barcode',
+      // Read templates directly for accurate standard_price
+      const tmpls = await searchRead('product.template', [['type', '=', 'consu'], ['active', '=', true]], [
+        'name', 'list_price', 'standard_price', 'categ_id', 'product_variant_count', 'image_512',
       ], 0, 0, 'name asc');
-
-      // Group by template
-      const tmplMap = new Map<number, ProductTemplate>();
-      for (const p of (data || [])) {
-        const tmplId = p.product_tmpl_id?.[0] || p.product_tmpl_id;
-        if (!tmplMap.has(tmplId)) {
-          tmplMap.set(tmplId, {
-            id: tmplId,
-            name: p.product_tmpl_id?.[1] || p.name,
-            list_price: p.list_price,
-            standard_price: p.standard_price,
-            categ_id: p.categ_id || false,
-            product_variant_count: 0,
-            image_128: p.image_128 || false,
-          });
-        }
-        tmplMap.get(tmplId)!.product_variant_count++;
-      }
-      setTemplates(Array.from(tmplMap.values()));
+      setTemplates((tmpls || []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        list_price: t.list_price,
+        standard_price: t.standard_price,
+        categ_id: t.categ_id || false,
+        product_variant_count: t.product_variant_count || 1,
+        image_512: t.image_512 || false,
+      })));
       setError('');
     } catch (e: any) { setError(e.message || 'خطا'); }
     setLoading(false);
@@ -247,6 +236,17 @@ export default function InventoryPage() {
   async function openAttrForm(tmplId: number) {
     setAttrTemplateId(tmplId); setSelectedAttr(0); setSelectedValues([]); setNewAttrName(''); setNewValueName('');
     try { const attrs = await getProductAttributes(); setAttributes(attrs || []); } catch {}
+    // Load current attribute lines for this template
+    try {
+      const lines = await searchRead('product.template.attribute.line', [['product_tmpl_id', '=', tmplId]], ['attribute_id', 'value_ids']);
+      // Resolve value names
+      const resolvedLines = [];
+      for (const line of (lines || [])) {
+        const vals = await searchRead('product.attribute.value', [['id', 'in', line.value_ids]], ['name']);
+        resolvedLines.push({ ...line, value_names: (vals || []).map((v: any) => v.name), line_id: line.id });
+      }
+      setCurrentAttrLines(resolvedLines);
+    } catch { setCurrentAttrLines([]); }
     setShowAttrForm(true);
   }
 
@@ -331,7 +331,7 @@ export default function InventoryPage() {
               <div className="flex items-center p-3 cursor-pointer hover:bg-gray-50" onClick={() => toggleExpand(t.id)}>
                 {/* Image */}
                 <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden ml-3 flex-shrink-0">
-                  {imgUrl(t.image_128) ? <img src={imgUrl(t.image_128)!} alt="" className="w-full h-full object-cover" /> : <span className="text-lg">📦</span>}
+                  {imgUrl(t.image_512) ? <img src={imgUrl(t.image_512)!} alt="" className="w-full h-full object-cover" /> : <span className="text-lg">📦</span>}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm text-slate-800 truncate">{t.name}</div>
@@ -350,7 +350,11 @@ export default function InventoryPage() {
               {/* Expanded variants */}
               {expandedId === t.id && (
                 <div className="border-t bg-gray-50 p-3">
-                  {variantsLoading ? <div className="text-center text-gray-400 text-sm py-3">بارگذاری...</div> : variants.length <= 1 ? (
+                  {variantsLoading ? <div className="text-center text-gray-400 text-sm py-3">بارگذاری...</div> : variants.length === 0 ? (
+                    <div className="text-center text-gray-400 text-sm py-3">
+                      <p>واریانتی ایجاد نشده. با دکمه 🏷️ ویژگی اضافه کنید.</p>
+                    </div>
+                  ) : variants.length === 1 && t.product_variant_count <= 1 ? (
                     <div className="text-center text-gray-400 text-sm py-3">
                       <p>واریانتی ایجاد نشده. با دکمه 🏷️ ویژگی اضافه کنید.</p>
                       <p className="text-xs mt-1">موجودی: {toPersianDigits(Math.round(variants[0]?.qty_available || 0))}</p>
@@ -472,13 +476,45 @@ export default function InventoryPage() {
       {/* Attribute Form Modal */}
       {showAttrForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl">
-            <h3 className="text-lg font-bold mb-4">افزودن ویژگی (ایجاد واریانت)</h3>
-            <div className="space-y-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[85vh] overflow-auto">
+            <h3 className="text-lg font-bold mb-4">مدیریت ویژگی‌های محصول</h3>
+
+            {/* Current attributes */}
+            {currentAttrLines.length > 0 && (
+              <div className="mb-4">
+                <label className="block text-xs text-gray-500 mb-2">ویژگی‌های فعلی:</label>
+                <div className="space-y-2">
+                  {currentAttrLines.map((line: any) => (
+                    <div key={line.line_id || line.id} className="flex justify-between items-center bg-gray-50 rounded-lg p-3 border">
+                      <div>
+                        <span className="text-sm font-bold text-slate-700">{line.attribute_id?.[1] || 'ویژگی'}</span>
+                        <span className="text-xs text-gray-500 mr-2">({(line.value_names || []).join('، ')})</span>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!confirm('حذف این ویژگی و واریانت‌های مربوطه؟')) return;
+                          try {
+                            const { unlink } = await import('@/lib/odoo-api');
+                            await unlink('product.template.attribute.line', [line.line_id || line.id]);
+                            await openAttrForm(attrTemplateId);
+                            await fetchTemplates();
+                            if (expandedId === attrTemplateId) { const vars = await getProductVariants(attrTemplateId); setVariants(vars || []); }
+                          } catch (e: any) { alert(e.message || 'خطا در حذف'); }
+                        }}
+                        className="text-xs text-red-500 hover:text-red-700 font-bold"
+                      >🗑️ حذف</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Add new attribute */}
+            <div className="border-t pt-4 space-y-4">
+              <label className="block text-xs text-gray-500 font-bold">افزودن ویژگی جدید:</label>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">ویژگی</label>
                 <select value={selectedAttr} onChange={(e) => handleAttrSelect(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
-                  <option value={0}>— انتخاب —</option>
+                  <option value={0}>— انتخاب ویژگی —</option>
                   {attributes.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
                 <div className="flex gap-2 mt-2">
@@ -488,7 +524,7 @@ export default function InventoryPage() {
               </div>
               {selectedAttr > 0 && (
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">مقادیر</label>
+                  <label className="block text-xs text-gray-500 mb-1">مقادیر (انتخاب کنید):</label>
                   <div className="flex flex-wrap gap-2 mb-2 max-h-32 overflow-auto">
                     {attrValues.map((v) => (
                       <button key={v.id} onClick={() => setSelectedValues((p) => p.includes(v.id) ? p.filter(x=>x!==v.id) : [...p, v.id])}
@@ -504,9 +540,10 @@ export default function InventoryPage() {
                 </div>
               )}
             </div>
+
             <div className="flex gap-3 mt-5">
-              <button onClick={handleAddAttr} disabled={saving||!selectedAttr||selectedValues.length===0} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-40">{saving?'ذخیره...':'ثبت و ایجاد واریانت‌ها'}</button>
-              <button onClick={() => setShowAttrForm(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">انصراف</button>
+              <button onClick={handleAddAttr} disabled={saving||!selectedAttr||selectedValues.length===0} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-40">{saving?'ذخیره...':'ثبت ویژگی جدید'}</button>
+              <button onClick={() => setShowAttrForm(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">بستن</button>
             </div>
           </div>
         </div>
