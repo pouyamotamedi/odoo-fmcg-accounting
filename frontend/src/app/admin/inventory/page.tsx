@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { getProducts, createProduct, updateProduct, deleteProduct, createStockAdjustment, getCategories, createCategory, searchRead } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
@@ -39,6 +40,7 @@ interface AdjustmentForm {
 }
 
 export default function InventoryPage() {
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -253,7 +255,9 @@ export default function InventoryPage() {
                   className={`border-b border-gray-50 hover:bg-gray-50 ${product.fmcg_is_low_stock ? 'bg-red-50' : ''}`}
                 >
                   <td className="p-3 font-medium">
-                    {product.name}
+                    <span className="cursor-pointer hover:text-indigo-600" onClick={() => router.push(`/admin/inventory/${product.id}`)}>
+                      {product.name}
+                    </span>
                     {product.fmcg_is_low_stock && (
                       <span className="mr-2 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">کمبود</span>
                     )}
