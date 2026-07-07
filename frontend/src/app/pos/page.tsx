@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import Link from 'next/link';
 
@@ -38,6 +38,9 @@ export default function PosPage() {
   const [expandedSale, setExpandedSale] = useState<number | null>(null);
   const [saleLines, setSaleLines] = useState<any[]>([]);
   const [posJournals, setPosJournals] = useState<{id:number;name:string;type:string}[]>([]);
+  const [discountCategories, setDiscountCategories] = useState<{id:number;name:string}[]>([]);
+  const [activeDiscount, setActiveDiscount] = useState<number>(0);
+  const [discountPrices, setDiscountPrices] = useState<Map<number, number>>(new Map());
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -104,14 +107,42 @@ export default function PosPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [data, jrnls] = await Promise.all([getProducts(), getBankCashBalances()]);
+        const [data, jrnls, discCats] = await Promise.all([getProducts(), getBankCashBalances(), getDiscountCategories()]);
         setProducts(data || []);
         setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
+        setDiscountCategories(discCats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
       } catch { setProducts([]); }
       setLoading(false);
     }
     load();
   }, []);
+
+  // Load discount prices when discount category changes
+  async function handleDiscountChange(catId: number) {
+    setActiveDiscount(catId);
+    if (catId === 0) {
+      setDiscountPrices(new Map());
+      return;
+    }
+    try {
+      const prods = await getProductsWithDiscount(catId);
+      const priceMap = new Map<number, number>();
+      for (const p of (prods || [])) {
+        if (p.discount_price !== p.list_price) {
+          priceMap.set(p.id, p.discount_price);
+        }
+      }
+      setDiscountPrices(priceMap);
+    } catch { setDiscountPrices(new Map()); }
+  }
+
+  // Get effective price for a product (considering active discount)
+  function getEffectivePrice(product: OdooProduct): number {
+    if (activeDiscount && discountPrices.has(product.id)) {
+      return discountPrices.get(product.id)!;
+    }
+    return product.list_price;
+  }
 
   const filteredProducts = products.filter(
     (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
@@ -343,6 +374,26 @@ export default function PosPage() {
             className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
             autoFocus
           />
+          {/* Discount category selector */}
+          {discountCategories.length > 0 && (
+            <div className="flex gap-2 mt-2 flex-wrap">
+              <button
+                onClick={() => handleDiscountChange(0)}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${activeDiscount === 0 ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                قیمت عادی
+              </button>
+              {discountCategories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => handleDiscountChange(cat.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${activeDiscount === cat.id ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}
+                >
+                  🏷️ {cat.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Product Grid */}
@@ -354,12 +405,15 @@ export default function PosPage() {
             {filteredProducts.map((product) => (
               <button
                 key={product.id}
-                onClick={() => addItem({ id: product.id, name: product.name, price: product.list_price })}
+                onClick={() => addItem({ id: product.id, name: product.name, price: getEffectivePrice(product) })}
                 className="bg-white rounded-xl p-4 text-center border-2 border-transparent hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm"
               >
                 <div className="text-sm font-medium text-gray-800">{product.name}</div>
                 <div className="text-sm text-green-600 font-bold mt-2">
-                  {formatPrice(product.list_price)}
+                  {formatPrice(getEffectivePrice(product))}
+                  {activeDiscount && discountPrices.has(product.id) && (
+                    <span className="text-xs text-gray-400 line-through mr-1">{formatPrice(product.list_price)}</span>
+                  )}
                 </div>
               </button>
             ))}

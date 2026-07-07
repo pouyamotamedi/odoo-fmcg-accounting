@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_fmcg_discount_category_user,fmcg.discount.category.user,model_fmcg_discount_category,base.group_user,1,1,1,1
+access_fmcg_discount_line_user,fmcg.discount.line.user,model_fmcg_discount_line,base.group_user,1,1,1,1

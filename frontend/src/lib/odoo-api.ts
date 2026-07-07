@@ -979,33 +979,6 @@ export async function createCategory(name: string, parent_id?: number) {
   return create('product.category', { name, parent_id: parent_id || false });
 }
 
-// ============ Product Variants (Attributes) ============
-
-export async function getProductAttributes() {
-  return searchRead('product.attribute', [], ['name'], 0, 0, 'name asc');
-}
-
-export async function createProductAttribute(name: string) {
-  return create('product.attribute', { name });
-}
-
-export async function getProductAttributeValues(attributeId: number) {
-  return searchRead('product.attribute.value', [['attribute_id', '=', attributeId]], ['name', 'attribute_id']);
-}
-
-export async function addAttributeToProduct(productTmplId: number, attributeId: number, valueIds: number[]) {
-  // Add attribute line to product template
-  return create('product.template.attribute.line', {
-    product_tmpl_id: productTmplId,
-    attribute_id: attributeId,
-    value_ids: [[6, 0, valueIds]],
-  });
-}
-
-export async function getProductVariants(productTmplId: number) {
-  return searchRead('product.product', [['product_tmpl_id', '=', productTmplId]], ['name', 'barcode', 'product_template_variant_value_ids', 'list_price', 'qty_available']);
-}
-
 // ============ Chart of Accounts ============
 
 export async function getAccounts(accountTypes?: string[]) {
@@ -1061,4 +1034,201 @@ export async function getTodaySales() {
   );
   const totalAmount = sales?.reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0) || 0;
   return { totalAmount, count: sales?.length || 0 };
+}
+
+// ============ Product Variants (Attributes) ============
+
+/**
+ * Get all product attributes (e.g., "طعم", "رنگ", "سایز")
+ */
+export async function getProductAttributes() {
+  return searchRead('product.attribute', [], ['name', 'display_type', 'create_variant'], 0, 0, 'name asc');
+}
+
+/**
+ * Get attribute values for a specific attribute
+ */
+export async function getAttributeValues(attributeId: number) {
+  return searchRead('product.attribute.value', [['attribute_id', '=', attributeId]], ['name', 'attribute_id', 'sequence'], 0, 0, 'sequence asc');
+}
+
+/**
+ * Create a new product attribute (e.g., "طعم")
+ */
+export async function createProductAttribute(name: string) {
+  return create('product.attribute', { name, create_variant: 'always' });
+}
+
+/**
+ * Create a new attribute value (e.g., "هلو" for attribute "طعم")
+ */
+export async function createAttributeValue(attributeId: number, name: string) {
+  return create('product.attribute.value', { attribute_id: attributeId, name });
+}
+
+/**
+ * Get variants (product.product) for a product template
+ */
+export async function getProductVariants(templateId: number) {
+  return searchRead('product.product', [['product_tmpl_id', '=', templateId]], [
+    'name', 'barcode', 'list_price', 'standard_price', 'qty_available',
+    'product_template_variant_value_ids', 'combination_indices',
+  ], 0, 0, 'name asc');
+}
+
+/**
+ * Get attribute lines for a product template (which attributes are assigned)
+ */
+export async function getTemplateAttributeLines(templateId: number) {
+  return searchRead('product.template.attribute.line', [['product_tmpl_id', '=', templateId]], [
+    'attribute_id', 'value_ids',
+  ]);
+}
+
+/**
+ * Add attribute values to a product template (creates variants)
+ * This adds an attribute line with specific values to a template.
+ */
+export async function addAttributeToTemplate(templateId: number, attributeId: number, valueIds: number[]) {
+  return create('product.template.attribute.line', {
+    product_tmpl_id: templateId,
+    attribute_id: attributeId,
+    value_ids: [[6, 0, valueIds]],
+  });
+}
+
+/**
+ * Update barcode for a specific variant
+ */
+export async function updateVariantBarcode(variantId: number, barcode: string) {
+  return write('product.product', [variantId], { barcode: barcode || false });
+}
+
+/**
+ * Get product template ID from product.product ID
+ */
+export async function getProductTemplate(productId: number) {
+  const result = await searchRead('product.product', [['id', '=', productId]], ['product_tmpl_id'], 1);
+  if (result && result.length > 0) return result[0].product_tmpl_id;
+  return null;
+}
+
+// ============ Discount Categories ============
+
+/**
+ * Get all discount categories
+ */
+export async function getDiscountCategories() {
+  try {
+    return await searchRead('fmcg.discount.category', [['active', '=', true]], [
+      'name', 'code', 'is_fixed_percent', 'fixed_percent', 'note', 'sequence',
+    ], 0, 0, 'sequence asc');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Create a discount category
+ */
+export async function createDiscountCategory(values: {
+  name: string;
+  code?: string;
+  is_fixed_percent: boolean;
+  fixed_percent?: number;
+  note?: string;
+}) {
+  return create('fmcg.discount.category', {
+    name: values.name,
+    code: values.code || false,
+    is_fixed_percent: values.is_fixed_percent,
+    fixed_percent: values.fixed_percent || 0,
+    note: values.note || false,
+  });
+}
+
+/**
+ * Update a discount category
+ */
+export async function updateDiscountCategory(id: number, values: Record<string, any>) {
+  return write('fmcg.discount.category', [id], values);
+}
+
+/**
+ * Delete a discount category (deactivate)
+ */
+export async function deleteDiscountCategory(id: number) {
+  return write('fmcg.discount.category', [id], { active: false });
+}
+
+/**
+ * Get discount lines for a category (per-product prices)
+ */
+export async function getDiscountLines(categoryId: number) {
+  try {
+    return await searchRead('fmcg.discount.line', [['category_id', '=', categoryId]], [
+      'product_id', 'product_list_price', 'discount_price',
+    ]);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Set discount price for a product in a category
+ */
+export async function setDiscountPrice(categoryId: number, productId: number, discountPrice: number) {
+  // Check if line exists
+  const existing = await searchRead('fmcg.discount.line', [
+    ['category_id', '=', categoryId],
+    ['product_id', '=', productId],
+  ], ['id'], 1);
+  if (existing && existing.length > 0) {
+    return write('fmcg.discount.line', [existing[0].id], { discount_price: discountPrice });
+  }
+  return create('fmcg.discount.line', {
+    category_id: categoryId,
+    product_id: productId,
+    discount_price: discountPrice,
+  });
+}
+
+/**
+ * Remove discount price for a product in a category
+ */
+export async function removeDiscountPrice(categoryId: number, productId: number) {
+  const existing = await searchRead('fmcg.discount.line', [
+    ['category_id', '=', categoryId],
+    ['product_id', '=', productId],
+  ], ['id'], 1);
+  if (existing && existing.length > 0) {
+    return unlink('fmcg.discount.line', [existing[0].id]);
+  }
+}
+
+/**
+ * Get all products with their discount prices for a specific category
+ * Returns products with adjusted prices based on discount category rules
+ */
+export async function getProductsWithDiscount(categoryId: number) {
+  const [products, category, lines] = await Promise.all([
+    getProducts(),
+    searchRead('fmcg.discount.category', [['id', '=', categoryId]], ['is_fixed_percent', 'fixed_percent'], 1),
+    getDiscountLines(categoryId),
+  ]);
+
+  if (!products || !category || category.length === 0) return products;
+
+  const cat = category[0];
+  const lineMap = new Map((lines || []).map((l: any) => [l.product_id[0] || l.product_id, l.discount_price]));
+
+  return products.map((p: any) => {
+    let discountPrice = p.list_price;
+    if (cat.is_fixed_percent && cat.fixed_percent > 0) {
+      discountPrice = p.list_price * (1 - cat.fixed_percent / 100);
+    } else if (lineMap.has(p.id)) {
+      discountPrice = lineMap.get(p.id)!;
+    }
+    return { ...p, discount_price: discountPrice };
+  });
 }
