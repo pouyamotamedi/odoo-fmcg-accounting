@@ -369,12 +369,7 @@ export default function InventoryPage() {
                 <div className="border-t bg-gray-50 p-3">
                   {variantsLoading ? <div className="text-center text-gray-400 text-sm py-3">بارگذاری...</div> : variants.length === 0 ? (
                     <div className="text-center text-gray-400 text-sm py-3">
-                      <p>واریانتی ایجاد نشده. با دکمه 🏷️ ویژگی اضافه کنید.</p>
-                    </div>
-                  ) : variants.length === 1 && t.product_variant_count <= 1 ? (
-                    <div className="text-center text-gray-400 text-sm py-3">
-                      <p>واریانتی ایجاد نشده. با دکمه 🏷️ ویژگی اضافه کنید.</p>
-                      <p className="text-xs mt-1">موجودی: {toPersianDigits(Math.round(variants[0]?.qty_available || 0))}</p>
+                      <p>واریانتی یافت نشد.</p>
                     </div>
                   ) : (
                     <table className="w-full text-xs">
@@ -534,6 +529,20 @@ export default function InventoryPage() {
                   <option value={0}>— انتخاب ویژگی —</option>
                   {attributes.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
+                {selectedAttr > 0 && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm('حذف این ویژگی از کل سیستم؟ (فقط اگر در هیچ محصولی استفاده نشده)')) return;
+                      try {
+                        const { unlink } = await import('@/lib/odoo-api');
+                        await unlink('product.attribute', [selectedAttr]);
+                        setSelectedAttr(0);
+                        const attrs = await getProductAttributes(); setAttributes(attrs || []);
+                      } catch (e: any) { alert(e.message || 'خطا - احتمالاً در محصولی استفاده شده'); }
+                    }}
+                    className="text-xs text-red-500 hover:text-red-700 mt-1 inline-block"
+                  >🗑️ حذف ویژگی «{attributes.find(a=>a.id===selectedAttr)?.name}» از سیستم</button>
+                )}
                 <div className="flex gap-2 mt-2">
                   <input type="text" value={newAttrName} onChange={(e) => setNewAttrName(e.target.value)} placeholder="ویژگی جدید (مثلاً: طعم)" className="flex-1 p-2 border border-gray-200 rounded-lg text-xs" />
                   <button onClick={handleCreateAttr} disabled={!newAttrName} className="px-3 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold disabled:opacity-40">+ ایجاد</button>
