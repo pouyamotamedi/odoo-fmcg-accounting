@@ -36,6 +36,7 @@ export default function PosPage() {
   const [splitCard, setSplitCard] = useState('');
   const [splitCredit, setSplitCredit] = useState('');
   const [splitCustomer, setSplitCustomer] = useState(0);
+  const [splitCardPayments, setSplitCardPayments] = useState<{amount: string; paid: boolean}[]>([{amount: '', paid: false}]);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
   const [expandedSale, setExpandedSale] = useState<number | null>(null);
@@ -387,6 +388,11 @@ export default function PosPage() {
       alert('برای بخش اعتباری، انتخاب مشتری الزامی است');
       return;
     }
+    // Check all card payments are done
+    if (cardAmt > 0 && splitCardPayments.some(cp => Number(cp.amount) > 0 && !cp.paid)) {
+      alert('ابتدا همه کارت‌ها را پرداخت کنید');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -646,6 +652,7 @@ export default function PosPage() {
             onClick={async () => {
               try { const cust = await getPartners('customer'); setCustomers(cust?.map((c:any) => ({id:c.id, name:c.name})) || []); } catch {}
               setSplitCash(''); setSplitCard(''); setSplitCredit(''); setSplitCustomer(0);
+              setSplitCardPayments([{amount: '', paid: false}]);
               setShowSplit(true);
             }}
             disabled={items.length === 0 || submitting}
@@ -719,11 +726,44 @@ export default function PosPage() {
                 <input type="text" value={splitCash ? Number(splitCash).toLocaleString() : ''} onChange={(e) => setSplitCash(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">💳 مبلغ کارت (مجموع همه کارت‌ها)</label>
-                <input type="text" value={splitCard ? Number(splitCard).toLocaleString() : ''} onChange={(e) => setSplitCard(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
-                {Number(splitCard) > 0 && (
-                  <p className="text-[10px] text-blue-500 mt-1">💡 اگه چند کارت مختلف هست، مجموع رو وارد کن — موقع ثبت هر کارت جداگانه به دستگاه ارسال میشه</p>
-                )}
+                <label className="block text-xs text-gray-500 mb-1">💳 کارت‌ها</label>
+                <div className="space-y-2">
+                  {splitCardPayments.map((cp, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={cp.amount ? Number(cp.amount).toLocaleString() : ''}
+                        onChange={(e) => { const val = e.target.value.replace(/[^\d]/g, ''); const next = [...splitCardPayments]; next[idx] = {...next[idx], amount: val}; setSplitCardPayments(next); setSplitCard(String(next.reduce((s,c)=>s+(Number(c.amount)||0),0))); }}
+                        placeholder="مبلغ"
+                        disabled={cp.paid}
+                        className="flex-1 p-2 border border-gray-200 rounded-lg text-xs"
+                      />
+                      {cp.paid ? (
+                        <span className="text-green-600 text-xs font-bold">✓</span>
+                      ) : (
+                        <button
+                          onClick={async () => {
+                            const amt = Number(cp.amount);
+                            if (!amt) { alert('مبلغ وارد کنید'); return; }
+                            setMsg('💳 ارسال به کارتخوان...');
+                            try {
+                              const pax = await payWithPaxTerminal(amt, 'sale');
+                              if (!pax?.success) { alert(pax?.error || 'ناموفق'); setMsg(''); return; }
+                              const next = [...splitCardPayments]; next[idx] = {...next[idx], paid: true}; setSplitCardPayments(next);
+                              setMsg(`✅ کارت ${toPersianDigits(idx+1)} پرداخت شد`);
+                              setTimeout(() => setMsg(''), 2000);
+                            } catch (e: any) { alert(e.message || 'خطا'); setMsg(''); }
+                          }}
+                          className="px-2 py-1.5 bg-blue-600 text-white rounded text-xs font-bold"
+                        >پرداخت</button>
+                      )}
+                      {!cp.paid && splitCardPayments.length > 1 && (
+                        <button onClick={() => { const next = splitCardPayments.filter((_,i)=>i!==idx); setSplitCardPayments(next); setSplitCard(String(next.reduce((s,c)=>s+(Number(c.amount)||0),0))); }} className="text-red-400 text-xs">✕</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => setSplitCardPayments([...splitCardPayments, {amount: '', paid: false}])} className="text-[10px] text-blue-600 font-bold mt-1">+ کارت دیگر</button>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">🤝 مبلغ اعتباری (نسیه)</label>
