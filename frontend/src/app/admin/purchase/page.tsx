@@ -784,6 +784,12 @@ export default function PurchasePage() {
                   } else {
                     await updateProduct(editingProduct.id, { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
                   }
+                  // Update items in cart with new price
+                  const newPrice = Number(editPrice) || 0;
+                  setItems(prev => prev.map(item => {
+                    if (item.id === editingProduct.id) return { ...item, price: newPrice };
+                    return item;
+                  }));
                   setEditingProduct(null); await loadData(); setMsg('✅ ذخیره شد'); setTimeout(()=>setMsg(''),3000);
                 } catch(e:any){ alert(e.message||'خطا'); }
               }} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold">ذخیره</button>
@@ -807,6 +813,9 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
   const [selectedValues, setSelectedValues] = useState<number[]>([]);
   const [newValueName, setNewValueName] = useState('');
 
+  const [editingBarcodeId, setEditingBarcodeId] = useState<number|null>(null);
+  const [barcodeVal, setBarcodeVal] = useState('');
+
   const tmplId = product.product_tmpl_id?.[0] || product.product_tmpl_id;
 
   useEffect(() => { if (tmplId) loadVariants(); }, [tmplId]);
@@ -828,7 +837,17 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
 
   async function handleAttrChange(attrId: number) {
     setSelectedAttr(attrId); setSelectedValues([]);
-    if (attrId) { try { const v = await getAttributeValues(attrId); setAttrValues(v || []); } catch {} }
+    if (attrId) {
+      try {
+        const v = await getAttributeValues(attrId);
+        // Filter out values that are already on this product's attribute line
+        const existing = await searchRead('product.template.attribute.line', [
+          ['product_tmpl_id', '=', tmplId], ['attribute_id', '=', attrId]
+        ], ['value_ids'], 1);
+        const existingIds = new Set(existing?.[0]?.value_ids || []);
+        setAttrValues((v || []).filter((val: any) => !existingIds.has(val.id)));
+      } catch { setAttrValues([]); }
+    }
   }
 
   async function handleAddValue() {
@@ -878,9 +897,23 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
             const short = dl.startsWith(tmplName) && dl.length > tmplName.length
               ? dl.slice(tmplName.length).replace(/^\s*[\(\[,]\s*/, '').replace(/[\)\]]\s*$/, '') : dl;
             return (
-              <div key={v.id} className="flex justify-between items-center bg-gray-50 p-2 rounded text-xs">
-                <span>{short || dl}</span>
-                <span className="text-gray-400">{v.barcode || '—'} | موجودی: {toPersianDigits(Math.round(v.qty_available || 0))}</span>
+              <div key={v.id} className="flex justify-between items-center bg-gray-50 p-2 rounded text-xs gap-2">
+                <span className="font-medium">{short || dl}</span>
+                <div className="flex items-center gap-2">
+                  {editingBarcodeId === v.id ? (
+                    <div className="flex gap-1">
+                      <input type="text" value={barcodeVal} onChange={(e) => setBarcodeVal(e.target.value)} className="w-24 p-1 border rounded text-[10px]" autoFocus placeholder="بارکد" />
+                      <button onClick={async () => { try { await write('product.product', [v.id], {barcode: barcodeVal || false}); setEditingBarcodeId(null); await loadVariants(); } catch(e:any){alert(e.message||'خطا');} }} className="text-green-600 font-bold">✓</button>
+                      <button onClick={() => setEditingBarcodeId(null)} className="text-red-500">✕</button>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400 cursor-pointer hover:text-blue-500" onClick={() => { setEditingBarcodeId(v.id); setBarcodeVal(v.barcode || ''); }}>
+                      {v.barcode || '+ بارکد'}
+                    </span>
+                  )}
+                  <span className="text-gray-300">|</span>
+                  <span className="text-gray-400">{toPersianDigits(Math.round(v.qty_available || 0))}</span>
+                </div>
               </div>
             );
           })}

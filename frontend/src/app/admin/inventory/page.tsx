@@ -93,19 +93,31 @@ export default function InventoryPage() {
   async function fetchTemplates() {
     setLoading(true);
     try {
-      // Read templates directly for accurate standard_price
-      const tmpls = await searchRead('product.template', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'list_price', 'standard_price', 'categ_id', 'product_variant_count', 'image_512',
+      // Read product.product and group by template for accurate prices
+      const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
+        'name', 'display_name', 'list_price', 'standard_price', 'categ_id', 'product_tmpl_id', 'image_512',
       ], 0, 0, 'name asc');
-      setTemplates((tmpls || []).map((t: any) => ({
-        id: t.id,
-        name: t.name,
-        list_price: t.list_price,
-        standard_price: t.standard_price,
-        categ_id: t.categ_id || false,
-        product_variant_count: t.product_variant_count || 1,
-        image_512: t.image_512 || false,
-      })));
+      
+      const tmplMap = new Map<number, ProductTemplate>();
+      for (const p of (prods || [])) {
+        const tmplId = p.product_tmpl_id?.[0] || p.product_tmpl_id;
+        if (!tmplMap.has(tmplId)) {
+          tmplMap.set(tmplId, {
+            id: tmplId,
+            name: p.product_tmpl_id?.[1] || p.name,
+            list_price: p.list_price,
+            standard_price: p.standard_price,
+            categ_id: p.categ_id || false,
+            product_variant_count: 0,
+            image_512: p.image_512 || false,
+          });
+        }
+        const t = tmplMap.get(tmplId)!;
+        t.product_variant_count++;
+        // Use highest standard_price among variants
+        if (p.standard_price > t.standard_price) t.standard_price = p.standard_price;
+      }
+      setTemplates(Array.from(tmplMap.values()));
       setError('');
     } catch (e: any) { setError(e.message || 'خطا'); }
     setLoading(false);
@@ -258,7 +270,17 @@ export default function InventoryPage() {
 
   async function handleAttrSelect(attrId: number) {
     setSelectedAttr(attrId); setSelectedValues([]);
-    if (attrId) { try { const v = await getAttributeValues(attrId); setAttrValues(v || []); } catch { setAttrValues([]); } }
+    if (attrId) {
+      try {
+        const v = await getAttributeValues(attrId);
+        // Filter out values already on this product
+        const existing = await searchRead('product.template.attribute.line', [
+          ['product_tmpl_id', '=', attrTemplateId], ['attribute_id', '=', attrId]
+        ], ['value_ids'], 1);
+        const existingIds = new Set(existing?.[0]?.value_ids || []);
+        setAttrValues((v || []).filter((val: any) => !existingIds.has(val.id)));
+      } catch { setAttrValues([]); }
+    }
     else setAttrValues([]);
   }
 
