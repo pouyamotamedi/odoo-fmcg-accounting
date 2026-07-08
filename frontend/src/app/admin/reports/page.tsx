@@ -6,11 +6,13 @@ import {
   getInventoryReport,
   getCreditAgingReport,
   getCashFlowReport,
+  searchRead,
 } from '@/lib/odoo-api';
 import { formatPrice, toJalali, toPersianDigits } from '@/lib/utils';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
+import ExcelButtons from '@/components/ExcelButtons';
 
-type ReportType = 'sales' | 'inventory' | 'credit' | 'cashflow' | null;
+type ReportType = 'sales' | 'inventory' | 'credit' | 'cashflow' | 'profitloss' | 'purchases' | null;
 
 export default function ReportsPage() {
   const [active, setActive] = useState<ReportType>(null);
@@ -33,6 +35,28 @@ export default function ReportsPage() {
       else if (type === 'inventory') data = await getInventoryReport();
       else if (type === 'credit') data = await getCreditAgingReport();
       else if (type === 'cashflow') data = await getCashFlowReport(dateFrom, dateTo);
+      else if (type === 'purchases') {
+        data = await searchRead('account.move', [['move_type', '=', 'in_invoice'], ['state', '=', 'posted'], ['invoice_date', '>=', dateFrom], ['invoice_date', '<=', dateTo]], ['name', 'partner_id', 'amount_total', 'invoice_date', 'payment_state'], 0, 0, 'invoice_date desc');
+      }
+      else if (type === 'profitloss') {
+        // Get income and expense totals from account.move.line
+        const incomeLines = await searchRead('account.move.line', [['parent_state', '=', 'posted'], ['account_id.account_type', 'in', ['income', 'income_other']], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['debit', 'credit', 'account_id'], 0);
+        const expenseLines = await searchRead('account.move.line', [['parent_state', '=', 'posted'], ['account_id.account_type', 'in', ['expense', 'expense_direct_cost']], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['debit', 'credit', 'account_id'], 0);
+        // Group by account
+        const incomeMap: Record<string, number> = {};
+        for (const l of (incomeLines || [])) { const name = l.account_id?.[1] || 'نامشخص'; incomeMap[name] = (incomeMap[name] || 0) + l.credit - l.debit; }
+        const expenseMap: Record<string, number> = {};
+        for (const l of (expenseLines || [])) { const name = l.account_id?.[1] || 'نامشخص'; expenseMap[name] = (expenseMap[name] || 0) + l.debit - l.credit; }
+        const totalIncome = Object.values(incomeMap).reduce((s, v) => s + v, 0);
+        const totalExpense = Object.values(expenseMap).reduce((s, v) => s + v, 0);
+        data = [
+          ...Object.entries(incomeMap).map(([name, amount]) => ({ name, amount, type: 'income' })),
+          { name: '--- جمع درآمد ---', amount: totalIncome, type: 'subtotal' },
+          ...Object.entries(expenseMap).map(([name, amount]) => ({ name, amount, type: 'expense' })),
+          { name: '--- جمع هزینه ---', amount: totalExpense, type: 'subtotal' },
+          { name: '=== سود (زیان) خالص ===', amount: totalIncome - totalExpense, type: 'total' },
+        ];
+      }
       setRows(data || []);
     } catch (e: any) {
       setError(e.message || 'خطا در دریافت گزارش');
@@ -42,7 +66,9 @@ export default function ReportsPage() {
   }
 
   const cards = [
-    { type: 'sales' as const, icon: '📊', title: 'گزارش فروش روزانه', desc: 'مجموع فروش و تعداد فاکتور' },
+    { type: 'sales' as const, icon: '📊', title: 'گزارش فروش', desc: 'مجموع فروش و تعداد فاکتور' },
+    { type: 'purchases' as const, icon: '🛒', title: 'گزارش خرید', desc: 'فاکتورهای خرید در دوره' },
+    { type: 'profitloss' as const, icon: '📈', title: 'سود و زیان', desc: 'درآمدها و هزینه‌ها' },
     { type: 'inventory' as const, icon: '📦', title: 'وضعیت موجودی', desc: 'لیست کالاها با تعداد و ارزش' },
     { type: 'credit' as const, icon: '👥', title: 'سن بدهی مشتریان', desc: 'بدهی‌های باز مشتریان' },
     { type: 'cashflow' as const, icon: '💰', title: 'جریان نقدی', desc: 'ورودی و خروجی وجوه' },
@@ -85,7 +111,7 @@ export default function ReportsPage() {
 
       {active && (
         <div>
-          {(active === 'sales' || active === 'cashflow') && (
+          {(active === 'sales' || active === 'cashflow' || active === 'profitloss' || active === 'purchases') && (
             <div className="flex gap-3 mb-4 items-end flex-wrap print:hidden">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">از تاریخ</label>
@@ -104,9 +130,9 @@ export default function ReportsPage() {
           {/* Print-only header */}
           <div className="hidden print:block mb-4">
             <h2 className="text-xl font-bold">
-              {active === 'sales' ? 'گزارش فروش' : active === 'inventory' ? 'گزارش موجودی' : active === 'credit' ? 'گزارش بدهی مشتریان' : 'گزارش جریان نقدی'}
+              {active === 'sales' ? 'گزارش فروش' : active === 'purchases' ? 'گزارش خرید' : active === 'profitloss' ? 'سود و زیان' : active === 'inventory' ? 'گزارش موجودی' : active === 'credit' ? 'گزارش بدهی مشتریان' : 'گزارش جریان نقدی'}
             </h2>
-            {(active === 'sales' || active === 'cashflow') && (
+            {(active === 'sales' || active === 'cashflow' || active === 'profitloss' || active === 'purchases') && (
               <p className="text-sm text-gray-600">از {toJalali(dateFrom)} تا {toJalali(dateTo)}</p>
             )}
           </div>
@@ -186,6 +212,48 @@ function ReportTable({ type, rows }: { type: Exclude<ReportType, null>; rows: an
             r.state === 'partial' ? 'پرداخت جزئی' : 'باز',
           ])}
         />
+      </div>
+    );
+  }
+  // purchases
+  if (type === 'purchases') {
+    const total = rows.reduce((s, r) => s + (r.amount_total || 0), 0);
+    return (
+      <div>
+        <div className="mb-3 bg-orange-50 text-orange-700 p-3 rounded-lg text-sm font-bold">
+          مجموع خرید: {formatPrice(total)} تومان — {toPersianDigits(rows.length)} فاکتور
+        </div>
+        <Table
+          headers={['فاکتور', 'تامین‌کننده', 'مبلغ', 'تاریخ', 'وضعیت پرداخت']}
+          data={rows.map((r) => [
+            r.name || '—',
+            r.partner_id ? r.partner_id[1] : '—',
+            formatPrice(r.amount_total || 0),
+            r.invoice_date ? toJalali(r.invoice_date) : '—',
+            r.payment_state === 'paid' ? 'پرداخت شده' : 'در انتظار',
+          ])}
+        />
+      </div>
+    );
+  }
+  // profitloss
+  if (type === 'profitloss') {
+    return (
+      <div className="bg-white rounded-xl border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b"><tr>
+            <th className="text-right p-3">حساب</th>
+            <th className="text-right p-3">مبلغ (تومان)</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className={`border-b ${r.type === 'subtotal' ? 'bg-gray-50 font-bold' : r.type === 'total' ? 'bg-indigo-50 font-bold text-indigo-700' : r.type === 'income' ? '' : 'text-red-700'}`}>
+                <td className="p-3">{r.name}</td>
+                <td className={`p-3 font-bold ${r.amount >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatPrice(Math.abs(r.amount))}{r.amount < 0 ? ' (زیان)' : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   }
