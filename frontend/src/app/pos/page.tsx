@@ -19,7 +19,7 @@ interface OdooProduct {
 }
 
 export default function PosPage() {
-  const { items, addItem, updateQuantity, clearCart, total } = useCartStore();
+  const { items, addItem, updateQuantity, clearCart, total, updateAllPrices } = useCartStore();
   const [products, setProducts] = useState<OdooProduct[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -126,17 +126,24 @@ export default function PosPage() {
     setActiveDiscount(catId);
     if (catId === 0) {
       setDiscountPrices(new Map());
+      // Reset cart prices to original list_price
+      const priceMap = new Map<number, number>();
+      for (const item of items) {
+        const prod = products.find(p => p.id === item.id);
+        if (prod) priceMap.set(item.id, prod.list_price);
+      }
+      updateAllPrices(priceMap);
       return;
     }
     try {
       const prods = await getProductsWithDiscount(catId);
       const priceMap = new Map<number, number>();
       for (const p of (prods || [])) {
-        if (p.discount_price !== p.list_price) {
-          priceMap.set(p.id, p.discount_price);
-        }
+        priceMap.set(p.id, p.discount_price);
       }
       setDiscountPrices(priceMap);
+      // Update existing cart items with new prices
+      updateAllPrices(priceMap);
     } catch { setDiscountPrices(new Map()); }
   }
 

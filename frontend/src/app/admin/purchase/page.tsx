@@ -750,26 +750,164 @@ export default function PurchasePage() {
         </div>
       )}
 
-      {/* Edit Product Price Modal */}
+      {/* Edit Product Modal - Full */}
       {editingProduct && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-80 shadow-2xl">
-            <h3 className="text-sm font-bold mb-3">✏️ ویرایش قیمت: {editingProduct.name}</h3>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[85vh] overflow-auto">
+            <h3 className="text-lg font-bold mb-4">✏️ ویرایش: {editingProduct.name}</h3>
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">قیمت خرید</label>
-                <PriceInput value={editPrice} onChange={(v) => setEditPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">قیمت خرید</label>
+                  <PriceInput value={editPrice} onChange={(v) => setEditPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">قیمت فروش</label>
+                  <PriceInput value={editSellPrice} onChange={(v) => setEditSellPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">قیمت فروش</label>
-                <PriceInput value={editSellPrice} onChange={(v) => setEditSellPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
-              </div>
+
+              {/* Variants list */}
+              <EditVariantsSection product={editingProduct} onDone={async () => { await loadData(); }} />
             </div>
             <div className="flex gap-3 mt-4">
-              <button onClick={async () => { try { await updateProduct(editingProduct.id, { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 }); setEditingProduct(null); await loadData(); setMsg('✅ قیمت بروز شد'); setTimeout(()=>setMsg(''),3000); } catch(e:any){ alert(e.message||'خطا'); }}} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-xs font-bold">ذخیره</button>
-              <button onClick={() => setEditingProduct(null)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-xs font-bold">انصراف</button>
+              <button onClick={async () => {
+                try {
+                  const tmplId = (editingProduct as any).product_tmpl_id?.[0] || (editingProduct as any).product_tmpl_id;
+                  if (tmplId) {
+                    await write('product.template', [tmplId], { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
+                    // Update all variants too
+                    const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id']);
+                    if (vars && vars.length > 0) {
+                      await write('product.product', vars.map((v:any)=>v.id), { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
+                    }
+                  } else {
+                    await updateProduct(editingProduct.id, { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
+                  }
+                  setEditingProduct(null); await loadData(); setMsg('✅ ذخیره شد'); setTimeout(()=>setMsg(''),3000);
+                } catch(e:any){ alert(e.message||'خطا'); }
+              }} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold">ذخیره</button>
+              <button onClick={() => setEditingProduct(null)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">بستن</button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Sub-component for editing variants inside purchase edit modal */
+function EditVariantsSection({ product, onDone }: { product: any; onDone: () => Promise<void> }) {
+  const [variants, setVariants] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddAttr, setShowAddAttr] = useState(false);
+  const [attributes, setAttributes] = useState<any[]>([]);
+  const [selectedAttr, setSelectedAttr] = useState(0);
+  const [attrValues, setAttrValues] = useState<any[]>([]);
+  const [selectedValues, setSelectedValues] = useState<number[]>([]);
+  const [newValueName, setNewValueName] = useState('');
+
+  const tmplId = product.product_tmpl_id?.[0] || product.product_tmpl_id;
+
+  useEffect(() => { if (tmplId) loadVariants(); }, [tmplId]);
+
+  async function loadVariants() {
+    setLoading(true);
+    try {
+      const vars = await getProductVariants(tmplId);
+      setVariants(vars || []);
+    } catch {}
+    setLoading(false);
+  }
+
+  async function openAddAttr() {
+    try { const attrs = await getProductAttributes(); setAttributes(attrs || []); } catch {}
+    setSelectedAttr(0); setSelectedValues([]); setNewValueName('');
+    setShowAddAttr(true);
+  }
+
+  async function handleAttrChange(attrId: number) {
+    setSelectedAttr(attrId); setSelectedValues([]);
+    if (attrId) { try { const v = await getAttributeValues(attrId); setAttrValues(v || []); } catch {} }
+  }
+
+  async function handleAddValue() {
+    if (!newValueName || !selectedAttr) return;
+    try {
+      const id = await createAttributeValue(selectedAttr, newValueName);
+      setNewValueName('');
+      const v = await getAttributeValues(selectedAttr); setAttrValues(v || []);
+      setSelectedValues([...selectedValues, id]);
+    } catch (e: any) { alert(e.message || 'خطا'); }
+  }
+
+  async function handleSaveAttr() {
+    if (!selectedAttr || selectedValues.length === 0) return;
+    try {
+      // Check if attr line already exists
+      const existing = await searchRead('product.template.attribute.line', [
+        ['product_tmpl_id', '=', tmplId], ['attribute_id', '=', selectedAttr]
+      ], ['id', 'value_ids'], 1);
+      if (existing && existing.length > 0) {
+        const merged = [...new Set([...existing[0].value_ids, ...selectedValues])];
+        await write('product.template.attribute.line', [existing[0].id], { value_ids: [[6, 0, merged]] });
+      } else {
+        await addAttributeToTemplate(tmplId, selectedAttr, selectedValues);
+      }
+      setShowAddAttr(false);
+      await loadVariants();
+      await onDone();
+    } catch (e: any) { alert(e.message || 'خطا'); }
+  }
+
+  if (!tmplId) return null;
+
+  return (
+    <div className="border-t pt-3 mt-3">
+      <div className="flex justify-between items-center mb-2">
+        <label className="text-xs text-gray-500 font-bold">واریانت‌ها ({toPersianDigits(variants.length)})</label>
+        <button onClick={openAddAttr} className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded font-bold">+ ویژگی</button>
+      </div>
+      {loading ? <div className="text-xs text-gray-400">بارگذاری...</div> : variants.length <= 1 ? (
+        <div className="text-xs text-gray-400 text-center py-2">واریانتی نیست. با افزودن ویژگی واریانت بسازید.</div>
+      ) : (
+        <div className="space-y-1 max-h-40 overflow-auto">
+          {variants.map((v: any) => {
+            const dl = v.display_name || v.name;
+            const tmplName = product.name;
+            const short = dl.startsWith(tmplName) && dl.length > tmplName.length
+              ? dl.slice(tmplName.length).replace(/^\s*[\(\[,]\s*/, '').replace(/[\)\]]\s*$/, '') : dl;
+            return (
+              <div key={v.id} className="flex justify-between items-center bg-gray-50 p-2 rounded text-xs">
+                <span>{short || dl}</span>
+                <span className="text-gray-400">{v.barcode || '—'} | موجودی: {toPersianDigits(Math.round(v.qty_available || 0))}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showAddAttr && (
+        <div className="mt-3 border-t pt-3 space-y-2">
+          <select value={selectedAttr} onChange={(e) => handleAttrChange(Number(e.target.value))} className="w-full p-2 border rounded text-xs">
+            <option value={0}>— ویژگی —</option>
+            {attributes.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          {selectedAttr > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1">
+                {attrValues.map((v: any) => (
+                  <button key={v.id} onClick={() => setSelectedValues(p => p.includes(v.id) ? p.filter(x=>x!==v.id) : [...p, v.id])}
+                    className={`px-2 py-1 rounded-full text-[10px] font-bold ${selectedValues.includes(v.id) ? 'bg-indigo-500 text-white' : 'bg-gray-100'}`}>{v.name}</button>
+                ))}
+              </div>
+              <div className="flex gap-1">
+                <input type="text" value={newValueName} onChange={(e) => setNewValueName(e.target.value)} placeholder="مقدار جدید" className="flex-1 p-1.5 border rounded text-xs" onKeyDown={(e) => { if(e.key==='Enter') handleAddValue(); }} />
+                <button onClick={handleAddValue} disabled={!newValueName} className="px-2 py-1 bg-green-500 text-white rounded text-xs disabled:opacity-40">+</button>
+              </div>
+              <button onClick={handleSaveAttr} disabled={selectedValues.length===0} className="w-full py-1.5 bg-indigo-500 text-white rounded text-xs font-bold disabled:opacity-40">ثبت ویژگی</button>
+            </>
+          )}
         </div>
       )}
     </div>

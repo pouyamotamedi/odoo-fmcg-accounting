@@ -178,13 +178,19 @@ export default function InventoryPage() {
       }
       if (editingId) {
         await write('product.template', [editingId], values);
-        // Save discount prices
-        const vars = await searchRead('product.product', [['product_tmpl_id', '=', editingId], ['active', '=', true]], ['id'], 1);
-        if (vars && vars.length > 0) {
+        // Also update all variants with the same prices
+        const allVars = await searchRead('product.product', [['product_tmpl_id', '=', editingId], ['active', '=', true]], ['id']);
+        if (allVars && allVars.length > 0) {
+          const varIds = allVars.map((v: any) => v.id);
+          await write('product.product', varIds, {
+            standard_price: parseFloat(form.standard_price),
+            list_price: parseFloat(form.list_price),
+          });
+          // Save discount prices for first variant
           for (const cat of discountCats) {
             const price = parseFloat(discountPrices[cat.id] || '');
             if (price && price !== parseFloat(form.list_price)) {
-              await setDiscountPrice(cat.id, vars[0].id, price);
+              await setDiscountPrice(cat.id, varIds[0], price);
             }
           }
         }

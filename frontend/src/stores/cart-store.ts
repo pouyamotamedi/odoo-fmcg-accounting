@@ -12,6 +12,8 @@ interface CartState {
   addItem: (product: { id: number; name: string; price: number }) => void;
   removeItem: (id: number) => void;
   updateQuantity: (id: number, quantity: number) => void;
+  updatePrice: (id: number, price: number) => void;
+  updateAllPrices: (priceMap: Map<number, number>) => void;
   clearCart: () => void;
   total: () => number;
 }
@@ -48,6 +50,21 @@ export const useCartStore = create<CartState>((set, get) => ({
         ),
       };
     }),
+
+  updatePrice: (id, price) =>
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.id === id ? { ...item, price } : item
+      ),
+    })),
+
+  updateAllPrices: (priceMap) =>
+    set((state) => ({
+      items: state.items.map((item) => {
+        const newPrice = priceMap.get(item.id);
+        return newPrice !== undefined ? { ...item, price: newPrice } : item;
+      }),
+    })),
 
   clearCart: () => set({ items: [] }),
 
