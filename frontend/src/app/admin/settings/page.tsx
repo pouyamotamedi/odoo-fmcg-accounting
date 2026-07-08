@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getCompanySettings, updateCompanySettings, changePassword, searchRead, write } from '@/lib/odoo-api';
+import { getCompanySettings, updateCompanySettings, changePassword, searchRead, write, getBankCashBalances } from '@/lib/odoo-api';
 import { useCompanyStore } from '@/stores/company-store';
 import Link from 'next/link';
 
@@ -19,11 +19,16 @@ export default function SettingsPage() {
   const { setCompany } = useCompanyStore();
   const [taxEnabled, setTaxEnabled] = useState(true);
   const [taxRate, setTaxRate] = useState('9');
+  // POS journal settings
+  const [journals, setJournals] = useState<{id:number;name:string;type:string}[]>([]);
+  const [posCashJournal, setPosCashJournal] = useState<number>(0);
+  const [posCardJournal, setPosCardJournal] = useState<number>(0);
+  const [posCreditJournal, setPosCreditJournal] = useState<number>(0);
 
   useEffect(() => {
     async function load() {
       try {
-        const data = await getCompanySettings();
+        const [data, jrnls] = await Promise.all([getCompanySettings(), getBankCashBalances()]);
         if (data) {
           setCompanyId(data.id);
           setName(data.name || '');
@@ -31,6 +36,17 @@ export default function SettingsPage() {
           setPaxIp(data.fmcg_pax_terminal_ip || '');
           setPaxPort(String(data.fmcg_pax_terminal_port || 10009));
         }
+        setJournals((jrnls || []).map((j: any) => ({ id: j.id, name: j.name, type: j.type })));
+        // Load POS journal settings from localStorage
+        try {
+          const saved = localStorage.getItem('pos_journal_settings');
+          if (saved) {
+            const s = JSON.parse(saved);
+            setPosCashJournal(s.cash || 0);
+            setPosCardJournal(s.card || 0);
+            setPosCreditJournal(s.credit || 0);
+          }
+        } catch {}
         setConnected(true);
       } catch {
         setConnected(false);
@@ -176,6 +192,40 @@ export default function SettingsPage() {
         </div>
 
         {/* Password */}
+        <div className="bg-white rounded-xl p-6 border border-gray-100">
+          <h3 className="font-bold text-sm mb-4">🏦 حساب‌های صندوق فروش</h3>
+          <p className="text-xs text-gray-500 mb-3">مشخص کنید پرداخت‌های صندوق به کدام حساب بانکی/صندوق وصل شود</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">💵 نقد → صندوق</label>
+              <select value={posCashJournal} onChange={(e) => setPosCashJournal(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
+                <option value={0}>— اولین صندوق —</option>
+                {journals.filter(j=>j.type==='cash').map(j=><option key={j.id} value={j.id}>{j.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">💳 کارت → بانک</label>
+              <select value={posCardJournal} onChange={(e) => setPosCardJournal(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
+                <option value={0}>— اولین بانک —</option>
+                {journals.filter(j=>j.type==='bank').map(j=><option key={j.id} value={j.id}>{j.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">🤝 نسیه → حساب</label>
+              <select value={posCreditJournal} onChange={(e) => setPosCreditJournal(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
+                <option value={0}>— بدون ثبت پرداخت —</option>
+                {journals.map(j=><option key={j.id} value={j.id}>{j.name} ({j.type==='cash'?'نقد':'بانک'})</option>)}
+              </select>
+            </div>
+          </div>
+          <button onClick={() => {
+            localStorage.setItem('pos_journal_settings', JSON.stringify({cash: posCashJournal, card: posCardJournal, credit: posCreditJournal}));
+            setMsg('✅ تنظیمات صندوق ذخیره شد');
+            setTimeout(() => setMsg(''), 3000);
+          }} className="mt-3 px-4 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700">ذخیره تنظیمات صندوق</button>
+        </div>
+
+        {/* Password - actual */}
         <div className="bg-white rounded-xl p-6 border border-gray-100">
           <h3 className="font-bold text-sm mb-4">🔑 تغییر رمز عبور مدیر</h3>
           <div className="flex gap-3 items-end">

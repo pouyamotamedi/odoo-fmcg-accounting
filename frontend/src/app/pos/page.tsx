@@ -45,6 +45,11 @@ export default function PosPage() {
   const [activeDiscount, setActiveDiscount] = useState<number>(0);
   const [discountPrices, setDiscountPrices] = useState<Map<number, number>>(new Map());
   const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
+  // Pin feature
+  const [pinnedIds, setPinnedIds] = useState<Set<number>>(new Set());
+  // Multi-card payment
+  const [showMultiCard, setShowMultiCard] = useState(false);
+  const [cardPayments, setCardPayments] = useState<{amount: string; paid: boolean}[]>([{amount: '', paid: false}]);
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -117,6 +122,11 @@ export default function PosPage() {
         setDiscountCategories(discCats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
       } catch { setProducts([]); }
       setLoading(false);
+      // Load pinned products from localStorage
+      try {
+        const saved = localStorage.getItem('pos_pinned_products');
+        if (saved) setPinnedIds(new Set(JSON.parse(saved)));
+      } catch {}
     }
     load();
   }, []);
@@ -155,6 +165,15 @@ export default function PosPage() {
     return product.list_price;
   }
 
+  function togglePin(productId: number) {
+    setPinnedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId); else next.add(productId);
+      localStorage.setItem('pos_pinned_products', JSON.stringify([...next]));
+      return next;
+    });
+  }
+
   const filteredProducts = products.filter(
     (p) => {
       if (!search) return true;
@@ -179,6 +198,13 @@ export default function PosPage() {
     }
     return Array.from(tmplMap.values());
   })();
+
+  // Sort: pinned first
+  const sortedDisplayProducts = [...displayProducts].sort((a, b) => {
+    const aPin = pinnedIds.has(a.id) ? 0 : 1;
+    const bPin = pinnedIds.has(b.id) ? 0 : 1;
+    return aPin - bPin;
+  });
 
   // If searching by barcode, check for exact barcode match -> add directly
   useEffect(() => {
@@ -260,10 +286,20 @@ export default function PosPage() {
       const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
       const invoiceId = await createPosOrder({ lines, payment_method: method });
       await confirmInvoice(invoiceId);
-      // Register payment to actually affect bank/cash balance
-      const cashJournal = posJournals.find(j => j.type === 'cash');
-      const bankJournal = posJournals.find(j => j.type === 'bank');
-      const journalId = method === 'card' ? bankJournal?.id : cashJournal?.id;
+      // Register payment - get journal from settings or fallback to first found
+      let journalId: number | undefined;
+      try {
+        const saved = localStorage.getItem('pos_journal_settings');
+        if (saved) {
+          const s = JSON.parse(saved);
+          journalId = method === 'card' ? s.card : s.cash;
+        }
+      } catch {}
+      if (!journalId) {
+        const cashJournal = posJournals.find(j => j.type === 'cash');
+        const bankJournal = posJournals.find(j => j.type === 'bank');
+        journalId = method === 'card' ? bankJournal?.id : cashJournal?.id;
+      }
       if (journalId) {
         await registerInvoicePayment(invoiceId, journalId, cartTotal);
       }
@@ -473,34 +509,38 @@ export default function PosPage() {
             <div className="text-center py-12 text-gray-400">در حال بارگذاری محصولات...</div>
           ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {displayProducts.map((product) => (
-              <button
-                key={product.id}
-                onClick={() => handleProductClick(product)}
-                className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square"
-              >
-                {/* Background image or placeholder */}
-                {product.image_512 ? (
-                  <img src={`data:image/png;base64,${product.image_512}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                ) : (
-                  <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-                    <span className="text-3xl opacity-30">📦</span>
-                  </div>
-                )}
-                {/* Overlay with name - hidden on hover */}
-                <div className="absolute inset-0 bg-black/40 group-hover:bg-black/10 transition-all flex flex-col items-center justify-center p-2">
-                  <div className="text-white text-xs font-bold text-center group-hover:opacity-0 transition-opacity leading-tight">{product.name}</div>
-                  {(product as any).variantCount > 1 && (
-                    <div className="text-purple-200 text-[10px] mt-1 group-hover:opacity-0 transition-opacity">{toPersianDigits((product as any).variantCount)} نوع</div>
+            {sortedDisplayProducts.map((product) => (
+              <div key={product.id} className="relative">
+                <button
+                  onClick={() => handleProductClick(product)}
+                  className={`group relative rounded-xl overflow-hidden border-2 ${pinnedIds.has(product.id) ? 'border-yellow-400' : 'border-transparent'} hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square w-full`}
+                >
+                  {product.image_512 ? (
+                    <img src={`data:image/png;base64,${product.image_512}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                      <span className="text-3xl opacity-30">📦</span>
+                    </div>
                   )}
-                  <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded group-hover:opacity-0 transition-opacity">
-                    {formatPrice(getEffectivePrice(product))}
+                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/10 transition-all flex flex-col items-center justify-center p-2">
+                    <div className="text-white text-xs font-bold text-center group-hover:opacity-0 transition-opacity leading-tight">{product.name}</div>
+                    {(product as any).variantCount > 1 && (
+                      <div className="text-purple-200 text-[10px] mt-1 group-hover:opacity-0 transition-opacity">{toPersianDigits((product as any).variantCount)} نوع</div>
+                    )}
+                    <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded group-hover:opacity-0 transition-opacity">
+                      {formatPrice(getEffectivePrice(product))}
+                    </div>
+                    {activeDiscount && discountPrices.has(product.id) && (
+                      <span className="text-[10px] text-gray-300 line-through group-hover:opacity-0 transition-opacity">{formatPrice(product.list_price)}</span>
+                    )}
                   </div>
-                  {activeDiscount && discountPrices.has(product.id) && (
-                    <span className="text-[10px] text-gray-300 line-through group-hover:opacity-0 transition-opacity">{formatPrice(product.list_price)}</span>
-                  )}
-                </div>
-              </button>
+                </button>
+                {/* Pin button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); togglePin(product.id); }}
+                  className={`absolute top-1 right-1 text-xs z-10 w-5 h-5 rounded-full flex items-center justify-center ${pinnedIds.has(product.id) ? 'bg-yellow-400 text-yellow-900' : 'bg-black/30 text-white/60 hover:text-white'}`}
+                >📌</button>
+              </div>
             ))}
           </div>
           )}
@@ -583,6 +623,13 @@ export default function PosPage() {
             className="py-3 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-40 transition"
           >
             💳 کارت
+          </button>
+          <button
+            onClick={() => { setCardPayments([{amount: String(cartTotal), paid: false}]); setShowMultiCard(true); }}
+            disabled={items.length === 0 || submitting || !isOnline}
+            className="py-3 bg-blue-400 text-white rounded-lg text-xs font-bold hover:bg-blue-500 disabled:opacity-40 transition"
+          >
+            💳💳 چند کارت
           </button>
           <button
             onClick={() => handlePayment('credit')}
@@ -732,6 +779,82 @@ export default function PosPage() {
                 </React.Fragment>))}</tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Multi-Card Payment Popup */}
+      {showMultiCard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">💳 پرداخت چند کارته</h3>
+              <button onClick={() => setShowMultiCard(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="text-sm text-gray-500 mb-3">جمع فاکتور: <b>{formatPrice(cartTotal)}</b></div>
+            <div className="space-y-3 mb-4">
+              {cardPayments.map((cp, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-14">کارت {toPersianDigits(idx + 1)}:</span>
+                  <input
+                    type="number"
+                    value={cp.amount}
+                    onChange={(e) => { const next = [...cardPayments]; next[idx] = {...next[idx], amount: e.target.value}; setCardPayments(next); }}
+                    className="flex-1 p-2 border border-gray-200 rounded-lg text-sm"
+                    placeholder="مبلغ"
+                    disabled={cp.paid}
+                  />
+                  {cp.paid ? (
+                    <span className="text-green-600 text-xs font-bold">✓ پرداخت شد</span>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        const amt = Number(cp.amount);
+                        if (!amt) { alert('مبلغ وارد کنید'); return; }
+                        setMsg('💳 ارسال به کارتخوان...');
+                        try {
+                          const pax = await payWithPaxTerminal(amt, 'sale');
+                          if (!pax?.success) { alert(pax?.error || 'ناموفق'); setMsg(''); return; }
+                          const next = [...cardPayments]; next[idx] = {...next[idx], paid: true}; setCardPayments(next);
+                          setMsg(`✅ کارت ${toPersianDigits(idx+1)} پرداخت شد`);
+                        } catch (e: any) { alert(e.message || 'خطا'); setMsg(''); }
+                      }}
+                      className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                    >پرداخت</button>
+                  )}
+                  {!cp.paid && cardPayments.length > 1 && (
+                    <button onClick={() => setCardPayments(cardPayments.filter((_, i) => i !== idx))} className="text-red-400 text-xs">✕</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setCardPayments([...cardPayments, {amount: '', paid: false}])} className="text-xs text-blue-600 font-bold mb-4">+ افزودن کارت دیگر</button>
+            <div className="text-xs text-gray-500 mb-3">
+              پرداخت شده: {formatPrice(cardPayments.filter(c=>c.paid).reduce((s,c)=>s+(Number(c.amount)||0),0))} از {formatPrice(cartTotal)}
+            </div>
+            <button
+              onClick={async () => {
+                const totalPaid = cardPayments.filter(c=>c.paid).reduce((s,c)=>s+(Number(c.amount)||0),0);
+                if (totalPaid < cartTotal) { alert('کل مبلغ هنوز پرداخت نشده'); return; }
+                // All cards paid - create invoice
+                setSubmitting(true);
+                try {
+                  const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
+                  const invoiceId = await createPosOrder({ lines, payment_method: 'card' });
+                  await confirmInvoice(invoiceId);
+                  const bankJournal = posJournals.find(j => j.type === 'bank');
+                  if (bankJournal) await registerInvoicePayment(invoiceId, bankJournal.id, cartTotal);
+                  try { await createStockDelivery(lines); } catch {}
+                  clearCart(); setShowMultiCard(false); setMsg('✅ فاکتور ثبت شد');
+                  setTimeout(() => setMsg(''), 3000);
+                } catch (e: any) { alert(e.message || 'خطا'); }
+                setSubmitting(false);
+              }}
+              disabled={submitting || cardPayments.some(c => !c.paid)}
+              className="w-full py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-40"
+            >
+              {submitting ? 'ثبت...' : '✓ ثبت فاکتور'}
+            </button>
           </div>
         </div>
       )}
