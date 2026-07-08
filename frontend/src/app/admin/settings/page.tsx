@@ -210,14 +210,8 @@ export default function SettingsPage() {
                 {journals.filter(j=>j.type==='bank').map(j=><option key={j.id} value={j.id}>{j.name}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">🤝 نسیه → حساب</label>
-              <select value={posCreditJournal} onChange={(e) => setPosCreditJournal(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm">
-                <option value={0}>— بدون ثبت پرداخت —</option>
-                {journals.map(j=><option key={j.id} value={j.id}>{j.name} ({j.type==='cash'?'نقد':'بانک'})</option>)}
-              </select>
-            </div>
           </div>
+          <p className="text-[11px] text-gray-400 mt-2">نسیه/اعتباری نیازی به تنظیم ندارد — خودکار به حساب مشتری ثبت می‌شود.</p>
           <button onClick={() => {
             localStorage.setItem('pos_journal_settings', JSON.stringify({cash: posCashJournal, card: posCardJournal, credit: posCreditJournal}));
             setMsg('✅ تنظیمات صندوق ذخیره شد');

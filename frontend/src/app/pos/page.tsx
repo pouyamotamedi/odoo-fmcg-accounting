@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import Link from 'next/link';
 
@@ -50,6 +50,10 @@ export default function PosPage() {
   // Multi-card payment
   const [showMultiCard, setShowMultiCard] = useState(false);
   const [cardPayments, setCardPayments] = useState<{amount: string; paid: boolean}[]>([{amount: '', paid: false}]);
+  // Quick add customer
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPhone, setNewCustPhone] = useState('');
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -671,6 +675,7 @@ export default function PosPage() {
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
+                <button onClick={() => setShowNewCustomer(true)} className="text-xs text-indigo-600 font-bold mt-1">+ ثبت مشتری جدید</button>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">یادداشت</label>
@@ -705,7 +710,7 @@ export default function PosPage() {
       {/* Split Payment Dialog */}
       {showSplit && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[85vh] overflow-auto">
             <h3 className="text-lg font-bold mb-4">🔀 پرداخت ترکیبی</h3>
             <div className="mb-3 text-sm text-gray-600">جمع کل: <b>{formatPrice(cartTotal)} تومان</b></div>
             <div className="space-y-3">
@@ -714,8 +719,11 @@ export default function PosPage() {
                 <input type="text" value={splitCash ? Number(splitCash).toLocaleString() : ''} onChange={(e) => setSplitCash(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">💳 مبلغ کارت</label>
+                <label className="block text-xs text-gray-500 mb-1">💳 مبلغ کارت (مجموع همه کارت‌ها)</label>
                 <input type="text" value={splitCard ? Number(splitCard).toLocaleString() : ''} onChange={(e) => setSplitCard(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                {Number(splitCard) > 0 && (
+                  <p className="text-[10px] text-blue-500 mt-1">💡 اگه چند کارت مختلف هست، مجموع رو وارد کن — موقع ثبت هر کارت جداگانه به دستگاه ارسال میشه</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">🤝 مبلغ اعتباری (نسیه)</label>
@@ -728,6 +736,7 @@ export default function PosPage() {
                     <option value={0}>— انتخاب —</option>
                     {customers.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
                   </select>
+                  <button onClick={() => setShowNewCustomer(true)} className="text-xs text-indigo-600 font-bold mt-1">+ ثبت مشتری جدید</button>
                 </div>
               )}
               <div className="bg-gray-50 p-2 rounded-lg text-xs text-gray-500">
@@ -783,6 +792,32 @@ export default function PosPage() {
         </div>
       )}
 
+      {/* New Customer Quick Add */}
+      {showNewCustomer && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="text-sm font-bold mb-3">+ ثبت مشتری جدید</h3>
+            <div className="space-y-3">
+              <input type="text" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} placeholder="نام مشتری *" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+              <input type="text" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} placeholder="شماره تماس (اختیاری)" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={async () => {
+                if (!newCustName) { alert('نام الزامی'); return; }
+                try {
+                  const id = await createPartner({ name: newCustName, phone: newCustPhone || undefined, customer_rank: 1 });
+                  setCustomers(prev => [...prev, { id, name: newCustName }]);
+                  setSelectedCustomer(id);
+                  setSplitCustomer(id);
+                  setNewCustName(''); setNewCustPhone(''); setShowNewCustomer(false);
+                } catch (e: any) { alert(e.message || 'خطا'); }
+              }} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-xs font-bold">ثبت</button>
+              <button onClick={() => setShowNewCustomer(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-xs font-bold">انصراف</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Multi-Card Payment Popup */}
       {showMultiCard && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -797,9 +832,9 @@ export default function PosPage() {
                 <div key={idx} className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 w-14">کارت {toPersianDigits(idx + 1)}:</span>
                   <input
-                    type="number"
-                    value={cp.amount}
-                    onChange={(e) => { const next = [...cardPayments]; next[idx] = {...next[idx], amount: e.target.value}; setCardPayments(next); }}
+                    type="text"
+                    value={cp.amount ? Number(cp.amount).toLocaleString() : ''}
+                    onChange={(e) => { const val = e.target.value.replace(/[^\d]/g, ''); const next = [...cardPayments]; next[idx] = {...next[idx], amount: val}; setCardPayments(next); }}
                     className="flex-1 p-2 border border-gray-200 rounded-lg text-sm"
                     placeholder="مبلغ"
                     disabled={cp.paid}
