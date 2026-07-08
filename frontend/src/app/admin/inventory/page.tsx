@@ -273,12 +273,8 @@ export default function InventoryPage() {
     if (attrId) {
       try {
         const v = await getAttributeValues(attrId);
-        // Filter out values already on this product
-        const existing = await searchRead('product.template.attribute.line', [
-          ['product_tmpl_id', '=', attrTemplateId], ['attribute_id', '=', attrId]
-        ], ['value_ids'], 1);
-        const existingIds = new Set(existing?.[0]?.value_ids || []);
-        setAttrValues((v || []).filter((val: any) => !existingIds.has(val.id)));
+        // Show all values - user picks which ones to add
+        setAttrValues(v || []);
       } catch { setAttrValues([]); }
     }
     else setAttrValues([]);

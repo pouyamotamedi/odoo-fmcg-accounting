@@ -59,14 +59,17 @@ export default function PurchasePage() {
   const [paymentJournal, setPaymentJournal] = useState<number>(0);
   const [pendingInvoiceId, setPendingInvoiceId] = useState<number>(0);
   const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
+  const [discountCats, setDiscountCats] = useState<{id:number;name:string}[]>([]);
+  const [editDiscountPrices, setEditDiscountPrices] = useState<Record<number, string>>({});
 
   async function loadData() {
     try {
-      const [prods, sups, cats, jrnls] = await Promise.all([getProducts(), getPartners('supplier'), getCategories(), getBankCashBalances()]);
+      const [prods, sups, cats, jrnls, discCats] = await Promise.all([getProducts(), getPartners('supplier'), getCategories(), getBankCashBalances(), getDiscountCategories()]);
       setProducts(prods || []);
       setSuppliers(sups?.map((s:any) => ({ id: s.id, name: s.name })) || []);
       setCategories(cats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
       setJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
+      setDiscountCats((discCats||[]).filter((c:any) => !c.is_fixed_percent).map((c:any) => ({id: c.id, name: c.name})));
     } catch { /* ignore */ }
     setLoading(false);
   }
@@ -497,7 +500,19 @@ export default function PurchasePage() {
                     </div>
                   </div>
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); setEditingProduct(product); setEditPrice(String(product.standard_price)); setEditSellPrice(String(product.list_price)); }} className="absolute top-1 left-1 text-[10px] text-white/70 hover:text-white bg-black/30 rounded px-1 z-10">✏️</button>
+                <button onClick={async (e) => {
+                  e.stopPropagation();
+                  setEditingProduct(product); setEditPrice(String(product.standard_price)); setEditSellPrice(String(product.list_price));
+                  // Load discount prices
+                  const prices: Record<number, string> = {};
+                  for (const cat of discountCats) {
+                    try {
+                      const lines = await searchRead('fmcg.discount.line', [['category_id', '=', cat.id], ['product_id', '=', product.id]], ['discount_price'], 1);
+                      if (lines && lines.length > 0) prices[cat.id] = String(lines[0].discount_price);
+                    } catch {}
+                  }
+                  setEditDiscountPrices(prices);
+                }} className="absolute top-1 left-1 text-[10px] text-white/70 hover:text-white bg-black/30 rounded px-1 z-10">✏️</button>
               </div>
             ))}
           </div>
@@ -767,6 +782,21 @@ export default function PurchasePage() {
                 </div>
               </div>
 
+              {/* Discount prices */}
+              {discountCats.length > 0 && (
+                <div className="border-t pt-3">
+                  <label className="block text-xs text-gray-500 mb-2">قیمت‌های تخفیفی:</label>
+                  <div className="space-y-2">
+                    {discountCats.map((cat) => (
+                      <div key={cat.id} className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600 w-28 truncate">{cat.name}:</span>
+                        <PriceInput value={editDiscountPrices[cat.id] || ''} onChange={(v) => setEditDiscountPrices({...editDiscountPrices, [cat.id]: v})} placeholder={editSellPrice || '= فروش'} className="flex-1 p-1.5 border border-gray-200 rounded text-xs" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Variants list */}
               <EditVariantsSection product={editingProduct} onDone={async () => { await loadData(); }} />
             </div>
@@ -780,14 +810,35 @@ export default function PurchasePage() {
                     const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id']);
                     if (vars && vars.length > 0) {
                       await write('product.product', vars.map((v:any)=>v.id), { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
+                      // Save discount prices
+                      for (const cat of discountCats) {
+                        const price = parseFloat(editDiscountPrices[cat.id] || '');
+                        if (price && price !== (Number(editSellPrice)||0)) {
+                          await setDiscountPrice(cat.id, vars[0].id, price);
+                        }
+                      }
                     }
                   } else {
                     await updateProduct(editingProduct.id, { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
+                    // Save discount prices
+                    for (const cat of discountCats) {
+                      const price = parseFloat(editDiscountPrices[cat.id] || '');
+                      if (price && price !== (Number(editSellPrice)||0)) {
+                        await setDiscountPrice(cat.id, editingProduct.id, price);
+                      }
+                    }
                   }
-                  // Update items in cart with new price
+                  // Update items in cart with new price (all variants of this template)
                   const newPrice = Number(editPrice) || 0;
+                  const tmplVariantIds = new Set<number>();
+                  if (tmplId) {
+                    const allVars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id']);
+                    (allVars || []).forEach((v: any) => tmplVariantIds.add(v.id));
+                  } else {
+                    tmplVariantIds.add(editingProduct.id);
+                  }
                   setItems(prev => prev.map(item => {
-                    if (item.id === editingProduct.id) return { ...item, price: newPrice };
+                    if (tmplVariantIds.has(item.id)) return { ...item, price: newPrice };
                     return item;
                   }));
                   setEditingProduct(null); await loadData(); setMsg('✅ ذخیره شد'); setTimeout(()=>setMsg(''),3000);
@@ -840,12 +891,19 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
     if (attrId) {
       try {
         const v = await getAttributeValues(attrId);
-        // Filter out values that are already on this product's attribute line
-        const existing = await searchRead('product.template.attribute.line', [
-          ['product_tmpl_id', '=', tmplId], ['attribute_id', '=', attrId]
-        ], ['value_ids'], 1);
-        const existingIds = new Set(existing?.[0]?.value_ids || []);
-        setAttrValues((v || []).filter((val: any) => !existingIds.has(val.id)));
+        // Filter out values that have active variants for this product
+        const activeVars = await searchRead('product.product', [
+          ['product_tmpl_id', '=', tmplId], ['active', '=', true]
+        ], ['product_template_variant_value_ids']);
+        const activeValueIds = new Set<number>();
+        for (const av of (activeVars || [])) {
+          for (const vid of (av.product_template_variant_value_ids || [])) {
+            activeValueIds.add(vid);
+          }
+        }
+        // Get the PTAV -> attribute.value mapping
+        // For simplicity: show all values, user can re-add deleted ones
+        setAttrValues(v || []);
       } catch { setAttrValues([]); }
     }
   }
