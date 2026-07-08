@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getPartners, createPartner, updatePartner, createSellerUser, searchRead, unlink } from '@/lib/odoo-api';
 import { toPersianDigits } from '@/lib/utils';
+import ExcelButtons from '@/components/ExcelButtons';
 
 interface Partner {
   id: number;
@@ -191,9 +192,34 @@ export default function PeoplePage() {
           <h1 className="text-2xl font-bold text-slate-800">اشخاص</h1>
           <p className="text-gray-500 text-sm">مدیریت فروشنده‌ها، تامین‌کنندگان و مشتریان</p>
         </div>
-        <button onClick={openNewForm} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition">
-          + شخص جدید
-        </button>
+        <div className="flex gap-2 items-center">
+          <ExcelButtons
+            data={partners}
+            columns={[
+              { key: 'name', label: 'نام' },
+              { key: 'phone', label: 'تلفن', transform: (v) => v || '' },
+              { key: 'mobile', label: 'موبایل', transform: (v) => v || '' },
+              { key: 'customer_rank', label: 'مشتری', transform: (v) => v > 0 ? 'بله' : '' },
+              { key: 'supplier_rank', label: 'تامین‌کننده', transform: (v) => v > 0 ? 'بله' : '' },
+            ]}
+            filename="people"
+            onImport={async (rows) => {
+              let count = 0;
+              for (const row of rows) {
+                if (!row['نام']) continue;
+                try {
+                  await createPartner({ name: row['نام'], phone: row['تلفن'] || undefined, mobile: row['موبایل'] || undefined, customer_rank: row['مشتری'] === 'بله' ? 1 : 0, supplier_rank: row['تامین‌کننده'] === 'بله' ? 1 : 0 });
+                  count++;
+                } catch {}
+              }
+              alert(`${count} شخص وارد شد`);
+              await fetchPartners();
+            }}
+          />
+          <button onClick={openNewForm} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition">
+            + شخص جدید
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -338,7 +364,7 @@ export default function PeoplePage() {
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">توضیحات</label>
-                <textarea value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} placeholder="اختیاری..." rows={2} className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none resize-none" />
+                <textarea value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} placeholder="آدرس، شناسه ملی، کد اقتصادی، توضیحات..." rows={3} className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none resize-none" />
               </div>
             </div>
             <div className="flex gap-3 mt-5">

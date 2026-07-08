@@ -11,6 +11,8 @@ interface DashData {
   txCount: number;
   cashBalance: number;
   outstanding: number;
+  lowStockProducts: string[];
+  highDebtCustomers: string[];
 }
 
 function DashCard({ title, value, color }: { title: string; value: string; color?: string }) {
@@ -36,7 +38,7 @@ function ActionButton({ href, icon, label }: { href: string; icon: string; label
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0 });
+  const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [] });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,24 +52,31 @@ export default function AdminDashboard() {
         }
 
         // Try fetching from Odoo
-        const [balances, partners, todaySalesData] = await Promise.all([
+        const [balances, partners, todaySalesData, allProducts] = await Promise.all([
           getBankCashBalances(),
           getPartnerBalances(),
           getTodaySales(),
+          getProducts(),
         ]);
         const cashBalance = balances
           ?.filter((b: any) => b.type === 'cash')
           .reduce((sum: number, b: any) => sum + (b.fmcg_running_balance || 0), 0) || 0;
         const outstanding = partners?.reduce((sum: number, p: any) => sum + (p.receivable || 0), 0) || 0;
+        // Low stock alerts
+        const lowStock = (allProducts || []).filter((p: any) => p.qty_available <= (p.fmcg_reorder_threshold || 5)).map((p: any) => p.name);
+        // High debt customers
+        const highDebt = (partners || []).filter((p: any) => p.receivable > 500000).map((p: any) => `${p.name} (${formatPrice(p.receivable)})`);
         setData({
           todaySales: todaySalesData?.totalAmount || 0,
           txCount: todaySalesData?.count || 0,
           cashBalance,
           outstanding,
+          lowStockProducts: lowStock.slice(0, 5),
+          highDebtCustomers: highDebt.slice(0, 5),
         });
       } catch {
         // Fallback demo data if Odoo not connected
-        setData({ todaySales: 12500000, txCount: 47, cashBalance: 8200000, outstanding: 3800000 });
+        setData({ todaySales: 12500000, txCount: 47, cashBalance: 8200000, outstanding: 3800000, lowStockProducts: [], highDebtCustomers: [] });
       }
       setLoading(false);
     }
@@ -97,6 +106,30 @@ export default function AdminDashboard() {
         <ActionButton href="/admin/returns" icon="↩️" label="برگشت از فروش" />
         <ActionButton href="/pos" icon="🖥️" label="صندوق فروش" />
       </div>
+
+      {/* Alerts */}
+      {(data.lowStockProducts.length > 0 || data.highDebtCustomers.length > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+          {data.lowStockProducts.length > 0 && (
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+              <h4 className="text-sm font-bold text-orange-700 mb-2">⚠️ هشدار موجودی پایین</h4>
+              <ul className="text-xs text-orange-600 space-y-1">
+                {data.lowStockProducts.map((name, i) => <li key={i}>• {name}</li>)}
+              </ul>
+              <Link href="/admin/inventory" className="text-[10px] text-orange-500 mt-2 inline-block">مشاهده انبار →</Link>
+            </div>
+          )}
+          {data.highDebtCustomers.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <h4 className="text-sm font-bold text-red-700 mb-2">🔴 بدهکاران بالا</h4>
+              <ul className="text-xs text-red-600 space-y-1">
+                {data.highDebtCustomers.map((name, i) => <li key={i}>• {name}</li>)}
+              </ul>
+              <Link href="/admin/accounts?filter=debtors" className="text-[10px] text-red-500 mt-2 inline-block">مشاهده حساب‌ها →</Link>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

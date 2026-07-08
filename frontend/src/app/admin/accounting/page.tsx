@@ -5,6 +5,7 @@ import { searchRead, create, getBankCashBalances, callMethod, getPartners, getEx
 import { formatPrice, toJalali } from '@/lib/utils';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
+import ExcelButtons from '@/components/ExcelButtons';
 import * as jalaali from 'jalaali-js';
 
 type DocType = 'payment' | 'receipt';
@@ -321,6 +322,19 @@ export default function AccountingPage() {
         </div>
         <div className="flex gap-2 items-center">
           {msg && <span className="text-sm bg-green-500 text-white px-3 py-1.5 rounded-lg">{msg}</span>}
+          <ExcelButtons
+            data={entries}
+            columns={[
+              { key: 'name', label: 'شماره سند' },
+              { key: 'date', label: 'تاریخ', transform: (v) => v ? toJalali(v) : '' },
+              { key: 'partner_id', label: 'طرف حساب', transform: (v) => v ? v[1] : '' },
+              { key: 'journal_id', label: 'دفتر', transform: (v) => v ? v[1] : '' },
+              { key: 'amount_total', label: 'مبلغ' },
+              { key: 'move_type', label: 'نوع' },
+              { key: 'state', label: 'وضعیت' },
+            ]}
+            filename="accounting-entries"
+          />
           <button onClick={() => openForm('receipt')} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700 transition">
             + سند دریافت
           </button>

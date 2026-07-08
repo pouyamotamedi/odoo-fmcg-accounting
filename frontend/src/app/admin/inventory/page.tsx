@@ -11,6 +11,7 @@ import {
 } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
+import ExcelButtons from '@/components/ExcelButtons';
 
 interface ProductTemplate {
   id: number;
@@ -347,7 +348,32 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-bold text-slate-800">انبار و کالاها</h1>
           <p className="text-gray-500 text-sm">مدیریت محصولات، واریانت‌ها و موجودی</p>
         </div>
-        <button onClick={openNewForm} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition">+ کالای جدید</button>
+        <div className="flex gap-2 items-center">
+          <ExcelButtons
+            data={templates}
+            columns={[
+              { key: 'name', label: 'نام کالا' },
+              { key: 'standard_price', label: 'قیمت خرید' },
+              { key: 'list_price', label: 'قیمت فروش' },
+              { key: 'categ_id', label: 'دسته‌بندی', transform: (v) => v ? v[1] : '' },
+              { key: 'product_variant_count', label: 'تعداد واریانت' },
+            ]}
+            filename="products"
+            onImport={async (rows) => {
+              let count = 0;
+              for (const row of rows) {
+                if (!row['نام کالا']) continue;
+                try {
+                  await createProduct({ name: row['نام کالا'], list_price: Number(row['قیمت فروش']) || 0, standard_price: Number(row['قیمت خرید']) || 0 });
+                  count++;
+                } catch {}
+              }
+              alert(`${count} کالا وارد شد`);
+              await fetchTemplates();
+            }}
+          />
+          <button onClick={openNewForm} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition">+ کالای جدید</button>
+        </div>
       </div>
 
       {/* Search & Filter */}
