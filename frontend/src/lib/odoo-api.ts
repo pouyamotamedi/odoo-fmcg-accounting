@@ -1241,3 +1241,81 @@ export async function getProductsWithDiscount(categoryId: number) {
     return { ...p, discount_price: discountPrice };
   });
 }
+
+
+// ============ Edit Posted Invoices ============
+
+/**
+ * Edit a posted invoice: reset to draft, update lines, re-post.
+ * Also handles reversing related stock pickings and payments.
+ */
+export async function editPostedInvoice(invoiceId: number, newLines: Array<{ product_id: number; quantity: number; price_unit: number }>) {
+  // 1. Reset invoice to draft
+  await callMethod('account.move', 'button_draft', [[invoiceId]]);
+
+  // 2. Get current invoice lines and delete them
+  const currentLines = await searchRead('account.move.line', [['move_id', '=', invoiceId], ['display_type', '=', 'product']], ['id']);
+  if (currentLines && currentLines.length > 0) {
+    // Remove old lines (using write with command 2 = unlink)
+    const unlinkCmds = currentLines.map((l: any) => [2, l.id, 0]);
+    await write('account.move', [invoiceId], { invoice_line_ids: unlinkCmds });
+  }
+
+  // 3. Add new lines
+  const addCmds = newLines.map((line) => [0, 0, {
+    product_id: line.product_id,
+    quantity: line.quantity,
+    price_unit: line.price_unit,
+  }]);
+  await write('account.move', [invoiceId], { invoice_line_ids: addCmds });
+
+  // 4. Re-post the invoice
+  await confirmInvoice(invoiceId);
+
+  return invoiceId;
+}
+
+/**
+ * Cancel related stock pickings for an invoice (for re-doing stock)
+ */
+export async function cancelRelatedPickings(invoiceId: number) {
+  // Find pickings related to this invoice
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['name'], 1);
+  if (!invoice || invoice.length === 0) return;
+
+  const pickings = await searchRead('stock.picking', [
+    ['origin', 'ilike', invoice[0].name],
+    ['state', '!=', 'cancel'],
+  ], ['id', 'state']);
+
+  for (const picking of (pickings || [])) {
+    try {
+      await callMethod('stock.picking', 'action_cancel', [[picking.id]]);
+    } catch { /* may already be done */ }
+  }
+}
+
+/**
+ * Cancel related payments for an invoice
+ */
+export async function cancelRelatedPayments(invoiceId: number) {
+  // Find payments reconciled with this invoice via account.move.line
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['name', 'partner_id'], 1);
+  if (!invoice || invoice.length === 0) return;
+
+  // Find payments referencing this invoice
+  const payments = await searchRead('account.payment', [
+    ['partner_id', '=', invoice[0].partner_id?.[0] || false],
+    ['state', '=', 'posted'],
+  ], ['id', 'ref'], 0);
+
+  // Cancel payments that reference this invoice number
+  for (const pay of (payments || [])) {
+    if (pay.ref && pay.ref.includes(invoice[0].name)) {
+      try {
+        await callMethod('account.payment', 'action_draft', [[pay.id]]);
+        await callMethod('account.payment', 'action_cancel', [[pay.id]]);
+      } catch { /* best effort */ }
+    }
+  }
+}

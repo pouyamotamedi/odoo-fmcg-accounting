@@ -13,6 +13,7 @@ interface DashData {
   outstanding: number;
   lowStockProducts: string[];
   highDebtCustomers: string[];
+  salesChart: { label: string; amount: number }[];
 }
 
 function DashCard({ title, value, color }: { title: string; value: string; color?: string }) {
@@ -38,7 +39,7 @@ function ActionButton({ href, icon, label }: { href: string; icon: string; label
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [] });
+  const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [], salesChart: [] });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -66,6 +67,16 @@ export default function AdminDashboard() {
         const lowStock = (allProducts || []).filter((p: any) => p.qty_available <= (p.fmcg_reorder_threshold || 5)).map((p: any) => p.name);
         // High debt customers
         const highDebt = (partners || []).filter((p: any) => p.receivable > 500000).map((p: any) => `${p.name} (${formatPrice(p.receivable)})`);
+        // Sales chart: last 7 days
+        const salesChart: { label: string; amount: number }[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(Date.now() - i * 864e5);
+          const dateStr = d.toISOString().split('T')[0];
+          const dayName = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'][d.getDay()];
+          const daySales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['invoice_date', '=', dateStr]], ['amount_total']);
+          const dayTotal = (daySales || []).reduce((s: number, inv: any) => s + (inv.amount_total || 0), 0);
+          salesChart.push({ label: dayName, amount: dayTotal });
+        }
         setData({
           todaySales: todaySalesData?.totalAmount || 0,
           txCount: todaySalesData?.count || 0,
@@ -73,10 +84,11 @@ export default function AdminDashboard() {
           outstanding,
           lowStockProducts: lowStock.slice(0, 5),
           highDebtCustomers: highDebt.slice(0, 5),
+          salesChart,
         });
       } catch {
         // Fallback demo data if Odoo not connected
-        setData({ todaySales: 12500000, txCount: 47, cashBalance: 8200000, outstanding: 3800000, lowStockProducts: [], highDebtCustomers: [] });
+        setData({ todaySales: 12500000, txCount: 47, cashBalance: 8200000, outstanding: 3800000, lowStockProducts: [], highDebtCustomers: [], salesChart: [] });
       }
       setLoading(false);
     }
@@ -96,6 +108,28 @@ export default function AdminDashboard() {
         <DashCard title="موجودی صندوق" value={loading ? '...' : formatPrice(data.cashBalance)} />
         <DashCard title="بدهی مشتریان" value={loading ? '...' : formatPrice(data.outstanding)} color="text-red-600" />
       </div>
+
+      {/* Sales Chart */}
+      {data.salesChart.length > 0 && (
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mb-8">
+          <h3 className="text-sm font-bold text-slate-700 mb-4">📊 نمودار فروش ۷ روز اخیر</h3>
+          <div className="flex items-end gap-2 h-32">
+            {(() => {
+              const maxAmt = Math.max(...data.salesChart.map(d => d.amount), 1);
+              return data.salesChart.map((d, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <div className="text-[9px] text-gray-500">{d.amount > 0 ? formatPrice(d.amount) : ''}</div>
+                  <div
+                    className="w-full bg-indigo-400 rounded-t-md transition-all"
+                    style={{ height: `${Math.max((d.amount / maxAmt) * 100, 2)}%` }}
+                  />
+                  <div className="text-[10px] text-gray-500">{d.label.slice(0, 3)}</div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
 
       <h3 className="text-lg font-bold text-slate-800 mb-3">عملیات سریع</h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
