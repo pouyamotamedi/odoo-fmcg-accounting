@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import Link from 'next/link';
 
@@ -264,6 +264,21 @@ export default function PosPage() {
 
     setSubmitting(true);
     try {
+      // Check if editing existing invoice
+      const editingInvId = localStorage.getItem('pos_editing_invoice');
+      if (editingInvId) {
+        const invId = Number(editingInvId);
+        await cancelRelatedPickings(invId);
+        await editPostedInvoice(invId, items.map(i => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })));
+        try { await createStockDelivery(items.map(i => ({ product_id: i.id, qty: i.quantity }))); } catch {}
+        localStorage.removeItem('pos_editing_invoice');
+        clearCart();
+        setMsg('✅ فاکتور ویرایش شد');
+        setTimeout(() => setMsg(''), 3000);
+        setSubmitting(false);
+        return;
+      }
+
       // If offline, queue the transaction
       if (!navigator.onLine) {
         const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
@@ -809,7 +824,7 @@ export default function PosPage() {
             {salesHistory.length === 0 ? <p className="text-center text-gray-400 py-8">فاکتوری یافت نشد</p> : (
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b"><tr>
-                  <th className="text-right p-2">شماره</th><th className="text-right p-2">مشتری</th><th className="text-right p-2">مبلغ</th><th className="text-right p-2">وضعیت</th><th className="text-right p-2">جزئیات</th>
+                  <th className="text-right p-2">شماره</th><th className="text-right p-2">مشتری</th><th className="text-right p-2">مبلغ</th><th className="text-right p-2">وضعیت</th><th className="text-right p-2">عملیات</th>
                 </tr></thead>
                 <tbody>{salesHistory.map((inv:any) => (<React.Fragment key={inv.id}>
                   <tr className="border-b hover:bg-gray-50">
@@ -817,7 +832,22 @@ export default function PosPage() {
                     <td className="p-2">{inv.partner_id?inv.partner_id[1]:'—'}</td>
                     <td className="p-2 font-bold">{formatPrice(inv.amount_total)}</td>
                     <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inv.payment_state==='paid'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{inv.payment_state==='paid'?'پرداخت شده':'تأیید شده'}</span></td>
-                    <td className="p-2"><button onClick={async()=>{if(expandedSale===inv.id){setExpandedSale(null);setSaleLines([]);return;} try{const l=await getPurchaseInvoiceLines(inv.id);setSaleLines(l||[]);setExpandedSale(inv.id);}catch{setSaleLines([]);}}} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">مشاهده</button></td>
+                    <td className="p-2 flex gap-1">
+                      <button onClick={async()=>{if(expandedSale===inv.id){setExpandedSale(null);setSaleLines([]);return;} try{const l=await getPurchaseInvoiceLines(inv.id);setSaleLines(l||[]);setExpandedSale(inv.id);}catch{setSaleLines([]);}}} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">مشاهده</button>
+                      <button onClick={async()=>{
+                        try {
+                          const lines = await getPurchaseInvoiceLines(inv.id);
+                          const editItems = (lines||[]).map((l:any)=>({id:l.product_id?.[0]||l.product_id,name:l.product_id?.[1]||l.name,price:l.price_unit,quantity:l.quantity}));
+                          // Load into cart
+                          clearCart();
+                          for(const item of editItems){ for(let q=0;q<item.quantity;q++) addItem({id:item.id,name:item.name,price:item.price}); }
+                          setShowSalesHistory(false);
+                          setMsg(`📝 فاکتور ${inv.name} در حال ویرایش — تغییرات بدید. ثبت مجدد جایگزین فاکتور قبلی میشه.`);
+                          // Store for edit mode
+                          localStorage.setItem('pos_editing_invoice', String(inv.id));
+                        } catch(e:any){alert(e.message||'خطا');}
+                      }} className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded">✏️</button>
+                    </td>
                   </tr>
                   {expandedSale===inv.id&&(<tr key={`d-${inv.id}`}><td colSpan={5} className="p-2 bg-gray-50">
                     {saleLines.length===0?<p className="text-xs text-gray-400">بدون آیتم</p>:(
