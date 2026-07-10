@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, setDiscountPrice, editPostedInvoice, cancelRelatedPickings } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
@@ -437,8 +437,8 @@ export default function PurchasePage() {
                   </thead>
                   <tbody>
                     {history.map((inv: any) => (
-                      <>
-                      <tr key={inv.id} className="border-b border-gray-50 hover:bg-gray-50">
+                      <React.Fragment key={inv.id}>
+                      <tr className="border-b border-gray-50 hover:bg-gray-50">
                         <td className="p-3">{inv.name || '—'}</td>
                         <td className="p-3">{inv.partner_id ? inv.partner_id[1] : '—'}</td>
                         <td className="p-3 font-bold">{formatPrice(inv.amount_total || 0)}</td>
@@ -467,7 +467,7 @@ export default function PurchasePage() {
                           )}
                         </td></tr>
                       )}
-                      </>
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>

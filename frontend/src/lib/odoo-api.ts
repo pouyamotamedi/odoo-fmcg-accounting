@@ -1250,13 +1250,32 @@ export async function getProductsWithDiscount(categoryId: number) {
  * Also handles reversing related stock pickings and payments.
  */
 export async function editPostedInvoice(invoiceId: number, newLines: Array<{ product_id: number; quantity: number; price_unit: number }>) {
+  // 0. Cancel related payments first (reverse them)
+  try {
+    // Find payments linked to this invoice via reconciliation
+    const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['name', 'partner_id', 'amount_total'], 1);
+    if (invoice && invoice.length > 0) {
+      // Find all posted payments for this partner that match the amount
+      const payments = await searchRead('account.payment', [
+        ['partner_id', '=', invoice[0].partner_id?.[0] || false],
+        ['state', '=', 'posted'],
+        ['amount', '=', invoice[0].amount_total],
+      ], ['id'], 5);
+      for (const pay of (payments || [])) {
+        try {
+          await callMethod('account.payment', 'action_draft', [[pay.id]]);
+          await callMethod('account.payment', 'action_cancel', [[pay.id]]);
+        } catch { /* best effort */ }
+      }
+    }
+  } catch { /* payment cancellation failed, continue with edit */ }
+
   // 1. Reset invoice to draft
   await callMethod('account.move', 'button_draft', [[invoiceId]]);
 
   // 2. Get current invoice lines and delete them
   const currentLines = await searchRead('account.move.line', [['move_id', '=', invoiceId], ['display_type', '=', 'product']], ['id']);
   if (currentLines && currentLines.length > 0) {
-    // Remove old lines (using write with command 2 = unlink)
     const unlinkCmds = currentLines.map((l: any) => [2, l.id, 0]);
     await write('account.move', [invoiceId], { invoice_line_ids: unlinkCmds });
   }

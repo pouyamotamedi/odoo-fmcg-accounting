@@ -21,6 +21,7 @@ interface ProductTemplate {
   categ_id: [number, string] | false;
   product_variant_count: number;
   image_512: string | false;
+  total_qty: number;
 }
 
 interface Variant {
@@ -111,11 +112,12 @@ export default function InventoryPage() {
             categ_id: p.categ_id || false,
             product_variant_count: 0,
             image_512: p.image_512 || false,
+            total_qty: 0,
           });
         }
         const t = tmplMap.get(tmplId)!;
         t.product_variant_count++;
-        // Use highest standard_price among variants
+        t.total_qty += (p.qty_available || 0);
         if (p.standard_price > t.standard_price) t.standard_price = p.standard_price;
       }
       setTemplates(Array.from(tmplMap.values()));
@@ -406,6 +408,7 @@ export default function InventoryPage() {
                 </div>
                 <div className="text-xs text-gray-500 px-3">خرید: {formatPrice(t.standard_price)}</div>
                 <div className="text-xs text-green-600 font-bold px-3">فروش: {formatPrice(t.list_price)}</div>
+                <div className="text-xs text-blue-600 font-bold px-2">موجودی: {toPersianDigits(Math.round(t.total_qty))}</div>
                 <div className="flex gap-1 px-2">
                   <button onClick={(e) => { e.stopPropagation(); openEditForm(t); }} className="text-xs text-blue-500 hover:text-blue-700 px-1">✏️</button>
                   <button onClick={(e) => { e.stopPropagation(); openAttrForm(t.id); }} className="text-xs text-purple-500 hover:text-purple-700 px-1" title="افزودن ویژگی">🏷️</button>

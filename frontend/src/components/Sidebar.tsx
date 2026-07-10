@@ -36,7 +36,7 @@ export default function Sidebar() {
   }, [companyName, setCompany]);
 
   return (
-    <aside className="w-60 bg-slate-800 text-white min-h-screen flex flex-col">
+    <aside className="w-60 bg-slate-800 text-white h-screen flex flex-col sticky top-0 overflow-y-auto">
       {/* Logo */}
       <div className="p-5 border-b border-slate-700 text-center">
         <h2 className="text-lg font-bold">🏪 {companyName || 'فروشگاه من'}</h2>
