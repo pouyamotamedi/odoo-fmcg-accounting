@@ -1338,3 +1338,108 @@ export async function cancelRelatedPayments(invoiceId: number) {
     }
   }
 }
+
+
+// ============ Corrective Operations ============
+
+/**
+ * Change payment method for a sales invoice (e.g., cash was selected but should be card)
+ * This reverses the old payment and creates a new one with the correct journal.
+ */
+export async function changePaymentMethod(invoiceId: number, newJournalId: number) {
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['partner_id', 'amount_total', 'move_type'], 1);
+  if (!invoice || invoice.length === 0) throw new Error('فاکتور یافت نشد');
+
+  const partnerId = invoice[0].partner_id?.[0] || false;
+  const amount = invoice[0].amount_total;
+  const isOutInvoice = invoice[0].move_type === 'out_invoice';
+
+  // Find existing payments for this invoice
+  const payments = await searchRead('account.payment', [
+    ['partner_id', '=', partnerId],
+    ['amount', '=', amount],
+    ['state', '=', 'posted'],
+  ], ['id', 'journal_id'], 5);
+
+  // Cancel existing payments
+  for (const pay of (payments || []).slice(0, 1)) {
+    try {
+      await callMethod('account.payment', 'action_draft', [[pay.id]]);
+      await callMethod('account.payment', 'action_cancel', [[pay.id]]);
+    } catch { /* may fail if already reconciled - try reverse */ }
+  }
+
+  // Create new payment with correct journal
+  const paymentType = isOutInvoice ? 'inbound' : 'outbound';
+  const partnerType = isOutInvoice ? 'customer' : 'supplier';
+  const newPaymentId = await create('account.payment', {
+    payment_type: paymentType,
+    partner_type: partnerType,
+    partner_id: partnerId,
+    amount: amount,
+    journal_id: newJournalId,
+  });
+  await callMethod('account.payment', 'action_post', [[newPaymentId]]);
+  return newPaymentId;
+}
+
+/**
+ * Correct an invoice by creating a credit note and new invoice.
+ * This is the accounting-safe way to "edit" a posted invoice.
+ */
+export async function correctInvoice(
+  invoiceId: number,
+  newLines: Array<{ product_id: number; quantity: number; price_unit: number }>,
+  journalId?: number
+) {
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], [
+    'partner_id', 'move_type', 'amount_total',
+  ], 1);
+  if (!invoice || invoice.length === 0) throw new Error('فاکتور یافت نشد');
+
+  const partnerId = invoice[0].partner_id?.[0] || false;
+  const moveType = invoice[0].move_type;
+  const refundType = moveType === 'out_invoice' ? 'out_refund' : 'in_refund';
+
+  // 1. Create credit note (refund) for the old invoice
+  const oldLines = await searchRead('account.move.line', [
+    ['move_id', '=', invoiceId], ['display_type', '=', 'product'],
+  ], ['product_id', 'quantity', 'price_unit']);
+
+  const refundLineCmds = (oldLines || []).map((l: any) => [0, 0, {
+    product_id: l.product_id?.[0] || l.product_id,
+    quantity: l.quantity,
+    price_unit: l.price_unit,
+  }]);
+
+  const refundId = await create('account.move', {
+    move_type: refundType,
+    partner_id: partnerId,
+    invoice_line_ids: refundLineCmds,
+    narration: `اصلاح فاکتور ${invoice[0].name || invoiceId}`,
+  });
+  await confirmInvoice(refundId);
+
+  // 2. Create new corrected invoice
+  const newLineCmds = newLines.map((l) => [0, 0, {
+    product_id: l.product_id,
+    quantity: l.quantity,
+    price_unit: l.price_unit,
+  }]);
+
+  const newInvoiceId = await create('account.move', {
+    move_type: moveType,
+    partner_id: partnerId,
+    invoice_line_ids: newLineCmds,
+    narration: `اصلاح‌شده از فاکتور ${invoice[0].name || invoiceId}`,
+  });
+  await confirmInvoice(newInvoiceId);
+
+  // 3. Register payment for new invoice if journal specified
+  if (journalId) {
+    const newAmount = newLines.reduce((s, l) => s + l.quantity * l.price_unit, 0);
+    await registerInvoicePayment(newInvoiceId, journalId, newAmount);
+  }
+
+  return { refundId, newInvoiceId };
+}

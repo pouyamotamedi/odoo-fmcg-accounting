@@ -171,23 +171,33 @@ export default function PurchasePage() {
     if (!supplier) { alert('تامین‌کننده را انتخاب کنید'); return; }
     if (items.length === 0) return;
 
-    // If editing an existing invoice
+    // If editing an existing invoice — use correction method (credit note + new invoice)
     if (pendingInvoiceId) {
       setSubmitting(true);
       try {
-        // Cancel related pickings first
-        await cancelRelatedPickings(pendingInvoiceId);
-        // Edit the invoice
-        await editPostedInvoice(pendingInvoiceId, items.map(i => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })));
-        // Re-create stock receipt
-        try { await createStockReceipt(pendingInvoiceId); } catch {}
+        const { correctInvoice } = await import('@/lib/odoo-api');
+        // Get journal for payment
+        let jId: number | undefined;
+        if (paymentMethod !== 'credit') {
+          const relevantJournals = journals.filter(j => paymentMethod === 'cash' ? j.type === 'cash' : j.type === 'bank');
+          jId = relevantJournals[0]?.id;
+        }
+        const result = await correctInvoice(
+          pendingInvoiceId,
+          items.map(i => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })),
+          jId
+        );
+        // Re-create stock receipt for new invoice
+        try { await createStockReceipt(result.newInvoiceId); } catch {}
+        // Cancel old stock pickings
+        try { await cancelRelatedPickings(pendingInvoiceId); } catch {}
         setItems([]);
         setSupplier(0);
         setPendingInvoiceId(0);
-        setMsg('✅ فاکتور ویرایش شد');
-        setTimeout(() => setMsg(''), 4000);
+        setMsg('✅ فاکتور اصلاح شد (credit note + فاکتور جدید)');
+        setTimeout(() => setMsg(''), 5000);
         await loadHistory(histFilter);
-      } catch (e: any) { alert(e.message || 'خطا در ویرایش فاکتور'); }
+      } catch (e: any) { alert(e.message || 'خطا در اصلاح فاکتور'); }
       setSubmitting(false);
       return;
     }

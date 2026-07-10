@@ -268,12 +268,29 @@ export default function PosPage() {
       const editingInvId = localStorage.getItem('pos_editing_invoice');
       if (editingInvId) {
         const invId = Number(editingInvId);
-        await cancelRelatedPickings(invId);
-        await editPostedInvoice(invId, items.map(i => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })));
-        try { await createStockDelivery(items.map(i => ({ product_id: i.id, qty: i.quantity }))); } catch {}
+        try {
+          const { correctInvoice } = await import('@/lib/odoo-api');
+          // Get journal
+          let jId: number | undefined;
+          try {
+            const saved = localStorage.getItem('pos_journal_settings');
+            if (saved) { const s = JSON.parse(saved); jId = method === 'card' ? s.card : s.cash; }
+          } catch {}
+          if (!jId) { const j = posJournals.find(j => method === 'card' ? j.type === 'bank' : j.type === 'cash'); jId = j?.id; }
+
+          const result = await correctInvoice(
+            invId,
+            items.map(i => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })),
+            jId
+          );
+          // New stock delivery
+          try { await createStockDelivery(items.map(i => ({ product_id: i.id, qty: i.quantity }))); } catch {}
+          // Cancel old pickings
+          try { await cancelRelatedPickings(invId); } catch {}
+        } catch (e: any) { alert(e.message || 'خطا در اصلاح'); }
         localStorage.removeItem('pos_editing_invoice');
         clearCart();
-        setMsg('✅ فاکتور ویرایش شد');
+        setMsg('✅ فاکتور اصلاح شد');
         setTimeout(() => setMsg(''), 3000);
         setSubmitting(false);
         return;
@@ -846,7 +863,21 @@ export default function PosPage() {
                           // Store for edit mode
                           localStorage.setItem('pos_editing_invoice', String(inv.id));
                         } catch(e:any){alert(e.message||'خطا');}
-                      }} className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded">✏️</button>
+                      }} className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded">✏️ اقلام</button>
+                      <button onClick={async()=>{
+                        const choice = prompt('روش پرداخت جدید:\n1 = نقد\n2 = کارت');
+                        if (!choice) return;
+                        try {
+                          const { changePaymentMethod } = await import('@/lib/odoo-api');
+                          let jId: number | undefined;
+                          try { const s = JSON.parse(localStorage.getItem('pos_journal_settings')||'{}'); jId = choice==='2' ? s.card : s.cash; } catch{}
+                          if (!jId) { const j = posJournals.find(j => choice==='2' ? j.type==='bank' : j.type==='cash'); jId = j?.id; }
+                          if (!jId) { alert('journal یافت نشد - تنظیمات را چک کنید'); return; }
+                          await changePaymentMethod(inv.id, jId);
+                          setMsg('✅ روش پرداخت تغییر کرد');
+                          setTimeout(()=>setMsg(''),3000);
+                        } catch(e:any){alert(e.message||'خطا');}
+                      }} className="text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-1 rounded">💳 تغییر پرداخت</button>
                     </td>
                   </tr>
                   {expandedSale===inv.id&&(<tr key={`d-${inv.id}`}><td colSpan={5} className="p-2 bg-gray-50">
