@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, setDiscountPrice, editPostedInvoice, cancelRelatedPickings } from '@/lib/odoo-api';
+import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, setDiscountPrice, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
 
@@ -171,37 +171,6 @@ export default function PurchasePage() {
     if (!supplier) { alert('تامین‌کننده را انتخاب کنید'); return; }
     if (items.length === 0) return;
 
-    // If editing an existing invoice — use correction method (credit note + new invoice)
-    if (pendingInvoiceId) {
-      setSubmitting(true);
-      try {
-        const { correctInvoice } = await import('@/lib/odoo-api');
-        // Get journal for payment
-        let jId: number | undefined;
-        if (paymentMethod !== 'credit') {
-          const relevantJournals = journals.filter(j => paymentMethod === 'cash' ? j.type === 'cash' : j.type === 'bank');
-          jId = relevantJournals[0]?.id;
-        }
-        const result = await correctInvoice(
-          pendingInvoiceId,
-          items.map(i => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })),
-          jId
-        );
-        // Re-create stock receipt for new invoice
-        try { await createStockReceipt(result.newInvoiceId); } catch {}
-        // Cancel old stock pickings
-        try { await cancelRelatedPickings(pendingInvoiceId); } catch {}
-        setItems([]);
-        setSupplier(0);
-        setPendingInvoiceId(0);
-        setMsg('✅ فاکتور اصلاح شد (credit note + فاکتور جدید)');
-        setTimeout(() => setMsg(''), 5000);
-        await loadHistory(histFilter);
-      } catch (e: any) { alert(e.message || 'خطا در اصلاح فاکتور'); }
-      setSubmitting(false);
-      return;
-    }
-
     if (paymentMethod === 'credit') {
       // نسیه - فقط فاکتور ثبت شود بدون پرداخت
       setSubmitting(true);
@@ -358,6 +327,31 @@ export default function PurchasePage() {
     } catch (e: any) { alert(e.message || 'خطا'); }
   }
 
+  async function handleVoidInvoice(inv: any) {
+    if (!confirm(`ابطال فاکتور ${inv.name}؟\nیک credit note ایجاد میشه و فاکتور خنثی میشه. حواله انبار مربوطه هم لغو میشه.`)) return;
+    try {
+      // Create debit note (refund for purchase = in_refund)
+      const oldLines = await getPurchaseInvoiceLines(inv.id);
+      const refundLines = (oldLines || []).map((l: any) => [0, 0, {
+        product_id: l.product_id?.[0] || l.product_id,
+        quantity: l.quantity,
+        price_unit: l.price_unit,
+      }]);
+      const refundId = await create('account.move', {
+        move_type: 'in_refund',
+        partner_id: inv.partner_id?.[0] || false,
+        invoice_line_ids: refundLines,
+        narration: `ابطال فاکتور خرید ${inv.name}`,
+      });
+      await confirmInvoice(refundId);
+      // Cancel related pickings
+      await cancelRelatedPickings(inv.id);
+      setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
+      setTimeout(() => setMsg(''), 4000);
+      await loadHistory(histFilter);
+    } catch (e: any) { alert(e.message || 'خطا در ابطال'); }
+  }
+
   async function handleStockReceipt(invoiceId: number) {
     try {
       await createStockReceipt(invoiceId);
@@ -459,9 +453,8 @@ export default function PurchasePage() {
                         </td>
                         <td className="p-3 flex gap-1">
                           <button onClick={() => handleExpandInvoice(inv.id)} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">جزئیات</button>
-                          <button onClick={() => handleEditInvoice(inv)} className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded">✏️ ویرایش</button>
                           <button onClick={() => handleStockReceipt(inv.id)} className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded">📦 انبار</button>
-                          <button onClick={() => handleDeleteInvoice(inv.id)} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🗑️</button>
+                          <button onClick={() => handleVoidInvoice(inv)} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
                         </td>
                       </tr>
                       {expandedInvoice === inv.id && (

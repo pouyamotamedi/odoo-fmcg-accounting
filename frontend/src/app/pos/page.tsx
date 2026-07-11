@@ -264,38 +264,6 @@ export default function PosPage() {
 
     setSubmitting(true);
     try {
-      // Check if editing existing invoice
-      const editingInvId = localStorage.getItem('pos_editing_invoice');
-      if (editingInvId) {
-        const invId = Number(editingInvId);
-        try {
-          const { correctInvoice } = await import('@/lib/odoo-api');
-          // Get journal
-          let jId: number | undefined;
-          try {
-            const saved = localStorage.getItem('pos_journal_settings');
-            if (saved) { const s = JSON.parse(saved); jId = method === 'card' ? s.card : s.cash; }
-          } catch {}
-          if (!jId) { const j = posJournals.find(j => method === 'card' ? j.type === 'bank' : j.type === 'cash'); jId = j?.id; }
-
-          const result = await correctInvoice(
-            invId,
-            items.map(i => ({ product_id: i.id, quantity: i.quantity, price_unit: i.price })),
-            jId
-          );
-          // New stock delivery
-          try { await createStockDelivery(items.map(i => ({ product_id: i.id, qty: i.quantity }))); } catch {}
-          // Cancel old pickings
-          try { await cancelRelatedPickings(invId); } catch {}
-        } catch (e: any) { alert(e.message || 'خطا در اصلاح'); }
-        localStorage.removeItem('pos_editing_invoice');
-        clearCart();
-        setMsg('✅ فاکتور اصلاح شد');
-        setTimeout(() => setMsg(''), 3000);
-        setSubmitting(false);
-        return;
-      }
-
       // If offline, queue the transaction
       if (!navigator.onLine) {
         const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
@@ -852,32 +820,30 @@ export default function PosPage() {
                     <td className="p-2 flex gap-1">
                       <button onClick={async()=>{if(expandedSale===inv.id){setExpandedSale(null);setSaleLines([]);return;} try{const l=await getPurchaseInvoiceLines(inv.id);setSaleLines(l||[]);setExpandedSale(inv.id);}catch{setSaleLines([]);}}} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">مشاهده</button>
                       <button onClick={async()=>{
+                        if (!confirm(`ابطال فاکتور ${inv.name}؟\nاین عملیات یک credit note ایجاد میکنه و فاکتور رو خنثی میکنه.`)) return;
                         try {
-                          const lines = await getPurchaseInvoiceLines(inv.id);
-                          const editItems = (lines||[]).map((l:any)=>({id:l.product_id?.[0]||l.product_id,name:l.product_id?.[1]||l.name,price:l.price_unit,quantity:l.quantity}));
-                          // Load into cart
-                          clearCart();
-                          for(const item of editItems){ for(let q=0;q<item.quantity;q++) addItem({id:item.id,name:item.name,price:item.price}); }
-                          setShowSalesHistory(false);
-                          setMsg(`📝 فاکتور ${inv.name} در حال ویرایش — تغییرات بدید. ثبت مجدد جایگزین فاکتور قبلی میشه.`);
-                          // Store for edit mode
-                          localStorage.setItem('pos_editing_invoice', String(inv.id));
-                        } catch(e:any){alert(e.message||'خطا');}
-                      }} className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded">✏️ اقلام</button>
-                      <button onClick={async()=>{
-                        const choice = prompt('روش پرداخت جدید:\n1 = نقد\n2 = کارت');
-                        if (!choice) return;
-                        try {
-                          const { changePaymentMethod } = await import('@/lib/odoo-api');
-                          let jId: number | undefined;
-                          try { const s = JSON.parse(localStorage.getItem('pos_journal_settings')||'{}'); jId = choice==='2' ? s.card : s.cash; } catch{}
-                          if (!jId) { const j = posJournals.find(j => choice==='2' ? j.type==='bank' : j.type==='cash'); jId = j?.id; }
-                          if (!jId) { alert('journal یافت نشد - تنظیمات را چک کنید'); return; }
-                          await changePaymentMethod(inv.id, jId);
-                          setMsg('✅ روش پرداخت تغییر کرد');
-                          setTimeout(()=>setMsg(''),3000);
-                        } catch(e:any){alert(e.message||'خطا');}
-                      }} className="text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-1 rounded">💳 تغییر پرداخت</button>
+                          const { correctInvoice: _, cancelRelatedPickings: __, ...api } = await import('@/lib/odoo-api');
+                          // Create a refund (credit note) for the full amount
+                          const oldLines = await getPurchaseInvoiceLines(inv.id);
+                          const refundLines = (oldLines||[]).map((l:any)=>[0,0,{product_id:l.product_id?.[0]||l.product_id,quantity:l.quantity,price_unit:l.price_unit}]);
+                          const refundId = await api.create('account.move', {
+                            move_type: 'out_refund',
+                            partner_id: inv.partner_id?.[0] || false,
+                            invoice_line_ids: refundLines,
+                            narration: `ابطال فاکتور ${inv.name}`,
+                          });
+                          await api.confirmInvoice(refundId);
+                          // Cancel related pickings
+                          try {
+                            const pickings = await api.searchRead('stock.picking', [['origin','ilike',inv.name],['state','!=','cancel']], ['id']);
+                            for (const p of (pickings||[])) { try { await api.callMethod('stock.picking','action_cancel',[[p.id]]); } catch{} }
+                          } catch{}
+                          setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
+                          setTimeout(()=>setMsg(''),4000);
+                          // Reload history
+                          try { const h = await api.searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','payment_state'],50,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
+                        } catch(e:any){alert(e.message||'خطا در ابطال');}
+                      }} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
                     </td>
                   </tr>
                   {expandedSale===inv.id&&(<tr key={`d-${inv.id}`}><td colSpan={5} className="p-2 bg-gray-50">
