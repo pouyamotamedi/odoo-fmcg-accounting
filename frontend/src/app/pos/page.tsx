@@ -468,7 +468,7 @@ export default function PosPage() {
               بازگشت به پنل ←
             </Link>
             <button onClick={async () => {
-              try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','payment_state'], 30, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
+              try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','payment_state','narration'], 30, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
               setShowSalesHistory(true);
             }} className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded">📋 سوابق</button>
           </div>
@@ -816,22 +816,26 @@ export default function PosPage() {
                     <td className="p-2">{inv.name}</td>
                     <td className="p-2">{inv.partner_id?inv.partner_id[1]:'—'}</td>
                     <td className="p-2 font-bold">{formatPrice(inv.amount_total)}</td>
-                    <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inv.payment_state==='paid'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{inv.payment_state==='paid'?'پرداخت شده':'تأیید شده'}</span></td>
+                    <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inv.narration?.includes('ابطال') ? 'bg-red-100 text-red-700' : inv.payment_state==='paid'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{inv.narration?.includes('ابطال') ? '⛔ ابطال شده' : inv.payment_state==='paid'?'پرداخت شده':'تأیید شده'}</span></td>
                     <td className="p-2 flex gap-1">
                       <button onClick={async()=>{if(expandedSale===inv.id){setExpandedSale(null);setSaleLines([]);return;} try{const l=await getPurchaseInvoiceLines(inv.id);setSaleLines(l||[]);setExpandedSale(inv.id);}catch{setSaleLines([]);}}} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">مشاهده</button>
-                      <button onClick={async()=>{
-                        if (!confirm(`ابطال فاکتور ${inv.name}؟\nیک credit note ایجاد میشه، پول به صندوق/بانک برمیگرده و حواله انبار لغو میشه.`)) return;
-                        try {
-                          const { voidInvoice } = await import('@/lib/odoo-api');
-                          let jId: number | undefined;
-                          try { const s = JSON.parse(localStorage.getItem('pos_journal_settings')||'{}'); jId = s.cash || s.card; } catch{}
-                          if (!jId) { const j = posJournals.find(j => j.type === 'cash'); jId = j?.id; }
-                          await voidInvoice(inv.id, jId);
-                          setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
-                          setTimeout(()=>setMsg(''),4000);
-                          try { const h = await searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','payment_state'],50,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
-                        } catch(e:any){alert(e.message||'خطا در ابطال');}
-                      }} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
+                      {!inv.narration?.includes('ابطال') ? (
+                        <button onClick={async()=>{
+                          if (!confirm(`ابطال فاکتور ${inv.name}؟\nیک credit note ایجاد میشه، پول به صندوق/بانک برمیگرده و حواله انبار برمیگرده.`)) return;
+                          try {
+                            const { voidInvoice } = await import('@/lib/odoo-api');
+                            let jId: number | undefined;
+                            try { const s = JSON.parse(localStorage.getItem('pos_journal_settings')||'{}'); jId = s.cash || s.card; } catch{}
+                            if (!jId) { const j = posJournals.find(j => j.type === 'cash'); jId = j?.id; }
+                            await voidInvoice(inv.id, jId);
+                            setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
+                            setTimeout(()=>setMsg(''),4000);
+                            try { const h = await searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','payment_state','narration'],50,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
+                          } catch(e:any){alert(e.message||'خطا در ابطال');}
+                        }} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
+                      ) : (
+                        <span className="text-[10px] text-red-500 bg-red-50 px-2 py-1 rounded">⛔ ابطال شده</span>
+                      )}
                     </td>
                   </tr>
                   {expandedSale===inv.id&&(<tr key={`d-${inv.id}`}><td colSpan={5} className="p-2 bg-gray-50">

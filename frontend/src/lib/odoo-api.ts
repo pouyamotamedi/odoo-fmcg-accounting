@@ -1484,7 +1484,7 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
   });
   await confirmInvoice(refundId);
 
-  // If out_invoice voided and journal given, create outbound payment (return money)
+  // Payment reversal
   if (inv.move_type === 'out_invoice' && journalId) {
     const payId = await create('account.payment', {
       payment_type: 'outbound',
@@ -1496,8 +1496,6 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
     });
     await callMethod('account.payment', 'action_post', [[payId]]);
   }
-
-  // If in_invoice voided and journal given, create inbound payment (get money back)
   if (inv.move_type === 'in_invoice' && journalId) {
     const payId = await create('account.payment', {
       payment_type: 'inbound',
@@ -1510,12 +1508,26 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
     await callMethod('account.payment', 'action_post', [[payId]]);
   }
 
-  // Cancel related stock pickings
+  // Stock reversal: create a reverse picking (not cancel!)
+  // For purchase (in_invoice): original was incoming → create outgoing to return stock
+  // For sale (out_invoice): original was outgoing → create incoming to return stock to warehouse
   try {
-    const pickings = await searchRead('stock.picking', [['origin', 'ilike', inv.name], ['state', '!=', 'cancel']], ['id']);
-    for (const p of (pickings || [])) {
-      try { await callMethod('stock.picking', 'action_cancel', [[p.id]]); } catch {}
+    const productLines = (lines || []).map((l: any) => ({
+      product_id: l.product_id?.[0] || l.product_id,
+      qty: l.quantity,
+    }));
+
+    if (inv.move_type === 'in_invoice' && productLines.length > 0) {
+      await createStockDelivery(productLines, inv.partner_id?.[0] || undefined);
     }
+    if (inv.move_type === 'out_invoice' && productLines.length > 0) {
+      await createStockReceipt(refundId);
+    }
+  } catch { /* stock reversal failed, accounting is still correct */ }
+
+  // Mark original invoice as voided (narration)
+  try {
+    await write('account.move', [invoiceId], { narration: `⛔ ابطال شده — ${today}` });
   } catch {}
 
   return refundId;
