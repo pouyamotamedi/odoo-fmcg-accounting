@@ -6,6 +6,12 @@
 const ODOO_URL = process.env.NEXT_PUBLIC_ODOO_URL || '/api';
 const ODOO_DB = process.env.NEXT_PUBLIC_ODOO_DB || 'fmcg_shop';
 
+/** Get today's date in local timezone as YYYY-MM-DD */
+function getLocalToday(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
 interface JsonRpcResponse {
   jsonrpc: string;
   id: number;
@@ -348,7 +354,7 @@ export async function createPosOrder(values: {
     },
   ]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalToday();
 
   // For cash/card sales without a specific customer, use a default walk-in partner
   // or skip partner_id (some Odoo configs require it).
@@ -441,7 +447,7 @@ export async function createPurchaseInvoice(values: {
     },
   ]);
 
-  const invoiceDate = values.date || new Date().toISOString().split('T')[0];
+  const invoiceDate = values.date || getLocalToday();
 
   const invoiceId = await create('account.move', {
     move_type: 'in_invoice',
@@ -1031,7 +1037,7 @@ export async function deleteAccount(id: number) {
 // ============ Dashboard Helpers ============
 
 export async function getTodaySales() {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalToday();
   const sales = await searchRead(
     'account.move',
     [
@@ -1442,4 +1448,75 @@ export async function correctInvoice(
   }
 
   return { refundId, newInvoiceId };
+}
+
+
+// ============ Void Invoice (proper Odoo reversal) ============
+
+/**
+ * Void/reverse an invoice using Odoo's built-in reversal mechanism.
+ * Creates a credit note and optionally reconciles it.
+ */
+export async function voidInvoice(invoiceId: number, journalId?: number) {
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['move_type', 'amount_total', 'partner_id', 'name'], 1);
+  if (!invoice || invoice.length === 0) throw new Error('فاکتور یافت نشد');
+
+  const inv = invoice[0];
+  const today = getLocalToday();
+  const refundType = inv.move_type === 'out_invoice' ? 'out_refund' : inv.move_type === 'in_invoice' ? 'in_refund' : 'entry';
+
+  // Get invoice lines
+  const lines = await searchRead('account.move.line', [['move_id', '=', invoiceId], ['display_type', '=', 'product']], ['product_id', 'quantity', 'price_unit']);
+  const refundLineCmds = (lines || []).map((l: any) => [0, 0, {
+    product_id: l.product_id?.[0] || l.product_id,
+    quantity: l.quantity,
+    price_unit: l.price_unit,
+  }]);
+
+  // Create refund
+  const refundId = await create('account.move', {
+    move_type: refundType,
+    partner_id: inv.partner_id?.[0] || false,
+    invoice_line_ids: refundLineCmds,
+    invoice_date: today,
+    date: today,
+    narration: `ابطال ${inv.name}`,
+  });
+  await confirmInvoice(refundId);
+
+  // If out_invoice voided and journal given, create outbound payment (return money)
+  if (inv.move_type === 'out_invoice' && journalId) {
+    const payId = await create('account.payment', {
+      payment_type: 'outbound',
+      partner_type: 'customer',
+      partner_id: inv.partner_id?.[0] || false,
+      amount: inv.amount_total,
+      journal_id: journalId,
+      date: today,
+    });
+    await callMethod('account.payment', 'action_post', [[payId]]);
+  }
+
+  // If in_invoice voided and journal given, create inbound payment (get money back)
+  if (inv.move_type === 'in_invoice' && journalId) {
+    const payId = await create('account.payment', {
+      payment_type: 'inbound',
+      partner_type: 'supplier',
+      partner_id: inv.partner_id?.[0] || false,
+      amount: inv.amount_total,
+      journal_id: journalId,
+      date: today,
+    });
+    await callMethod('account.payment', 'action_post', [[payId]]);
+  }
+
+  // Cancel related stock pickings
+  try {
+    const pickings = await searchRead('stock.picking', [['origin', 'ilike', inv.name], ['state', '!=', 'cancel']], ['id']);
+    for (const p of (pickings || [])) {
+      try { await callMethod('stock.picking', 'action_cancel', [[p.id]]); } catch {}
+    }
+  } catch {}
+
+  return refundId;
 }

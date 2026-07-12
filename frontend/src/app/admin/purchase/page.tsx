@@ -328,24 +328,12 @@ export default function PurchasePage() {
   }
 
   async function handleVoidInvoice(inv: any) {
-    if (!confirm(`ابطال فاکتور ${inv.name}؟\nیک credit note ایجاد میشه و فاکتور خنثی میشه. حواله انبار مربوطه هم لغو میشه.`)) return;
+    if (!confirm(`ابطال فاکتور ${inv.name}؟\nیک credit note ایجاد میشه و حواله انبار لغو میشه.`)) return;
     try {
-      // Create debit note (refund for purchase = in_refund)
-      const oldLines = await getPurchaseInvoiceLines(inv.id);
-      const refundLines = (oldLines || []).map((l: any) => [0, 0, {
-        product_id: l.product_id?.[0] || l.product_id,
-        quantity: l.quantity,
-        price_unit: l.price_unit,
-      }]);
-      const refundId = await create('account.move', {
-        move_type: 'in_refund',
-        partner_id: inv.partner_id?.[0] || false,
-        invoice_line_ids: refundLines,
-        narration: `ابطال فاکتور خرید ${inv.name}`,
-      });
-      await confirmInvoice(refundId);
-      // Cancel related pickings
-      await cancelRelatedPickings(inv.id);
+      const { voidInvoice } = await import('@/lib/odoo-api');
+      // Find journal (use first bank or cash)
+      const jId = journals[0]?.id;
+      await voidInvoice(inv.id, jId);
       setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
       setTimeout(() => setMsg(''), 4000);
       await loadHistory(histFilter);

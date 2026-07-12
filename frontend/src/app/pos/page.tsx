@@ -820,28 +820,16 @@ export default function PosPage() {
                     <td className="p-2 flex gap-1">
                       <button onClick={async()=>{if(expandedSale===inv.id){setExpandedSale(null);setSaleLines([]);return;} try{const l=await getPurchaseInvoiceLines(inv.id);setSaleLines(l||[]);setExpandedSale(inv.id);}catch{setSaleLines([]);}}} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">مشاهده</button>
                       <button onClick={async()=>{
-                        if (!confirm(`ابطال فاکتور ${inv.name}؟\nاین عملیات یک credit note ایجاد میکنه و فاکتور رو خنثی میکنه.`)) return;
+                        if (!confirm(`ابطال فاکتور ${inv.name}؟\nیک credit note ایجاد میشه، پول به صندوق/بانک برمیگرده و حواله انبار لغو میشه.`)) return;
                         try {
-                          const { correctInvoice: _, cancelRelatedPickings: __, ...api } = await import('@/lib/odoo-api');
-                          // Create a refund (credit note) for the full amount
-                          const oldLines = await getPurchaseInvoiceLines(inv.id);
-                          const refundLines = (oldLines||[]).map((l:any)=>[0,0,{product_id:l.product_id?.[0]||l.product_id,quantity:l.quantity,price_unit:l.price_unit}]);
-                          const refundId = await api.create('account.move', {
-                            move_type: 'out_refund',
-                            partner_id: inv.partner_id?.[0] || false,
-                            invoice_line_ids: refundLines,
-                            narration: `ابطال فاکتور ${inv.name}`,
-                          });
-                          await api.confirmInvoice(refundId);
-                          // Cancel related pickings
-                          try {
-                            const pickings = await api.searchRead('stock.picking', [['origin','ilike',inv.name],['state','!=','cancel']], ['id']);
-                            for (const p of (pickings||[])) { try { await api.callMethod('stock.picking','action_cancel',[[p.id]]); } catch{} }
-                          } catch{}
+                          const { voidInvoice } = await import('@/lib/odoo-api');
+                          let jId: number | undefined;
+                          try { const s = JSON.parse(localStorage.getItem('pos_journal_settings')||'{}'); jId = s.cash || s.card; } catch{}
+                          if (!jId) { const j = posJournals.find(j => j.type === 'cash'); jId = j?.id; }
+                          await voidInvoice(inv.id, jId);
                           setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
                           setTimeout(()=>setMsg(''),4000);
-                          // Reload history
-                          try { const h = await api.searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','payment_state'],50,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
+                          try { const h = await searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','payment_state'],50,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
                         } catch(e:any){alert(e.message||'خطا در ابطال');}
                       }} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
                     </td>
