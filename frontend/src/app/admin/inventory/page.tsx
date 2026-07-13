@@ -97,7 +97,7 @@ export default function InventoryPage() {
     try {
       // Read product.product and group by template for accurate prices
       const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'display_name', 'list_price', 'standard_price', 'categ_id', 'product_tmpl_id', 'image_512',
+        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512',
       ], 0, 0, 'name asc');
       
       const tmplMap = new Map<number, ProductTemplate>();

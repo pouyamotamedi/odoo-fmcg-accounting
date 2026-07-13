@@ -415,7 +415,7 @@ export async function getPurchaseInvoices(state?: string) {
     domain.push(['payment_state', '=', 'paid']);
   }
   return searchRead('account.move', domain, [
-    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'payment_state', 'invoice_line_ids',
+    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'payment_state', 'invoice_line_ids', 'narration',
   ], 50, 0, 'create_date desc');
 }
 
@@ -1484,29 +1484,46 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
   });
   await confirmInvoice(refundId);
 
-  // Payment reversal
-  if (inv.move_type === 'out_invoice' && journalId) {
-    const payId = await create('account.payment', {
-      payment_type: 'outbound',
-      partner_type: 'customer',
-      partner_id: inv.partner_id?.[0] || false,
-      amount: inv.amount_total,
-      journal_id: journalId,
-      date: today,
-    });
-    await callMethod('account.payment', 'action_post', [[payId]]);
-  }
-  if (inv.move_type === 'in_invoice' && journalId) {
-    const payId = await create('account.payment', {
-      payment_type: 'inbound',
-      partner_type: 'supplier',
-      partner_id: inv.partner_id?.[0] || false,
-      amount: inv.amount_total,
-      journal_id: journalId,
-      date: today,
-    });
-    await callMethod('account.payment', 'action_post', [[payId]]);
-  }
+  // Payment reversal — find actual payments for this invoice and reverse each one from its own journal
+  try {
+    const payments = await searchRead('account.payment', [
+      ['partner_id', '=', inv.partner_id?.[0] || false],
+      ['state', '=', 'posted'],
+    ], ['id', 'amount', 'journal_id', 'payment_type', 'date'], 20, 0, 'date desc');
+
+    // Find payments that sum up to invoice amount (recent ones first)
+    let remaining = inv.amount_total;
+    for (const pay of (payments || [])) {
+      if (remaining <= 0) break;
+      const payAmount = Math.min(pay.amount, remaining);
+      const reverseType = pay.payment_type === 'outbound' ? 'inbound' : 'outbound';
+      const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
+      const reversePayId = await create('account.payment', {
+        payment_type: reverseType,
+        partner_type: partnerType,
+        partner_id: inv.partner_id?.[0] || false,
+        amount: payAmount,
+        journal_id: pay.journal_id?.[0] || pay.journal_id,
+        date: today,
+      });
+      await callMethod('account.payment', 'action_post', [[reversePayId]]);
+      remaining -= payAmount;
+    }
+    // If still remaining (credit/no payment found), use provided journal
+    if (remaining > 0 && journalId) {
+      const reverseType = inv.move_type === 'out_invoice' ? 'outbound' : 'inbound';
+      const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
+      const payId = await create('account.payment', {
+        payment_type: reverseType,
+        partner_type: partnerType,
+        partner_id: inv.partner_id?.[0] || false,
+        amount: remaining,
+        journal_id: journalId,
+        date: today,
+      });
+      await callMethod('account.payment', 'action_post', [[payId]]);
+    }
+  } catch { /* payment reversal failed */ }
 
   // Stock reversal: create a reverse picking (not cancel!)
   // For purchase (in_invoice): original was incoming → create outgoing to return stock

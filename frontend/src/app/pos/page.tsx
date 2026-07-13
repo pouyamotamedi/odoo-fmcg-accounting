@@ -816,10 +816,10 @@ export default function PosPage() {
                     <td className="p-2">{inv.name}</td>
                     <td className="p-2">{inv.partner_id?inv.partner_id[1]:'—'}</td>
                     <td className="p-2 font-bold">{formatPrice(inv.amount_total)}</td>
-                    <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inv.narration?.includes('ابطال') ? 'bg-red-100 text-red-700' : inv.payment_state==='paid'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{inv.narration?.includes('ابطال') ? '⛔ ابطال شده' : inv.payment_state==='paid'?'پرداخت شده':'تأیید شده'}</span></td>
+                    <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${(String(inv.narration||'')).includes('ابطال') ? 'bg-red-100 text-red-700' : inv.payment_state==='paid'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{(String(inv.narration||'')).includes('ابطال') ? '⛔ ابطال شده' : inv.payment_state==='paid'?'پرداخت شده':'تأیید شده'}</span></td>
                     <td className="p-2 flex gap-1">
                       <button onClick={async()=>{if(expandedSale===inv.id){setExpandedSale(null);setSaleLines([]);return;} try{const l=await getPurchaseInvoiceLines(inv.id);setSaleLines(l||[]);setExpandedSale(inv.id);}catch{setSaleLines([]);}}} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">مشاهده</button>
-                      {!inv.narration?.includes('ابطال') ? (
+                      {!(String(inv.narration||'')).includes('ابطال') ? (
                         <button onClick={async()=>{
                           if (!confirm(`ابطال فاکتور ${inv.name}؟\nیک credit note ایجاد میشه، پول به صندوق/بانک برمیگرده و حواله انبار برمیگرده.`)) return;
                           try {

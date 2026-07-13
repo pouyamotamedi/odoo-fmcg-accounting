@@ -435,14 +435,18 @@ export default function PurchasePage() {
                         <td className="p-3">{inv.partner_id ? inv.partner_id[1] : '—'}</td>
                         <td className="p-3 font-bold">{formatPrice(inv.amount_total || 0)}</td>
                         <td className="p-3">
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${inv.payment_state === 'paid' ? 'bg-green-100 text-green-700' : inv.state === 'posted' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-                            {inv.payment_state === 'paid' ? 'پرداخت شده' : inv.state === 'posted' ? 'تأیید شده' : 'پیش‌نویس'}
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${(String(inv.narration||'')).includes('ابطال') ? 'bg-red-100 text-red-700' : inv.payment_state === 'paid' ? 'bg-green-100 text-green-700' : inv.state === 'posted' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {(String(inv.narration||'')).includes('ابطال') ? '⛔ ابطال شده' : inv.payment_state === 'paid' ? 'پرداخت شده' : inv.state === 'posted' ? 'تأیید شده' : 'پیش‌نویس'}
                           </span>
                         </td>
                         <td className="p-3 flex gap-1">
                           <button onClick={() => handleExpandInvoice(inv.id)} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">جزئیات</button>
-                          <button onClick={() => handleStockReceipt(inv.id)} className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded">📦 انبار</button>
-                          <button onClick={() => handleVoidInvoice(inv)} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
+                          {!(String(inv.narration||'')).includes('ابطال') && (
+                            <>
+                              <button onClick={() => handleStockReceipt(inv.id)} className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded">📦 انبار</button>
+                              <button onClick={() => handleVoidInvoice(inv)} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
+                            </>
+                          )}
                         </td>
                       </tr>
                       {expandedInvoice === inv.id && (
