@@ -1484,45 +1484,62 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
   });
   await confirmInvoice(refundId);
 
-  // Payment reversal — find actual payments for this invoice and reverse each one from its own journal
+  // Payment reversal — find actual payments linked to THIS invoice specifically
+  // In Odoo, payments get reconciled with invoices. We look for payments that match
+  // the invoice via reconciled move lines.
   try {
-    const payments = await searchRead('account.payment', [
-      ['partner_id', '=', inv.partner_id?.[0] || false],
-      ['state', '=', 'posted'],
-    ], ['id', 'amount', 'journal_id', 'payment_type', 'date'], 20, 0, 'date desc');
+    // Get receivable/payable lines from the invoice
+    const invoiceLines = await searchRead('account.move.line', [
+      ['move_id', '=', invoiceId],
+      ['account_id.account_type', 'in', ['asset_receivable', 'liability_payable']],
+    ], ['id', 'matched_debit_ids', 'matched_credit_ids']);
 
-    // Find payments that sum up to invoice amount (recent ones first)
-    let remaining = inv.amount_total;
-    for (const pay of (payments || [])) {
-      if (remaining <= 0) break;
-      const payAmount = Math.min(pay.amount, remaining);
-      const reverseType = pay.payment_type === 'outbound' ? 'inbound' : 'outbound';
-      const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
-      const reversePayId = await create('account.payment', {
-        payment_type: reverseType,
-        partner_type: partnerType,
-        partner_id: inv.partner_id?.[0] || false,
-        amount: payAmount,
-        journal_id: pay.journal_id?.[0] || pay.journal_id,
-        date: today,
-      });
-      await callMethod('account.payment', 'action_post', [[reversePayId]]);
-      remaining -= payAmount;
+    // Collect all reconciliation entries
+    const reconIds = new Set<number>();
+    for (const line of (invoiceLines || [])) {
+      for (const id of (line.matched_debit_ids || [])) reconIds.add(id);
+      for (const id of (line.matched_credit_ids || [])) reconIds.add(id);
     }
-    // If still remaining (credit/no payment found), use provided journal
-    if (remaining > 0 && journalId) {
-      const reverseType = inv.move_type === 'out_invoice' ? 'outbound' : 'inbound';
-      const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
-      const payId = await create('account.payment', {
-        payment_type: reverseType,
-        partner_type: partnerType,
-        partner_id: inv.partner_id?.[0] || false,
-        amount: remaining,
-        journal_id: journalId,
-        date: today,
-      });
-      await callMethod('account.payment', 'action_post', [[payId]]);
+
+    // Find payments through reconciled move lines
+    if (reconIds.size > 0) {
+      // Get the partial reconcile records to find counterpart move lines
+      const partials = await searchRead('account.partial.reconcile', [['id', 'in', [...reconIds]]], ['debit_move_id', 'credit_move_id']);
+      const moveLineIds = new Set<number>();
+      for (const p of (partials || [])) {
+        if (p.debit_move_id) moveLineIds.add(p.debit_move_id[0] || p.debit_move_id);
+        if (p.credit_move_id) moveLineIds.add(p.credit_move_id[0] || p.credit_move_id);
+      }
+      // Filter out the invoice's own lines
+      const invLineIds = new Set((invoiceLines || []).map((l: any) => l.id));
+      const paymentLineIds = [...moveLineIds].filter(id => !invLineIds.has(id));
+
+      if (paymentLineIds.length > 0) {
+        // Get the moves (payments) these lines belong to
+        const payLines = await searchRead('account.move.line', [['id', 'in', paymentLineIds]], ['move_id']);
+        const payMoveIds = [...new Set((payLines || []).map((l: any) => l.move_id?.[0] || l.move_id))];
+
+        // Find account.payment records for these moves
+        const paymentRecords = await searchRead('account.payment', [['move_id', 'in', payMoveIds], ['state', '=', 'posted']], ['id', 'amount', 'journal_id', 'payment_type']);
+
+        // Reverse each payment from its own journal
+        for (const pay of (paymentRecords || [])) {
+          const reverseType = pay.payment_type === 'outbound' ? 'inbound' : 'outbound';
+          const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
+          const reversePayId = await create('account.payment', {
+            payment_type: reverseType,
+            partner_type: partnerType,
+            partner_id: inv.partner_id?.[0] || false,
+            amount: pay.amount,
+            journal_id: pay.journal_id?.[0] || pay.journal_id,
+            date: today,
+          });
+          await callMethod('account.payment', 'action_post', [[reversePayId]]);
+        }
+      }
     }
+    // Note: credit (نسیه) portion has no payment, the credit note itself settles it
+    // because credit note creates a receivable/payable that cancels the original
   } catch { /* payment reversal failed */ }
 
   // Stock reversal: create a reverse picking (not cancel!)
