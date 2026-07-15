@@ -471,7 +471,7 @@ export async function createPurchaseInvoice(values: {
  * @param amount - the amount to pay (partial or full)
  */
 export async function registerInvoicePayment(invoiceId: number, journalId: number, amount: number) {
-  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['amount_total', 'partner_id', 'move_type', 'amount_residual'], 1);
+  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['amount_total', 'partner_id', 'move_type', 'amount_residual', 'name'], 1);
   if (!invoice || invoice.length === 0) return;
 
   const payAmount = amount || invoice[0].amount_residual || invoice[0].amount_total;
@@ -484,6 +484,7 @@ export async function registerInvoicePayment(invoiceId: number, journalId: numbe
     partner_id: invoice[0].partner_id?.[0] || false,
     amount: payAmount,
     journal_id: journalId,
+    ref: invoice[0].name || `INV-${invoiceId}`,
   });
   await callMethod('account.payment', 'action_post', [[paymentId]]);
   return paymentId;
@@ -1484,58 +1485,117 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
   });
   await confirmInvoice(refundId);
 
-  // Payment reversal — find payments linked to this invoice by ref (invoice number)
-  // Odoo sets payment.ref = invoice name when paying. We search by ref to find exact payments.
-  // Only reverse actual bank/cash payments. Credit (نسیه) has no payment — the credit note
+  // Payment reversal — find payments linked to this invoice and reverse each from its own journal.
+  // Only actual bank/cash payments need reversal. Credit (نسیه) has no payment — the credit note
   // automatically settles the receivable/payable balance on the partner's account.
   try {
-    // Strategy 1: Find payments by ref containing the invoice name
-    let paymentRecords = await searchRead('account.payment', [
-      ['ref', 'ilike', inv.name],
-      ['state', '=', 'posted'],
-    ], ['id', 'amount', 'journal_id', 'payment_type']);
+    let paymentRecords: any[] = [];
 
-    // Strategy 2: If no results, try reconciled_bill_ids / reconciled_invoice_ids
-    if ((!paymentRecords || paymentRecords.length === 0)) {
+    // Strategy 1: Find payments by ref containing the invoice name
+    // (works for newly created payments where we set ref = invoice name)
+    try {
+      const byRef = await searchRead('account.payment', [
+        ['ref', 'ilike', inv.name],
+        ['state', '=', 'posted'],
+      ], ['id', 'amount', 'journal_id', 'payment_type']);
+      if (byRef && byRef.length > 0) paymentRecords = byRef;
+    } catch {}
+
+    // Strategy 2: Try reconciled_bill_ids / reconciled_invoice_ids (Odoo 17+)
+    if (paymentRecords.length === 0) {
       const fieldName = inv.move_type === 'in_invoice' ? 'reconciled_bill_ids' : 'reconciled_invoice_ids';
       try {
-        paymentRecords = await searchRead('account.payment', [
+        const byRecon = await searchRead('account.payment', [
           [fieldName, 'in', [invoiceId]],
           ['state', '=', 'posted'],
         ], ['id', 'amount', 'journal_id', 'payment_type']);
-      } catch { /* field may not exist in this Odoo version */ }
+        if (byRecon && byRecon.length > 0) paymentRecords = byRecon;
+      } catch {}
     }
 
-    // Strategy 3: If still nothing, look at move lines in payment journals for this partner
-    if ((!paymentRecords || paymentRecords.length === 0)) {
-      // Find payment move lines that reference this invoice's move_id via full_reconcile_id
-      const invRecLines = await searchRead('account.move.line', [
-        ['move_id', '=', invoiceId],
-        ['account_id.account_type', 'in', ['asset_receivable', 'liability_payable']],
-        ['full_reconcile_id', '!=', false],
-      ], ['full_reconcile_id']);
-      
-      if (invRecLines && invRecLines.length > 0) {
-        const fullRecIds = invRecLines.map((l: any) => l.full_reconcile_id?.[0] || l.full_reconcile_id).filter(Boolean);
-        if (fullRecIds.length > 0) {
-          // Find other move lines with same full_reconcile_id (these are the payment lines)
-          const counterLines = await searchRead('account.move.line', [
-            ['full_reconcile_id', 'in', fullRecIds],
-            ['move_id', '!=', invoiceId],
-          ], ['move_id']);
-          const payMoveIds = [...new Set((counterLines || []).map((l: any) => l.move_id?.[0] || l.move_id))];
-          if (payMoveIds.length > 0) {
-            paymentRecords = await searchRead('account.payment', [
-              ['move_id', 'in', payMoveIds],
-              ['state', '=', 'posted'],
-            ], ['id', 'amount', 'journal_id', 'payment_type']);
+    // Strategy 3: Find via full_reconcile_id on invoice's receivable/payable lines
+    if (paymentRecords.length === 0) {
+      try {
+        const invRecLines = await searchRead('account.move.line', [
+          ['move_id', '=', invoiceId],
+          ['account_id.account_type', 'in', ['asset_receivable', 'liability_payable']],
+          ['full_reconcile_id', '!=', false],
+        ], ['full_reconcile_id']);
+        if (invRecLines && invRecLines.length > 0) {
+          const fullRecIds = invRecLines.map((l: any) => l.full_reconcile_id?.[0] || l.full_reconcile_id).filter(Boolean);
+          if (fullRecIds.length > 0) {
+            const counterLines = await searchRead('account.move.line', [
+              ['full_reconcile_id', 'in', fullRecIds],
+              ['move_id', '!=', invoiceId],
+            ], ['move_id']);
+            const payMoveIds = [...new Set((counterLines || []).map((l: any) => l.move_id?.[0] || l.move_id))];
+            if (payMoveIds.length > 0) {
+              const byFullRec = await searchRead('account.payment', [
+                ['move_id', 'in', payMoveIds],
+                ['state', '=', 'posted'],
+              ], ['id', 'amount', 'journal_id', 'payment_type']);
+              if (byFullRec && byFullRec.length > 0) paymentRecords = byFullRec;
+            }
           }
         }
-      }
+      } catch {}
+    }
+
+    // Strategy 4: Find via matched_debit_ids/matched_credit_ids (partial reconcile)
+    if (paymentRecords.length === 0) {
+      try {
+        const invMoveLines = await searchRead('account.move.line', [
+          ['move_id', '=', invoiceId],
+          ['account_id.account_type', 'in', ['asset_receivable', 'liability_payable']],
+        ], ['id', 'matched_debit_ids', 'matched_credit_ids']);
+        const partialIds = new Set<number>();
+        for (const ml of (invMoveLines || [])) {
+          for (const pid of (ml.matched_debit_ids || [])) partialIds.add(pid);
+          for (const pid of (ml.matched_credit_ids || [])) partialIds.add(pid);
+        }
+        if (partialIds.size > 0) {
+          const partials = await searchRead('account.partial.reconcile', [['id', 'in', [...partialIds]]], ['debit_move_id', 'credit_move_id']);
+          const mlIds = new Set<number>();
+          for (const p of (partials || [])) {
+            if (p.debit_move_id) mlIds.add(p.debit_move_id[0] || p.debit_move_id);
+            if (p.credit_move_id) mlIds.add(p.credit_move_id[0] || p.credit_move_id);
+          }
+          const invMlIds = new Set((invMoveLines || []).map((l: any) => l.id));
+          const payMlIds = [...mlIds].filter(id => !invMlIds.has(id));
+          if (payMlIds.length > 0) {
+            const payMls = await searchRead('account.move.line', [['id', 'in', payMlIds]], ['move_id']);
+            const payMvIds = [...new Set((payMls || []).map((l: any) => l.move_id?.[0] || l.move_id))];
+            if (payMvIds.length > 0) {
+              const byPartial = await searchRead('account.payment', [
+                ['move_id', 'in', payMvIds],
+                ['state', '=', 'posted'],
+              ], ['id', 'amount', 'journal_id', 'payment_type']);
+              if (byPartial && byPartial.length > 0) paymentRecords = byPartial;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Strategy 5 (last resort): Find payments for same partner with same date as invoice
+    // that have journal type bank/cash (exclude misc journals)
+    if (paymentRecords.length === 0) {
+      try {
+        const invDate = (await searchRead('account.move', [['id', '=', invoiceId]], ['date'], 1))?.[0]?.date;
+        if (invDate) {
+          const byDate = await searchRead('account.payment', [
+            ['partner_id', '=', inv.partner_id?.[0] || false],
+            ['date', '=', invDate],
+            ['state', '=', 'posted'],
+            ['journal_id.type', 'in', ['bank', 'cash']],
+          ], ['id', 'amount', 'journal_id', 'payment_type']);
+          if (byDate && byDate.length > 0) paymentRecords = byDate;
+        }
+      } catch {}
     }
 
     // Reverse each found payment from its own journal
-    for (const pay of (paymentRecords || [])) {
+    for (const pay of paymentRecords) {
       const reverseType = pay.payment_type === 'outbound' ? 'inbound' : 'outbound';
       const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
       const reversePayId = await create('account.payment', {
@@ -1545,13 +1605,13 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
         amount: pay.amount,
         journal_id: pay.journal_id?.[0] || pay.journal_id,
         date: today,
+        ref: `VOID ${inv.name}`,
       });
       await callMethod('account.payment', 'action_post', [[reversePayId]]);
     }
-    // Note: credit (نسیه) portion has no payment record, so it won't appear here.
-    // The credit note itself creates an opposite receivable/payable entry that cancels
-    // the original balance on the partner's account automatically.
-  } catch { /* payment reversal failed */ }
+    // Log for debugging
+    console.log(`[voidInvoice] Invoice ${inv.name}: found ${paymentRecords.length} payments to reverse`, paymentRecords.map((p: any) => ({ id: p.id, amount: p.amount, journal: p.journal_id, type: p.payment_type })));
+  } catch (e) { console.error('[voidInvoice] payment reversal error:', e); }
 
   // Stock reversal: create a reverse picking (not cancel!)
   // For purchase (in_invoice): original was incoming → create outgoing to return stock
