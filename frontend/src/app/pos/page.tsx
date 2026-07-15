@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import Link from 'next/link';
 
@@ -55,6 +55,8 @@ export default function PosPage() {
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
+  // PAX terminal setting
+  const [paxTerminalEnabled, setPaxTerminalEnabled] = useState(false);
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -125,6 +127,11 @@ export default function PosPage() {
         setProducts(data || []);
         setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
         setDiscountCategories(discCats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
+        // Check PAX terminal setting
+        try {
+          const settings = await getCompanySettings();
+          setPaxTerminalEnabled(settings?.fmcg_pos_terminal_enabled || false);
+        } catch {}
       } catch { setProducts([]); }
       setLoading(false);
       // Load pinned products from localStorage
@@ -277,8 +284,8 @@ export default function PosPage() {
         return;
       }
 
-      // For card payments, push the amount to the PAX S800 terminal first.
-      if (method === 'card') {
+      // For card payments, push the amount to the PAX S800 terminal if enabled.
+      if (method === 'card' && paxTerminalEnabled) {
         setMsg('💳 مبلغ به دستگاه کارتخوان ارسال شد، منتظر کشیدن کارت...');
         const pax = await payWithPaxTerminal(cartTotal, 'sale');
         if (!pax?.success) {
@@ -405,8 +412,8 @@ export default function PosPage() {
       const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
       const partnerId = creditAmt > 0 ? splitCustomer : undefined;
 
-      // If card amount > 0, send to PAX terminal first
-      if (cardAmt > 0) {
+      // If card amount > 0, send to PAX terminal if enabled
+      if (cardAmt > 0 && paxTerminalEnabled) {
         setMsg('💳 مبلغ کارت به دستگاه کارتخوان ارسال شد...');
         const pax = await payWithPaxTerminal(cardAmt, 'sale');
         if (!pax?.success) {
@@ -745,14 +752,16 @@ export default function PosPage() {
                           onClick={async () => {
                             const amt = Number(cp.amount);
                             if (!amt) { alert('مبلغ وارد کنید'); return; }
-                            setMsg('💳 ارسال به کارتخوان...');
-                            try {
-                              const pax = await payWithPaxTerminal(amt, 'sale');
-                              if (!pax?.success) { alert(pax?.error || 'ناموفق'); setMsg(''); return; }
-                              const next = [...splitCardPayments]; next[idx] = {...next[idx], paid: true}; setSplitCardPayments(next);
-                              setMsg(`✅ کارت ${toPersianDigits(idx+1)} پرداخت شد`);
-                              setTimeout(() => setMsg(''), 2000);
-                            } catch (e: any) { alert(e.message || 'خطا'); setMsg(''); }
+                            if (paxTerminalEnabled) {
+                              setMsg('💳 ارسال به کارتخوان...');
+                              try {
+                                const pax = await payWithPaxTerminal(amt, 'sale');
+                                if (!pax?.success) { alert(pax?.error || 'ناموفق'); setMsg(''); return; }
+                              } catch (e: any) { alert(e.message || 'خطا'); setMsg(''); return; }
+                            }
+                            const next = [...splitCardPayments]; next[idx] = {...next[idx], paid: true}; setSplitCardPayments(next);
+                            setMsg(`✅ کارت ${toPersianDigits(idx+1)} پرداخت شد`);
+                            setTimeout(() => setMsg(''), 2000);
                           }}
                           className="px-2 py-1.5 bg-blue-600 text-white rounded text-xs font-bold"
                         >پرداخت</button>
@@ -905,13 +914,15 @@ export default function PosPage() {
                       onClick={async () => {
                         const amt = Number(cp.amount);
                         if (!amt) { alert('مبلغ وارد کنید'); return; }
-                        setMsg('💳 ارسال به کارتخوان...');
-                        try {
-                          const pax = await payWithPaxTerminal(amt, 'sale');
-                          if (!pax?.success) { alert(pax?.error || 'ناموفق'); setMsg(''); return; }
-                          const next = [...cardPayments]; next[idx] = {...next[idx], paid: true}; setCardPayments(next);
-                          setMsg(`✅ کارت ${toPersianDigits(idx+1)} پرداخت شد`);
-                        } catch (e: any) { alert(e.message || 'خطا'); setMsg(''); }
+                        if (paxTerminalEnabled) {
+                          setMsg('💳 ارسال به کارتخوان...');
+                          try {
+                            const pax = await payWithPaxTerminal(amt, 'sale');
+                            if (!pax?.success) { alert(pax?.error || 'ناموفق'); setMsg(''); return; }
+                          } catch (e: any) { alert(e.message || 'خطا'); setMsg(''); return; }
+                        }
+                        const next = [...cardPayments]; next[idx] = {...next[idx], paid: true}; setCardPayments(next);
+                        setMsg(`✅ کارت ${toPersianDigits(idx+1)} پرداخت شد`);
                       }}
                       className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold"
                     >پرداخت</button>

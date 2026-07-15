@@ -70,8 +70,8 @@ export default function AccountingPage() {
   const [formType, setFormType] = useState<DocType>('payment');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
-  const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
-  const [entryLines, setEntryLines] = useState<any[]>([]);
+  const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set());
+  const [entryLinesMap, setEntryLinesMap] = useState<Record<number, any[]>>({});
   const [filterType, setFilterType] = useState<'all' | 'in' | 'out' | 'invoice' | 'out_invoice' | 'in_invoice' | 'out_refund' | 'in_refund'>('all');
   const [searchText, setSearchText] = useState('');
 
@@ -182,14 +182,16 @@ export default function AccountingPage() {
   }
 
   async function handleExpandEntry(entryId: number) {
-    if (expandedEntry === entryId) { setExpandedEntry(null); setEntryLines([]); return; }
+    const next = new Set(expandedEntries);
+    if (next.has(entryId)) { next.delete(entryId); setExpandedEntries(next); return; }
+    next.add(entryId);
+    setExpandedEntries(next);
     try {
       const lines = await searchRead('account.move.line', [['move_id', '=', entryId]], [
         'name', 'account_id', 'debit', 'credit', 'partner_id',
       ]);
-      setEntryLines(lines || []);
-      setExpandedEntry(entryId);
-    } catch { setEntryLines([]); }
+      setEntryLinesMap(prev => ({ ...prev, [entryId]: lines || [] }));
+    } catch { setEntryLinesMap(prev => ({ ...prev, [entryId]: [] })); }
   }
 
   function openForm(type: DocType, preselectedAccountId?: number) {
@@ -448,12 +450,12 @@ export default function AccountingPage() {
                   <td className="p-3 text-xs">{entry.journal_id ? entry.journal_id[1] : '\u2014'}</td>
                   <td className="p-3 font-bold">{formatPrice(entry.amount_total)}</td>
                 </tr>
-                {expandedEntry === entry.id && (
+                {expandedEntries.has(entry.id) && (
                   <tr><td colSpan={7} className="p-3 bg-gray-50">
                     <div className="text-xs font-bold mb-2">آرتیکل‌های سند:</div>
-                    {entryLines.length === 0 ? <p className="text-xs text-gray-400">بدون آرتیکل</p> : (
+                    {(entryLinesMap[entry.id] || []).length === 0 ? <p className="text-xs text-gray-400">بدون آرتیکل</p> : (
                       <table className="w-full text-xs"><thead><tr><th className="text-right p-1">شرح</th><th className="text-right p-1">حساب</th><th className="text-right p-1">بدهکار</th><th className="text-right p-1">بستانکار</th></tr></thead>
-                      <tbody>{entryLines.map((l: any) => (
+                      <tbody>{(entryLinesMap[entry.id] || []).map((l: any) => (
                         <tr key={l.id}><td className="p-1">{l.name || '\u2014'}</td><td className="p-1">{l.account_id?.[1] || '\u2014'}</td><td className="p-1">{l.debit > 0 ? formatPrice(l.debit) : ''}</td><td className="p-1">{l.credit > 0 ? formatPrice(l.credit) : ''}</td></tr>
                       ))}</tbody></table>
                     )}

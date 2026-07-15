@@ -59,9 +59,9 @@ export default function InventoryPage() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [form, setForm] = useState<ProductForm>({ name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10', categ_id: 0 });
 
-  // Accordion: expanded template
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [variants, setVariants] = useState<Variant[]>([]);
+  // Accordion: expanded templates (multiple allowed)
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [variantsMap, setVariantsMap] = useState<Record<number, any[]>>({});
   const [variantsLoading, setVariantsLoading] = useState(false);
 
   // Attribute form
@@ -134,13 +134,15 @@ export default function InventoryPage() {
   useEffect(() => { fetchTemplates(); fetchCategories(); }, []);
 
   async function toggleExpand(tmplId: number) {
-    if (expandedId === tmplId) { setExpandedId(null); return; }
-    setExpandedId(tmplId);
+    const next = new Set(expandedIds);
+    if (next.has(tmplId)) { next.delete(tmplId); setExpandedIds(next); return; }
+    next.add(tmplId);
+    setExpandedIds(next);
     setVariantsLoading(true);
     try {
       const vars = await getProductVariants(tmplId);
-      setVariants(vars || []);
-    } catch { setVariants([]); }
+      setVariantsMap(prev => ({ ...prev, [tmplId]: vars || [] }));
+    } catch { setVariantsMap(prev => ({ ...prev, [tmplId]: [] })); }
     setVariantsLoading(false);
   }
 
@@ -324,14 +326,18 @@ export default function InventoryPage() {
       }
 
       setShowAttrForm(false); await fetchTemplates();
-      if (expandedId === attrTemplateId) { const vars = await getProductVariants(attrTemplateId); setVariants(vars || []); }
+      if (expandedIds.has(attrTemplateId)) { const vars = await getProductVariants(attrTemplateId); setVariantsMap(prev => ({ ...prev, [attrTemplateId]: vars || [] })); }
     } catch (e: any) { alert(e.message || 'خطا'); }
     setSaving(false);
   }
 
   async function saveBarcode(variantId: number) {
     try { await updateVariantBarcode(variantId, barcodeValue); setEditingBarcode(null);
-      if (expandedId) { const vars = await getProductVariants(expandedId); setVariants(vars || []); }
+      // Reload variants for all expanded templates
+      for (const tmplId of expandedIds) {
+        const vars = await getProductVariants(tmplId);
+        setVariantsMap(prev => ({ ...prev, [tmplId]: vars || [] }));
+      }
     } catch (e: any) { alert(e.message || 'خطا'); }
   }
 
@@ -414,13 +420,13 @@ export default function InventoryPage() {
                   <button onClick={(e) => { e.stopPropagation(); openAttrForm(t.id); }} className="text-xs text-purple-500 hover:text-purple-700 px-1" title="افزودن ویژگی">🏷️</button>
                   <button onClick={(e) => { e.stopPropagation(); handleDelete(t.id); }} className="text-xs text-red-400 hover:text-red-600 px-1">🗑️</button>
                 </div>
-                <div className="text-gray-400 text-xs px-2">{expandedId === t.id ? '▲' : '▼'}</div>
+                <div className="text-gray-400 text-xs px-2">{expandedIds.has(t.id) ? '▲' : '▼'}</div>
               </div>
 
               {/* Expanded variants */}
-              {expandedId === t.id && (
+              {expandedIds.has(t.id) && (
                 <div className="border-t bg-gray-50 p-3">
-                  {variantsLoading ? <div className="text-center text-gray-400 text-sm py-3">بارگذاری...</div> : variants.length === 0 ? (
+                  {variantsLoading && !variantsMap[t.id] ? <div className="text-center text-gray-400 text-sm py-3">بارگذاری...</div> : (variantsMap[t.id] || []).length === 0 ? (
                     <div className="text-center text-gray-400 text-sm py-3">
                       <p>واریانتی یافت نشد.</p>
                     </div>
@@ -433,7 +439,7 @@ export default function InventoryPage() {
                         <th className="text-right p-2">عملیات</th>
                       </tr></thead>
                       <tbody>
-                        {variants.map((v: any) => {
+                        {(variantsMap[t.id] || []).map((v: any) => {
                           // Extract variant attribute info from display_name or combination_indices
                           const variantLabel = v.display_name || v.name;
                           // Try to show only the variant-specific part (after template name)
@@ -563,7 +569,7 @@ export default function InventoryPage() {
                             await unlink('product.template.attribute.line', [line.line_id || line.id]);
                             await openAttrForm(attrTemplateId);
                             await fetchTemplates();
-                            if (expandedId === attrTemplateId) { const vars = await getProductVariants(attrTemplateId); setVariants(vars || []); }
+                            if (expandedIds.has(attrTemplateId)) { const vars = await getProductVariants(attrTemplateId); setVariantsMap(prev => ({ ...prev, [attrTemplateId]: vars || [] })); }
                           } catch (e: any) { alert(e.message || 'خطا در حذف'); }
                         }}
                         className="text-xs text-red-500 hover:text-red-700 font-bold"
