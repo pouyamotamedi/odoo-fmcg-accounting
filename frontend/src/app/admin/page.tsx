@@ -232,33 +232,28 @@ function SalesChart() {
       ) : chartData.length === 0 ? (
         <div className="text-center py-8 text-gray-400 text-sm">داده‌ای یافت نشد</div>
       ) : (
-        <div dir="ltr" className="flex items-end gap-1 h-52 overflow-x-auto pb-2">
+        <div dir="ltr" className="flex items-end gap-1 h-48 pb-6 relative">
           {chartData.map((d, i) => (
-            <div key={i} className="flex-1 min-w-[36px] flex flex-col items-center gap-0.5 group relative">
-              {/* Value on top */}
-              <div className="text-[8px] text-indigo-600 font-bold leading-none">{compactPrice(d.sales)}</div>
-              {showPurchases && <div className="text-[8px] text-orange-500 font-bold leading-none">{compactPrice(d.purchases)}</div>}
-              {/* Tooltip */}
-              <div className="absolute bottom-full mb-6 bg-slate-800 text-white text-[9px] rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-10">
-                فروش: {formatPrice(d.sales)}{showPurchases ? ` | خرید: ${formatPrice(d.purchases)}` : ''}
+            <div key={i} className="flex-1 min-w-[36px] flex flex-col items-center group relative">
+              {/* Hover value (appears above bar on hover) */}
+              <div className="absolute -top-5 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] rounded px-2 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg">
+                {formatPrice(d.sales)}{showPurchases && d.purchases > 0 ? ` | ${formatPrice(d.purchases)}` : ''}
               </div>
               {/* Bars */}
-              <div className="flex gap-px w-full items-end" style={{ height: '130px' }}>
-                {/* Sales bar */}
+              <div className="flex gap-px w-full items-end flex-1">
                 <div
-                  className="flex-1 bg-indigo-400 rounded-t-sm transition-all hover:bg-indigo-500"
-                  style={{ height: `${Math.max((d.sales / maxAmt) * 100, 1)}%` }}
+                  className="flex-1 bg-indigo-400 rounded-t-sm transition-all group-hover:bg-indigo-500"
+                  style={{ height: `${Math.max((d.sales / maxAmt) * 100, 2)}%` }}
                 />
-                {/* Purchases bar */}
                 {showPurchases && (
                   <div
-                    className="flex-1 bg-orange-300 rounded-t-sm transition-all hover:bg-orange-400"
-                    style={{ height: `${Math.max((d.purchases / maxAmt) * 100, 1)}%` }}
+                    className="flex-1 bg-orange-300 rounded-t-sm transition-all group-hover:bg-orange-400"
+                    style={{ height: `${Math.max((d.purchases / maxAmt) * 100, 2)}%` }}
                   />
                 )}
               </div>
               {/* Label */}
-              <div className="text-[9px] text-gray-500 text-center leading-tight mt-0.5" dir="rtl">{d.label}</div>
+              <div className="text-[9px] text-gray-500 text-center leading-tight mt-1 absolute -bottom-5" dir="rtl">{d.label}</div>
             </div>
           ))}
         </div>
