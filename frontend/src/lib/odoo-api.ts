@@ -466,6 +466,7 @@ export async function createPurchaseInvoice(values: {
 
 /**
  * Register payment for an invoice (reduces bank/cash balance)
+ * Uses Odoo's payment register wizard to properly reconcile the payment with the invoice.
  * @param invoiceId - the confirmed invoice ID
  * @param journalId - the specific bank/cash journal to pay from
  * @param amount - the amount to pay (partial or full)
@@ -478,15 +479,52 @@ export async function registerInvoicePayment(invoiceId: number, journalId: numbe
   const paymentType = invoice[0].move_type === 'in_invoice' ? 'outbound' : 'inbound';
   const partnerType = invoice[0].move_type === 'in_invoice' ? 'supplier' : 'customer';
 
-  const paymentId = await create('account.payment', {
-    payment_type: paymentType,
-    partner_type: partnerType,
-    partner_id: invoice[0].partner_id?.[0] || false,
-    amount: payAmount,
-    journal_id: journalId,
-  });
-  await callMethod('account.payment', 'action_post', [[paymentId]]);
-  return paymentId;
+  // Try using the payment register wizard (properly reconciles payment with invoice)
+  try {
+    // Create the wizard in the context of the invoice
+    const wizardId = await jsonRpc('/web/dataset/call_kw', {
+      model: 'account.payment.register',
+      method: 'create',
+      args: [{
+        journal_id: journalId,
+        amount: payAmount,
+        payment_type: paymentType,
+        partner_type: partnerType,
+      }],
+      kwargs: {
+        context: {
+          active_model: 'account.move',
+          active_ids: [invoiceId],
+        },
+      },
+    });
+
+    // Execute the wizard to create and reconcile the payment
+    await jsonRpc('/web/dataset/call_kw', {
+      model: 'account.payment.register',
+      method: 'action_create_payments',
+      args: [[wizardId]],
+      kwargs: {
+        context: {
+          active_model: 'account.move',
+          active_ids: [invoiceId],
+        },
+      },
+    });
+    return wizardId;
+  } catch (e) {
+    // Fallback: Create payment directly (won't be reconciled but at least records the payment)
+    console.warn('[registerInvoicePayment] Wizard failed, using direct payment:', e);
+    const paymentId = await create('account.payment', {
+      payment_type: paymentType,
+      partner_type: partnerType,
+      partner_id: invoice[0].partner_id?.[0] || false,
+      amount: payAmount,
+      journal_id: journalId,
+    });
+    await callMethod('account.payment', 'action_post', [[paymentId]]);
+    return paymentId;
+  }
 }
 
 /**
@@ -1608,7 +1646,13 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
 
         console.log(`[voidInvoice] Same-date bank/cash moves:`, sameDateMoves);
 
+        // Only reverse up to the invoice total (not more!)
+        let reversedTotal = 0;
+        const maxReverse = inv.amount_total;
+
         for (const pm of (sameDateMoves || [])) {
+          if (reversedTotal >= maxReverse) break;
+          
           // Get the liquidity amount (the actual cash/bank movement)
           const liqLines = await searchRead('account.move.line', [
             ['move_id', '=', pm.id],
@@ -1617,7 +1661,11 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
           // Take the larger side (debit or credit) as the payment amount
           const totalDebit = (liqLines || []).reduce((sum: number, l: any) => sum + l.debit, 0);
           const totalCredit = (liqLines || []).reduce((sum: number, l: any) => sum + l.credit, 0);
-          const amount = Math.max(totalDebit, totalCredit) || pm.amount_total;
+          let amount = Math.max(totalDebit, totalCredit) || pm.amount_total;
+          
+          // Cap at remaining amount to reverse
+          amount = Math.min(amount, maxReverse - reversedTotal);
+          if (amount <= 0) break;
           
           const reverseType = inv.move_type === 'in_invoice' ? 'inbound' : 'outbound';
           const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
@@ -1632,7 +1680,8 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
             date: today,
           });
           await callMethod('account.payment', 'action_post', [[reversePayId]]);
-          console.log(`[voidInvoice] (fallback) Reversed: ${amount} from journal ${journalId}`);
+          reversedTotal += amount;
+          console.log(`[voidInvoice] (fallback) Reversed: ${amount} from journal ${journalId} (total reversed: ${reversedTotal}/${maxReverse})`);
         }
       }
     }
