@@ -65,6 +65,8 @@ export default function PurchasePage() {
   const [showNewSupplier, setShowNewSupplier] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState('');
   const [newSupplierPhone, setNewSupplierPhone] = useState('');
+  // Track which invoices already have stock pickings
+  const [invoicesWithPicking, setInvoicesWithPicking] = useState<Set<number>>(new Set());
 
   async function loadData() {
     try {
@@ -82,6 +84,28 @@ export default function PurchasePage() {
     try {
       const data = await getPurchaseInvoices(state === 'all' ? undefined : state);
       setHistory(data || []);
+      // Check which invoices already have stock pickings
+      if (data && data.length > 0) {
+        try {
+          const invoiceNames = data.map((inv: any) => inv.name).filter(Boolean);
+          const pickings = await searchRead('stock.picking', [
+            ['origin', 'in', invoiceNames.map((n: string) => `Purchase Invoice %`)],
+            ['state', '!=', 'cancel'],
+          ], ['origin'], 0);
+          // Fallback: search with ilike for each
+          const withPicking = new Set<number>();
+          for (const inv of data) {
+            if (!inv.name) continue;
+            const found = await searchRead('stock.picking', [
+              '|',
+              ['origin', 'ilike', inv.name],
+              ['origin', 'ilike', `Purchase Invoice ${inv.id}`],
+            ], ['id'], 1);
+            if (found && found.length > 0) withPicking.add(inv.id);
+          }
+          setInvoicesWithPicking(withPicking);
+        } catch { setInvoicesWithPicking(new Set()); }
+      }
     } catch { setHistory([]); }
   }
 
@@ -189,7 +213,7 @@ export default function PurchasePage() {
         setMsg('✅ فاکتور خرید (نسیه) ثبت شد');
         setTimeout(() => setMsg(''), 4000);
         if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-          try { await createStockReceipt(invoiceId); } catch {}
+          try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
         }
       } catch (e:any) { alert(e.message || 'خطا'); }
       setSubmitting(false);
@@ -213,7 +237,7 @@ export default function PurchasePage() {
         setMsg('✅ فاکتور خرید ثبت و پرداخت شد');
         setTimeout(() => setMsg(''), 4000);
         if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-          try { await createStockReceipt(invoiceId); } catch {}
+          try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
         }
       } catch (e:any) { alert(e.message || 'خطا'); }
       setSubmitting(false);
@@ -240,7 +264,7 @@ export default function PurchasePage() {
       setMsg('✅ فاکتور خرید ثبت و پرداخت شد');
       setTimeout(() => setMsg(''), 4000);
       if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-        try { await createStockReceipt(invoiceId); } catch {}
+        try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
       }
     } catch (e:any) { alert(e.message || 'خطا'); }
     setSubmitting(false);
@@ -280,7 +304,7 @@ export default function PurchasePage() {
       setMsg('✅ فاکتور با پرداخت ترکیبی ثبت شد');
       setTimeout(() => setMsg(''), 4000);
       if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-        try { await createStockReceipt(invoiceId); } catch {}
+        try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
       }
     } catch (e: any) {
       alert(e.message || 'خطا');
@@ -347,6 +371,7 @@ export default function PurchasePage() {
   async function handleStockReceipt(invoiceId: number) {
     try {
       await createStockReceipt(invoiceId);
+      setInvoicesWithPicking(prev => new Set([...prev, invoiceId]));
       setMsg('✅ ورود به انبار ثبت شد');
       setTimeout(() => setMsg(''), 3000);
     } catch (e: any) {
@@ -447,7 +472,9 @@ export default function PurchasePage() {
                           <button onClick={() => handleExpandInvoice(inv.id)} className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">جزئیات</button>
                           {!(String(inv.narration||'')).includes('ابطال') && (
                             <>
-                              <button onClick={() => handleStockReceipt(inv.id)} className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded">📦 انبار</button>
+                              {!invoicesWithPicking.has(inv.id) && (
+                                <button onClick={() => handleStockReceipt(inv.id)} className="text-xs bg-green-100 hover:bg-green-200 text-green-700 px-2 py-1 rounded">📦 ورود به انبار</button>
+                              )}
                               <button onClick={() => handleVoidInvoice(inv)} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
                             </>
                           )}
