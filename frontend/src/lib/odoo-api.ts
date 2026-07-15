@@ -1588,54 +1588,51 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
         console.log(`[voidInvoice] Reversed payment: ${amount} from journal ${journalId}`);
       }
     } else {
-      console.log(`[voidInvoice] No payment moves found via reconciliation. Checking amount_residual...`);
+      console.log(`[voidInvoice] No payment moves found via reconciliation. Using date-based fallback...`);
       
-      // Fallback: If invoice is fully paid but we can't find payments through reconciliation,
-      // check the invoice's amount_residual. If it's 0 (fully paid), we need to find payments another way.
-      const invCheck = await searchRead('account.move', [['id', '=', invoiceId]], ['amount_residual', 'payment_state'], 1);
-      const isPaid = invCheck?.[0]?.payment_state === 'paid' || invCheck?.[0]?.amount_residual === 0;
+      // Fallback: Since payments aren't reconciled with invoices in this Odoo instance,
+      // find bank/cash journal moves for this partner on the invoice date.
+      const invData = await searchRead('account.move', [['id', '=', invoiceId]], ['date', 'invoice_date'], 1);
+      const invDate = invData?.[0]?.date || invData?.[0]?.invoice_date;
       
-      if (isPaid) {
-        // Last resort: Look at ALL bank/cash moves for this partner on the invoice date
-        const invData = await searchRead('account.move', [['id', '=', invoiceId]], ['date', 'invoice_date'], 1);
-        const invDate = invData?.[0]?.date || invData?.[0]?.invoice_date;
-        
-        if (invDate) {
-          // Find bank/cash journal moves for this partner on the same date
-          const sameDateMoves = await searchRead('account.move', [
-            ['partner_id', '=', inv.partner_id?.[0] || false],
-            ['date', '=', invDate],
-            ['state', '=', 'posted'],
-            ['journal_id.type', 'in', ['bank', 'cash']],
-            ['id', '!=', invoiceId],
-          ], ['id', 'journal_id', 'amount_total']);
+      if (invDate) {
+        // Find bank/cash journal moves for this partner on the same date
+        const sameDateMoves = await searchRead('account.move', [
+          ['partner_id', '=', inv.partner_id?.[0] || false],
+          ['date', '=', invDate],
+          ['state', '=', 'posted'],
+          ['journal_id.type', 'in', ['bank', 'cash']],
+          ['id', '!=', invoiceId],
+          ['id', '!=', refundId],
+        ], ['id', 'journal_id', 'amount_total']);
 
-          console.log(`[voidInvoice] Same-date bank/cash moves:`, sameDateMoves);
+        console.log(`[voidInvoice] Same-date bank/cash moves:`, sameDateMoves);
 
-          for (const pm of (sameDateMoves || [])) {
-            // Get the liquidity amount
-            const liqLines = await searchRead('account.move.line', [
-              ['move_id', '=', pm.id],
-              ['account_id.account_type', 'not in', ['asset_receivable', 'liability_payable']],
-              ['debit', '>', 0],
-            ], ['debit']);
-            const amount = (liqLines || []).reduce((sum: number, l: any) => sum + l.debit, 0) || pm.amount_total;
-            
-            const reverseType = inv.move_type === 'in_invoice' ? 'inbound' : 'outbound';
-            const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
-            const journalId = pm.journal_id?.[0] || pm.journal_id;
+        for (const pm of (sameDateMoves || [])) {
+          // Get the liquidity amount (the actual cash/bank movement)
+          const liqLines = await searchRead('account.move.line', [
+            ['move_id', '=', pm.id],
+            ['account_id.account_type', 'not in', ['asset_receivable', 'liability_payable']],
+          ], ['debit', 'credit']);
+          // Take the larger side (debit or credit) as the payment amount
+          const totalDebit = (liqLines || []).reduce((sum: number, l: any) => sum + l.debit, 0);
+          const totalCredit = (liqLines || []).reduce((sum: number, l: any) => sum + l.credit, 0);
+          const amount = Math.max(totalDebit, totalCredit) || pm.amount_total;
+          
+          const reverseType = inv.move_type === 'in_invoice' ? 'inbound' : 'outbound';
+          const partnerType = inv.move_type === 'out_invoice' ? 'customer' : 'supplier';
+          const journalId = pm.journal_id?.[0] || pm.journal_id;
 
-            const reversePayId = await create('account.payment', {
-              payment_type: reverseType,
-              partner_type: partnerType,
-              partner_id: inv.partner_id?.[0] || false,
-              amount: amount,
-              journal_id: journalId,
-              date: today,
-            });
-            await callMethod('account.payment', 'action_post', [[reversePayId]]);
-            console.log(`[voidInvoice] (fallback) Reversed: ${amount} from journal ${journalId}`);
-          }
+          const reversePayId = await create('account.payment', {
+            payment_type: reverseType,
+            partner_type: partnerType,
+            partner_id: inv.partner_id?.[0] || false,
+            amount: amount,
+            journal_id: journalId,
+            date: today,
+          });
+          await callMethod('account.payment', 'action_post', [[reversePayId]]);
+          console.log(`[voidInvoice] (fallback) Reversed: ${amount} from journal ${journalId}`);
         }
       }
     }
