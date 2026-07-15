@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { formatPrice, toPersianDigits } from '@/lib/utils';
+import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 import { searchRead, getBankCashBalances, getTodaySales, getProducts, getPartnerBalances } from '@/lib/odoo-api';
+import * as jalaali from 'jalaali-js';
 
 interface DashData {
   todaySales: number;
@@ -45,7 +46,30 @@ function ActionButton({ href, icon, label }: { href: string; icon: string; label
 
 // Jalali month names
 const JALALI_MONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
-const WEEKDAYS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+const WEEKDAYS_SHORT = ['ی', 'د', 'س', 'چ', 'پ', 'ج', 'ش'];
+
+/** Convert gregorian date string to Jalali day label */
+function toJalaliLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  const { jd } = jalaali.toJalaali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  const weekday = WEEKDAYS_SHORT[d.getDay()];
+  return `${weekday} ${toPersianDigits(jd)}`;
+}
+
+/** Convert gregorian date to Jalali month label */
+function toJalaliMonthLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  const { jm } = jalaali.toJalaali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  return JALALI_MONTHS[jm - 1];
+}
+
+/** Format compact price for chart (e.g., 2.5M) */
+function compactPrice(amount: number): string {
+  if (amount === 0) return '';
+  if (amount >= 1000000) return toPersianDigits((amount / 1000000).toFixed(1).replace('.0', '')) + 'M';
+  if (amount >= 1000) return toPersianDigits(Math.round(amount / 1000).toString()) + 'K';
+  return toPersianDigits(amount.toString());
+}
 
 function getDateRange(period: 'daily' | 'weekly' | 'monthly', customFrom?: string, customTo?: string): { from: string; to: string; points: number } {
   const today = new Date();
@@ -110,7 +134,7 @@ function SalesChart() {
           const monthStr = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
           const monthSales = (sales || []).filter((s: any) => s.invoice_date?.startsWith(monthStr)).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
           const monthPurchases = (purchases || []).filter((s: any) => s.invoice_date?.startsWith(monthStr)).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
-          points.push({ label: `${monthDate.getMonth() + 1}/${monthDate.getFullYear().toString().slice(2)}`, date: monthStr, sales: monthSales, purchases: monthPurchases });
+          points.push({ label: toJalaliMonthLabel(monthStr + '-15'), date: monthStr, sales: monthSales, purchases: monthPurchases });
         }
       } else if (period === 'weekly' && !dateFrom) {
         // Group by week
@@ -122,7 +146,7 @@ function SalesChart() {
           const weStr = weekEnd.toISOString().split('T')[0];
           const weekSales = (sales || []).filter((s: any) => s.invoice_date >= wsStr && s.invoice_date <= weStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
           const weekPurchases = (purchases || []).filter((s: any) => s.invoice_date >= wsStr && s.invoice_date <= weStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
-          points.push({ label: `${weekStart.getDate()}/${weekStart.getMonth() + 1}`, date: wsStr, sales: weekSales, purchases: weekPurchases });
+          points.push({ label: toJalaliLabel(wsStr), date: wsStr, sales: weekSales, purchases: weekPurchases });
         }
       } else {
         // Daily
@@ -137,7 +161,7 @@ function SalesChart() {
           const dStr = d.toISOString().split('T')[0];
           const daySales = (sales || []).filter((s: any) => s.invoice_date === dStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
           const dayPurchases = (purchases || []).filter((s: any) => s.invoice_date === dStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
-          const dayLabel = WEEKDAYS[d.getDay()].slice(0, 2) + ' ' + toPersianDigits(d.getDate());
+          const dayLabel = toJalaliLabel(dStr);
           points.push({ label: dayLabel, date: dStr, sales: daySales, purchases: dayPurchases });
         }
       }
@@ -208,15 +232,18 @@ function SalesChart() {
       ) : chartData.length === 0 ? (
         <div className="text-center py-8 text-gray-400 text-sm">داده‌ای یافت نشد</div>
       ) : (
-        <div className="flex items-end gap-1 h-44 overflow-x-auto pb-2">
+        <div dir="ltr" className="flex items-end gap-1 h-52 overflow-x-auto pb-2">
           {chartData.map((d, i) => (
-            <div key={i} className="flex-1 min-w-[30px] flex flex-col items-center gap-0.5 group relative">
+            <div key={i} className="flex-1 min-w-[36px] flex flex-col items-center gap-0.5 group relative">
+              {/* Value on top */}
+              <div className="text-[8px] text-indigo-600 font-bold leading-none">{compactPrice(d.sales)}</div>
+              {showPurchases && <div className="text-[8px] text-orange-500 font-bold leading-none">{compactPrice(d.purchases)}</div>}
               {/* Tooltip */}
-              <div className="absolute bottom-full mb-1 bg-slate-800 text-white text-[9px] rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-10">
+              <div className="absolute bottom-full mb-6 bg-slate-800 text-white text-[9px] rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-10">
                 فروش: {formatPrice(d.sales)}{showPurchases ? ` | خرید: ${formatPrice(d.purchases)}` : ''}
               </div>
               {/* Bars */}
-              <div className="flex gap-px w-full items-end" style={{ height: '140px' }}>
+              <div className="flex gap-px w-full items-end" style={{ height: '130px' }}>
                 {/* Sales bar */}
                 <div
                   className="flex-1 bg-indigo-400 rounded-t-sm transition-all hover:bg-indigo-500"
@@ -231,7 +258,7 @@ function SalesChart() {
                 )}
               </div>
               {/* Label */}
-              <div className="text-[9px] text-gray-500 text-center leading-tight mt-0.5">{d.label}</div>
+              <div className="text-[9px] text-gray-500 text-center leading-tight mt-0.5" dir="rtl">{d.label}</div>
             </div>
           ))}
         </div>
