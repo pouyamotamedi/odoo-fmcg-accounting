@@ -57,6 +57,7 @@ export default function PurchasePage() {
   const [journals, setJournals] = useState<{id:number;name:string;type:string}[]>([]);
   const [showPayment, setShowPayment] = useState(false);
   const [paymentJournal, setPaymentJournal] = useState<number>(0);
+  const [paymentJournalType, setPaymentJournalType] = useState<'cash'|'bank'>('cash');
   const [pendingInvoiceId, setPendingInvoiceId] = useState<number>(0);
   const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
   const [discountCats, setDiscountCats] = useState<{id:number;name:string}[]>([]);
@@ -243,6 +244,7 @@ export default function PurchasePage() {
       setSubmitting(false);
     } else {
       // چند journal هست - popup نمایش بده
+      setPaymentJournalType(paymentMethod === 'cash' ? 'cash' : 'bank');
       setPaymentJournal(relevantJournals[0]?.id || 0);
       setShowPayment(true);
     }
@@ -847,10 +849,10 @@ export default function PurchasePage() {
       {showPayment && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-80 shadow-2xl">
-            <h3 className="text-sm font-bold mb-3">💳 انتخاب حساب پرداخت</h3>
+            <h3 className="text-sm font-bold mb-3">{paymentJournalType === 'cash' ? '💵 انتخاب صندوق' : '🏦 انتخاب حساب بانکی'}</h3>
             <select value={paymentJournal} onChange={(e) => setPaymentJournal(Number(e.target.value))} className="w-full p-2 border border-gray-200 rounded-lg text-sm mb-3">
               <option value={0}>— انتخاب —</option>
-              {journals.map(j=><option key={j.id} value={j.id}>{j.name} ({j.type==='cash'?'نقدی':'بانک'})</option>)}
+              {journals.filter(j => j.type === paymentJournalType).map(j=><option key={j.id} value={j.id}>{j.name}</option>)}
             </select>
             <div className="flex gap-3">
               <button onClick={handlePaymentConfirm} disabled={submitting} className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold">
