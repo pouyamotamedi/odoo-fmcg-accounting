@@ -1536,8 +1536,6 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
       ['account_id.account_type', 'in', ['asset_receivable', 'liability_payable']],
     ], ['id', 'matched_debit_ids', 'matched_credit_ids', 'full_reconcile_id']);
 
-    console.log(`[voidInvoice] Invoice rec/pay lines:`, invRecLines);
-
     // Step 2: Find the payment moves through partial reconciliation
     const paymentMoveIds = new Set<number>();
     
@@ -1584,8 +1582,6 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
       }
     }
 
-    console.log(`[voidInvoice] Found payment move IDs:`, [...paymentMoveIds]);
-
     // Step 3: Get the actual payment journal entries and their details
     if (paymentMoveIds.size > 0) {
       // Read the journal entries to get journal and amount info
@@ -1594,8 +1590,6 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
         ['state', '=', 'posted'],
         ['journal_id.type', 'in', ['bank', 'cash']],
       ], ['id', 'journal_id', 'amount_total']);
-
-      console.log(`[voidInvoice] Payment moves in bank/cash journals:`, payMoves);
 
       // For each payment move, reverse it from its own journal
       for (const pm of (payMoves || [])) {
@@ -1617,11 +1611,8 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
           date: today,
         });
         await callMethod('account.payment', 'action_post', [[reversePayId]]);
-        console.log(`[voidInvoice] Reversed payment: ${amount} from journal ${journalId}`);
       }
     } else {
-      console.log(`[voidInvoice] No payment moves found via reconciliation. Using date-based fallback...`);
-      
       // Fallback: Since payments aren't reconciled with invoices in this Odoo instance,
       // find bank/cash journal moves for this partner on the invoice date.
       const invData = await searchRead('account.move', [['id', '=', invoiceId]], ['date', 'invoice_date'], 1);
@@ -1637,8 +1628,6 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
           ['id', '!=', invoiceId],
           ['id', '!=', refundId],
         ], ['id', 'journal_id', 'amount_total']);
-
-        console.log(`[voidInvoice] Same-date bank/cash moves:`, sameDateMoves);
 
         // Only reverse up to the invoice total (not more!)
         let reversedTotal = 0;
@@ -1675,11 +1664,10 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
           });
           await callMethod('account.payment', 'action_post', [[reversePayId]]);
           reversedTotal += amount;
-          console.log(`[voidInvoice] (fallback) Reversed: ${amount} from journal ${journalId} (total reversed: ${reversedTotal}/${maxReverse})`);
         }
       }
     }
-  } catch (e) { console.error('[voidInvoice] payment reversal error:', e); }
+  } catch { /* payment reversal failed */ }
 
   // Stock reversal: create a reverse picking (not cancel!)
   // For purchase (in_invoice): original was incoming → create outgoing to return stock
