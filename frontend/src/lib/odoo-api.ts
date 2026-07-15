@@ -1597,15 +1597,9 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
 
       console.log(`[voidInvoice] Payment moves in bank/cash journals:`, payMoves);
 
-      // For each payment move, get the liquidity line to know the exact amount
+      // For each payment move, reverse it from its own journal
       for (const pm of (payMoves || [])) {
-        // Get the non-receivable/payable line (the bank/cash side)
-        const liqLines = await searchRead('account.move.line', [
-          ['move_id', '=', pm.id],
-          ['account_id.account_type', 'not in', ['asset_receivable', 'liability_payable']],
-        ], ['debit', 'credit', 'journal_id']);
-
-        const amount = (liqLines || []).reduce((sum: number, l: any) => sum + l.debit + l.credit, 0) / 2 || pm.amount_total;
+        const amount = pm.amount_total;
         const journalId = pm.journal_id?.[0] || pm.journal_id;
 
         // Create reverse payment
