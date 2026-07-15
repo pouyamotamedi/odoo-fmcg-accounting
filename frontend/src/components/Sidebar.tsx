@@ -20,6 +20,7 @@ const menuItems = [
   { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️' },
   { href: '/admin/discounts', label: 'تخفیفات', icon: '🏷️' },
   { href: '/admin/stock-count', label: 'انبارگردانی', icon: '📋' },
+  { href: '/admin/fiscal-year', label: 'سال مالی', icon: '📅' },
   { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️' },
 ];
 

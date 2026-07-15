@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, setDiscountPrice, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice } from '@/lib/odoo-api';
+import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, setDiscountPrice, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice, createPartner } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
 
@@ -61,6 +61,10 @@ export default function PurchasePage() {
   const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
   const [discountCats, setDiscountCats] = useState<{id:number;name:string}[]>([]);
   const [editDiscountPrices, setEditDiscountPrices] = useState<Record<number, string>>({});
+  // Quick add supplier
+  const [showNewSupplier, setShowNewSupplier] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState('');
+  const [newSupplierPhone, setNewSupplierPhone] = useState('');
 
   async function loadData() {
     try {
@@ -473,16 +477,22 @@ export default function PurchasePage() {
           <>
         {/* Supplier */}
         <div className="p-3 bg-white border-b border-gray-200">
-          <select
-            value={supplier}
-            onChange={(e) => setSupplier(Number(e.target.value))}
-            className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-orange-400 focus:outline-none"
-          >
-            <option value={0}>👤 انتخاب تامین‌کننده...</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          <div className="flex gap-2">
+            <select
+              value={supplier}
+              onChange={(e) => setSupplier(Number(e.target.value))}
+              className="flex-1 p-2 border border-gray-200 rounded-lg text-sm focus:border-orange-400 focus:outline-none"
+            >
+              <option value={0}>👤 انتخاب تامین‌کننده...</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setShowNewSupplier(true)}
+              className="px-3 py-2 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold hover:bg-orange-200 transition whitespace-nowrap"
+            >+ جدید</button>
+          </div>
         </div>
 
         {/* Date picker */}
@@ -776,6 +786,31 @@ export default function PurchasePage() {
                 {submitting ? 'در حال ثبت...' : 'ثبت ترکیبی'}
               </button>
               <button onClick={() => setShowSplit(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">انصراف</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Supplier Quick Add Modal */}
+      {showNewSupplier && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="text-sm font-bold mb-3">+ ثبت تامین‌کننده جدید</h3>
+            <div className="space-y-3">
+              <input type="text" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} placeholder="نام تامین‌کننده *" className="w-full p-2 border border-gray-200 rounded-lg text-sm" autoFocus />
+              <input type="text" value={newSupplierPhone} onChange={(e) => setNewSupplierPhone(e.target.value)} placeholder="شماره تماس (اختیاری)" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={async () => {
+                if (!newSupplierName) { alert('نام الزامی است'); return; }
+                try {
+                  const id = await createPartner({ name: newSupplierName, phone: newSupplierPhone || undefined, supplier_rank: 1 });
+                  setSuppliers(prev => [...prev, { id, name: newSupplierName }]);
+                  setSupplier(id);
+                  setNewSupplierName(''); setNewSupplierPhone(''); setShowNewSupplier(false);
+                } catch (e: any) { alert(e.message || 'خطا'); }
+              }} className="flex-1 py-2 bg-orange-500 text-white rounded-lg text-xs font-bold hover:bg-orange-600">ثبت</button>
+              <button onClick={() => setShowNewSupplier(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-xs font-bold hover:bg-gray-300">انصراف</button>
             </div>
           </div>
         </div>
