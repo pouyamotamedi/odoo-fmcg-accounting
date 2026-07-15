@@ -1490,6 +1490,21 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
   try {
     let paymentRecords: any[] = [];
 
+    // DIAGNOSTIC: Log ALL payments for this partner to understand data structure
+    const allPartnerPayments = await searchRead('account.payment', [
+      ['partner_id', '=', inv.partner_id?.[0] || false],
+      ['state', '=', 'posted'],
+    ], ['id', 'amount', 'journal_id', 'payment_type', 'move_id', 'date', 'name'], 20, 0, 'date desc');
+    console.log(`[voidInvoice] DIAGNOSTIC: All posted payments for partner ${inv.partner_id?.[1] || inv.partner_id?.[0]}:`, allPartnerPayments);
+
+    // Also check if there are move lines in bank/cash journals for this invoice
+    const bankCashMoveLines = await searchRead('account.move.line', [
+      ['partner_id', '=', inv.partner_id?.[0] || false],
+      ['parent_state', '=', 'posted'],
+      ['journal_id.type', 'in', ['bank', 'cash']],
+    ], ['id', 'move_id', 'journal_id', 'debit', 'credit', 'name', 'ref'], 20, 0, 'date desc');
+    console.log(`[voidInvoice] DIAGNOSTIC: Bank/Cash move lines for partner:`, bankCashMoveLines);
+
     // Strategy 1: Find payments whose journal entry (move_id) has ref = invoice name
     try {
       // In Odoo 18, account.payment doesn't have ref, but its move_id (account.move) does
