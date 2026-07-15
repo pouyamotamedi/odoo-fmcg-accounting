@@ -484,7 +484,6 @@ export async function registerInvoicePayment(invoiceId: number, journalId: numbe
     partner_id: invoice[0].partner_id?.[0] || false,
     amount: payAmount,
     journal_id: journalId,
-    ref: invoice[0].name || `INV-${invoiceId}`,
   });
   await callMethod('account.payment', 'action_post', [[paymentId]]);
   return paymentId;
@@ -1491,14 +1490,25 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
   try {
     let paymentRecords: any[] = [];
 
-    // Strategy 1: Find payments by ref containing the invoice name
-    // (works for newly created payments where we set ref = invoice name)
+    // Strategy 1: Find payments whose journal entry (move_id) has ref = invoice name
     try {
-      const byRef = await searchRead('account.payment', [
+      // In Odoo 18, account.payment doesn't have ref, but its move_id (account.move) does
+      // Search payments via their linked move's ref field
+      const payMoves = await searchRead('account.move', [
         ['ref', 'ilike', inv.name],
         ['state', '=', 'posted'],
-      ], ['id', 'amount', 'journal_id', 'payment_type']);
-      if (byRef && byRef.length > 0) paymentRecords = byRef;
+        ['journal_id.type', 'in', ['bank', 'cash']],
+      ], ['id', 'payment_id']);
+      if (payMoves && payMoves.length > 0) {
+        const payIds = payMoves.map((m: any) => m.payment_id?.[0] || m.payment_id).filter(Boolean);
+        if (payIds.length > 0) {
+          const byRef = await searchRead('account.payment', [
+            ['id', 'in', payIds],
+            ['state', '=', 'posted'],
+          ], ['id', 'amount', 'journal_id', 'payment_type']);
+          if (byRef && byRef.length > 0) paymentRecords = byRef;
+        }
+      }
     } catch {}
 
     // Strategy 2: Try reconciled_bill_ids / reconciled_invoice_ids (Odoo 17+)
@@ -1605,7 +1615,6 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
         amount: pay.amount,
         journal_id: pay.journal_id?.[0] || pay.journal_id,
         date: today,
-        ref: `VOID ${inv.name}`,
       });
       await callMethod('account.payment', 'action_post', [[reversePayId]]);
     }
