@@ -515,6 +515,10 @@ export default function InventoryPage() {
                 </select>
               </div>
               <div>
+                <label className="block text-xs text-gray-500 mb-1">حداقل موجودی (هشدار)</label>
+                <input type="number" value={form.fmcg_reorder_threshold} onChange={(e) => setForm({...form, fmcg_reorder_threshold: e.target.value})} placeholder="۱۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
+              </div>
+              <div>
                 <label className="block text-xs text-gray-500 mb-1">تصویر محصول</label>
                 <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="w-full text-sm" />
               </div>

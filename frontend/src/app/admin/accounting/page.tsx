@@ -40,6 +40,7 @@ interface AccountEntry {
   state: string;
   payment_state: string;
   ref: string | false;
+  create_date?: string;
 }
 
 /**
@@ -129,7 +130,7 @@ export default function AccountingPage() {
       const data = await searchRead(
         'account.move',
         domain,
-        ['name', 'date', 'move_type', 'amount_total', 'journal_id', 'partner_id', 'narration', 'state', 'payment_state', 'ref'],
+        ['name', 'date', 'move_type', 'amount_total', 'journal_id', 'partner_id', 'narration', 'state', 'payment_state', 'ref', 'create_date'],
         100, 0, 'date desc, id desc'
       );
       setEntries(data || []);
@@ -499,7 +500,10 @@ export default function AccountingPage() {
                 <React.Fragment key={entry.id}>
                 <tr className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => handleExpandEntry(entry.id)}>
                   <td className="p-3 text-gray-500 text-xs">{entry.name}</td>
-                  <td className="p-3">{entry.date ? toJalali(entry.date) : '\u2014'}</td>
+                  <td className="p-3">
+                    <div>{entry.date ? toJalali(entry.date) : '\u2014'}</div>
+                    {entry.create_date && <div className="text-[9px] text-gray-400">{new Date(entry.create_date).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</div>}
+                  </td>
                   <td className="p-3">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getMoveTypeColor(entry)}`}>
                       {getMoveTypeLabel(entry)}

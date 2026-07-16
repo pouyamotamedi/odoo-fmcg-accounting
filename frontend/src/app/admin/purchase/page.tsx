@@ -37,6 +37,7 @@ export default function PurchasePage() {
   const [newProductBarcode, setNewProductBarcode] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductSellPrice, setNewProductSellPrice] = useState('');
+  const [newProductThreshold, setNewProductThreshold] = useState('10');
   const [history, setHistory] = useState<any[]>([]);
   const [histFilter, setHistFilter] = useState<'all' | 'draft' | 'posted' | 'paid'>('all');
   const [showHistory, setShowHistory] = useState(false);
@@ -393,12 +394,14 @@ export default function PurchasePage() {
         barcode: newProductBarcode || undefined,
         standard_price: parseFloat(newProductPrice.replace(/[^\d.]/g, '')) || 0,
         list_price: parseFloat(newProductSellPrice.replace(/[^\d.]/g, '')) || 0,
+        fmcg_reorder_threshold: parseInt(newProductThreshold) || 10,
       });
       setShowNewProduct(false);
       setNewProductName('');
       setNewProductBarcode('');
       setNewProductPrice('');
       setNewProductSellPrice('');
+      setNewProductThreshold('10');
       await loadData();
     } catch (e:any) {
       alert(e.message || 'خطا در ثبت کالا');
@@ -754,6 +757,10 @@ export default function PurchasePage() {
                     placeholder="۳۲٬۰۰۰"
                     className="w-full p-2 border border-gray-200 rounded-lg text-sm"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">حداقل موجودی</label>
+                  <input type="number" value={newProductThreshold} onChange={(e) => setNewProductThreshold(e.target.value)} placeholder="۱۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
                 </div>
               </div>
             </div>
