@@ -189,6 +189,7 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
           const cost = costMap.get(pid) || 0;
           cogs += Math.abs(l.quantity || 0) * cost;
         }
+        console.log('[Dashboard] Sale lines:', saleLines?.length, 'Sample:', saleLines?.slice(0, 3), 'COGS:', cogs, 'Revenue:', curTotal);
       }
 
       const grossProfit = curTotal - cogs;
