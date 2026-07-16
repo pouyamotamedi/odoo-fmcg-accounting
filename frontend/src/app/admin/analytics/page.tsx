@@ -166,11 +166,13 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
       let cogs = 0;
       const saleInvoiceIds = (curSales || []).map((inv: any) => inv.id);
       if (saleInvoiceIds.length > 0) {
+        // Get sale lines — in Odoo 18, product lines have quantity != 0
+        // We need price_subtotal to identify real product lines (not receivable)
         const saleLines = await searchRead('account.move.line', [
           ['move_id', 'in', saleInvoiceIds],
           ['product_id', '!=', false],
-          ['quantity', '>', 0],
-        ], ['product_id', 'quantity']);
+          ['price_subtotal', '!=', 0],
+        ], ['product_id', 'quantity', 'price_subtotal']);
 
         // Get cost prices
         const productIds = [...new Set((saleLines || []).map((l: any) => l.product_id?.[0]).filter(Boolean))];
@@ -180,12 +182,12 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
           for (const p of (products || [])) costMap.set(p.id, p.standard_price || 0);
         }
 
-        // COGS = qty × cost for each sold line
+        // COGS = abs(qty) × cost for each sold line
         for (const l of (saleLines || [])) {
           const pid = l.product_id?.[0];
           if (!pid) continue;
           const cost = costMap.get(pid) || 0;
-          cogs += (l.quantity || 0) * cost;
+          cogs += Math.abs(l.quantity || 0) * cost;
         }
       }
 
@@ -250,8 +252,8 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['quantity', '>', 0],
-      ], ['product_id', 'quantity', 'price_subtotal', 'credit']);
+        ['price_subtotal', '!=', 0],
+      ], ['product_id', 'quantity', 'price_subtotal']);
 
       // Group by product
       const productMap = new Map<number, { name: string; qty: number; revenue: number }>();
@@ -261,9 +263,7 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
         if (!pid || !pname) continue;
         if (!productMap.has(pid)) productMap.set(pid, { name: pname, qty: 0, revenue: 0 });
         const p = productMap.get(pid)!;
-        p.qty += l.quantity || 0;
-        // In Odoo 18, sale invoice lines have negative price_subtotal (credit side)
-        // Use absolute value, or use credit field directly
+        p.qty += Math.abs(l.quantity || 0);
         p.revenue += Math.abs(l.price_subtotal || 0);
       }
 
@@ -357,7 +357,7 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['quantity', '>', 0],
+        ['price_subtotal', '!=', 0],
       ], ['product_id', 'quantity', 'price_subtotal']);
 
       const productMap = new Map<number, { name: string; qty: number; revenue: number }>();
@@ -366,7 +366,7 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
         if (!pid) continue;
         if (!productMap.has(pid)) productMap.set(pid, { name: l.product_id?.[1] || '', qty: 0, revenue: 0 });
         const p = productMap.get(pid)!;
-        p.qty += l.quantity || 0;
+        p.qty += Math.abs(l.quantity || 0);
         // Absolute value because Odoo 18 stores sale lines as negative (credit)
         p.revenue += Math.abs(l.price_subtotal || 0);
       }
@@ -470,7 +470,7 @@ function DeadStockTab() {
         const recentSales = await searchRead('account.move.line', [
           ['move_id', 'in', recentInvIds],
           ['product_id', '!=', false],
-          ['quantity', '>', 0],
+          ['price_subtotal', '!=', 0],
         ], ['product_id']);
         recentlySoldIds = new Set((recentSales || []).map((l: any) => l.product_id?.[0]).filter(Boolean));
       }
@@ -571,13 +571,13 @@ function SmartInventoryTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: str
         const lines = await searchRead('account.move.line', [
           ['move_id', 'in', invoiceIds],
           ['product_id', '!=', false],
-          ['quantity', '>', 0],
+          ['price_subtotal', '!=', 0],
         ], ['product_id', 'quantity']);
 
         for (const l of (lines || [])) {
           const pid = l.product_id?.[0];
           if (!pid) continue;
-          soldMap.set(pid, (soldMap.get(pid) || 0) + (l.quantity || 0));
+          soldMap.set(pid, (soldMap.get(pid) || 0) + Math.abs(l.quantity || 0));
         }
       }
 
@@ -794,7 +794,7 @@ function ABCTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['quantity', '>', 0],
+        ['price_subtotal', '!=', 0],
       ], ['product_id', 'price_subtotal']);
 
       // Sum revenue per product
