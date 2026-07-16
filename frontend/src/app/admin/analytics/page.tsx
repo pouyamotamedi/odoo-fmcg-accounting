@@ -626,8 +626,8 @@ function SmartInventoryTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: str
 
 // ============ TIME ANALYSIS TAB ============
 function TimeAnalysisTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
-  const [hourlyData, setHourlyData] = useState<{hour: number; count: number; total: number}[]>([]);
-  const [weekdayData, setWeekdayData] = useState<{day: number; name: string; count: number; total: number}[]>([]);
+  const [hourlyData, setHourlyData] = useState<{hour: number; count: number; total: number; avg: number}[]>([]);
+  const [weekdayData, setWeekdayData] = useState<{day: number; name: string; count: number; total: number; avg: number; dayCount: number}[]>([]);
   const [loading, setLoading] = useState(true);
 
   const WEEKDAYS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
@@ -637,13 +637,23 @@ function TimeAnalysisTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
   async function load() {
     setLoading(true);
     try {
-      // Get invoices with create_date (has time) for hourly analysis
       const invoices = await searchRead('account.move', [
         ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
         ['date', '>=', dateFrom], ['date', '<=', dateTo],
       ], ['amount_total', 'create_date', 'date']);
 
-      // Hourly breakdown (based on create_date time)
+      // Count how many of each weekday exist in the date range
+      const weekdayOccurrences: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+      const startDate = new Date(dateFrom);
+      const endDate = new Date(dateTo);
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        weekdayOccurrences[d.getDay()]++;
+      }
+
+      // Total days in period (for hourly average)
+      const totalDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / 864e5) + 1);
+
+      // Hourly breakdown
       const hourMap: Record<number, { count: number; total: number }> = {};
       for (let h = 0; h < 24; h++) hourMap[h] = { count: 0, total: 0 };
       
@@ -652,46 +662,60 @@ function TimeAnalysisTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
       for (let d = 0; d < 7; d++) dayMap[d] = { count: 0, total: 0 };
 
       for (const inv of (invoices || [])) {
-        const created = inv.create_date ? new Date(inv.create_date) : null;
-        const invDate = inv.date ? new Date(inv.date) : null;
-
-        if (created) {
-          const hour = created.getHours();
+        // Hourly: use create_date and add 3.5 hours for Iran timezone (UTC+3:30)
+        if (inv.create_date) {
+          const utcDate = new Date(inv.create_date);
+          // Add 3:30 for Tehran timezone
+          const iranDate = new Date(utcDate.getTime() + 3.5 * 60 * 60 * 1000);
+          const hour = iranDate.getHours();
           hourMap[hour].count++;
           hourMap[hour].total += inv.amount_total || 0;
         }
 
-        if (invDate) {
-          const dow = invDate.getDay(); // 0=Sun, 6=Sat
+        // Weekday: use date field
+        if (inv.date) {
+          const invDate = new Date(inv.date + 'T00:00:00');
+          const dow = invDate.getDay();
           dayMap[dow].count++;
           dayMap[dow].total += inv.amount_total || 0;
         }
       }
 
-      setHourlyData(Object.entries(hourMap).map(([h, d]) => ({ hour: Number(h), ...d })));
-      setWeekdayData(Object.entries(dayMap).map(([d, v]) => ({ day: Number(d), name: WEEKDAYS[Number(d)], ...v })));
-    } catch { setHourlyData([]); setWeekdayData([]); }
+      // Calculate averages
+      setHourlyData(Object.entries(hourMap).map(([h, d]) => ({
+        hour: Number(h), ...d,
+        avg: totalDays > 0 ? d.total / totalDays : 0,
+      })));
+      setWeekdayData(Object.entries(dayMap).map(([d, v]) => ({
+        day: Number(d), name: WEEKDAYS[Number(d)], ...v,
+        dayCount: weekdayOccurrences[Number(d)] || 1,
+        avg: weekdayOccurrences[Number(d)] > 0 ? v.total / weekdayOccurrences[Number(d)] : 0,
+      })));
+    } catch (e) { console.error('[TimeAnalysis]', e); setHourlyData([]); setWeekdayData([]); }
     setLoading(false);
   }
 
   if (loading) return <div className="text-center py-12 text-gray-400">بارگذاری...</div>;
 
-  const maxHourly = Math.max(...hourlyData.map(h => h.total), 1);
-  const maxWeekday = Math.max(...weekdayData.map(w => w.total), 1);
+  const maxHourlyAvg = Math.max(...hourlyData.map(h => h.avg), 1);
+  const maxWeekdayAvg = Math.max(...weekdayData.map(w => w.avg), 1);
 
   return (
     <div className="space-y-8">
       {/* Hourly Chart */}
       <div className="bg-white rounded-xl p-5 border">
-        <h3 className="text-sm font-bold text-slate-700 mb-4">⏰ فروش ساعتی</h3>
-        <div dir="ltr" className="flex items-end gap-px h-40">
+        <h3 className="text-sm font-bold text-slate-700 mb-1">⏰ میانگین فروش ساعتی</h3>
+        <p className="text-[10px] text-gray-500 mb-4">میانگین فروش هر ساعت در روز (مجموع تقسیم بر تعداد روزها)</p>
+        <div dir="ltr" style={{ height: '160px' }} className="flex items-end gap-px">
           {hourlyData.filter(h => h.hour >= 7 && h.hour <= 23).map((h) => (
-            <div key={h.hour} className="flex-1 flex flex-col items-center group relative">
-              <div className="absolute -top-5 bg-slate-800 text-white text-[8px] rounded px-1 py-0.5 opacity-0 group-hover:opacity-100 whitespace-nowrap z-10">
-                {formatPrice(h.total)} ({toPersianDigits(h.count)} فاکتور)
+            <div key={h.hour} className="flex-1 flex flex-col items-center h-full group cursor-pointer">
+              <div className="flex-1 flex items-end w-full relative">
+                <div className="absolute -top-5 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[8px] rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 whitespace-nowrap z-10">
+                  میانگین: {formatPrice(Math.round(h.avg))} | {toPersianDigits(h.count)} فاکتور
+                </div>
+                <div className="w-full bg-indigo-400 rounded-t-sm group-hover:bg-indigo-500 transition self-end" style={{ height: `${Math.max((h.avg / maxHourlyAvg) * 100, 3)}%` }} />
               </div>
-              <div className="w-full bg-indigo-400 rounded-t-sm group-hover:bg-indigo-500 transition" style={{ height: `${Math.max((h.total / maxHourly) * 100, 2)}%` }} />
-              <div className="text-[8px] text-gray-500 mt-1">{h.hour}</div>
+              <div className="text-[9px] text-gray-500 mt-1 shrink-0">{h.hour}</div>
             </div>
           ))}
         </div>
@@ -699,20 +723,20 @@ function TimeAnalysisTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
 
       {/* Weekday Chart */}
       <div className="bg-white rounded-xl p-5 border">
-        <h3 className="text-sm font-bold text-slate-700 mb-4">📅 فروش روزهای هفته</h3>
+        <h3 className="text-sm font-bold text-slate-700 mb-1">📅 میانگین فروش روزهای هفته</h3>
+        <p className="text-[10px] text-gray-500 mb-4">میانگین فروش هر روز هفته (مجموع ÷ تعداد تکرار آن روز در دوره)</p>
         <div className="space-y-2">
-          {/* Reorder: شنبه first */}
           {[6, 0, 1, 2, 3, 4, 5].map(dayIdx => {
             const w = weekdayData[dayIdx];
             if (!w) return null;
             return (
               <div key={dayIdx} className="flex items-center gap-3">
-                <span className="text-xs w-16 text-gray-600">{w.name}</span>
-                <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden relative">
-                  <div className="h-full bg-green-400 rounded-full transition-all" style={{ width: `${(w.total / maxWeekday) * 100}%` }} />
-                  <span className="absolute right-2 top-1 text-[9px] text-gray-600">{formatPrice(w.total)}</span>
+                <span className="text-xs w-14 text-gray-600 shrink-0">{w.name}</span>
+                <div className="flex-1 h-7 bg-gray-100 rounded-full overflow-hidden relative">
+                  <div className="h-full bg-green-400 rounded-full transition-all" style={{ width: `${(w.avg / maxWeekdayAvg) * 100}%` }} />
+                  <span className="absolute right-2 top-1.5 text-[9px] text-gray-700 font-bold">{formatPrice(Math.round(w.avg))}</span>
                 </div>
-                <span className="text-[10px] text-gray-500 w-16">{toPersianDigits(w.count)} فاکتور</span>
+                <span className="text-[9px] text-gray-400 w-20 shrink-0">{toPersianDigits(w.dayCount)} روز / {toPersianDigits(w.count)} فاکتور</span>
               </div>
             );
           })}
