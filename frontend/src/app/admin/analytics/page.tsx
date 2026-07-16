@@ -171,7 +171,7 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
         const saleLines = await searchRead('account.move.line', [
           ['move_id', 'in', saleInvoiceIds],
           ['product_id', '!=', false],
-          ['price_subtotal', '!=', 0],
+          ['price_subtotal', '>', 0],
         ], ['product_id', 'quantity', 'price_subtotal']);
 
         // Get cost prices
@@ -253,7 +253,7 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['price_subtotal', '!=', 0],
+        ['price_subtotal', '>', 0],
       ], ['product_id', 'quantity', 'price_subtotal']);
 
       // Group by product
@@ -358,7 +358,7 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['price_subtotal', '!=', 0],
+        ['price_subtotal', '>', 0],
       ], ['product_id', 'quantity', 'price_subtotal']);
 
       const productMap = new Map<number, { name: string; qty: number; revenue: number }>();
@@ -471,7 +471,7 @@ function DeadStockTab() {
         const recentSales = await searchRead('account.move.line', [
           ['move_id', 'in', recentInvIds],
           ['product_id', '!=', false],
-          ['price_subtotal', '!=', 0],
+          ['price_subtotal', '>', 0],
         ], ['product_id']);
         recentlySoldIds = new Set((recentSales || []).map((l: any) => l.product_id?.[0]).filter(Boolean));
       }
@@ -572,7 +572,7 @@ function SmartInventoryTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: str
         const lines = await searchRead('account.move.line', [
           ['move_id', 'in', invoiceIds],
           ['product_id', '!=', false],
-          ['price_subtotal', '!=', 0],
+          ['price_subtotal', '>', 0],
         ], ['product_id', 'quantity']);
 
         for (const l of (lines || [])) {
@@ -795,7 +795,7 @@ function ABCTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['price_subtotal', '!=', 0],
+        ['price_subtotal', '>', 0],
       ], ['product_id', 'price_subtotal']);
 
       // Sum revenue per product
