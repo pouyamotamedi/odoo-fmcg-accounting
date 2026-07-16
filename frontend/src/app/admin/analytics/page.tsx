@@ -72,8 +72,8 @@ function pctColor(current: number, previous: number): string {
 export default function AnalyticsPage() {
   const [tab, setTab] = useState<TabType>('dashboard');
   const monthRange = getJalaliMonthRange();
-  const [dateFrom, setDateFrom] = useState(monthRange.from);
-  const [dateTo, setDateTo] = useState(monthRange.to);
+  const [dateFrom, setDateFrom] = useState(new Date(Date.now() - 30 * 864e5).toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
 
   const tabs: { key: TabType; label: string; icon: string }[] = [
     { key: 'dashboard', label: 'داشبورد', icon: '📊' },
@@ -104,6 +104,21 @@ export default function AnalyticsPage() {
 
       {/* Date filter (shared) */}
       <div className="flex gap-3 mb-4 items-end flex-wrap print:hidden">
+        {/* Period presets */}
+        <div className="flex gap-1">
+          {([
+            { label: '۷ روز', days: 7 },
+            { label: '۳۰ روز', days: 30 },
+            { label: '۶ ماه', days: 180 },
+            { label: '۱ سال', days: 365 },
+          ]).map(p => (
+            <button key={p.days} onClick={() => {
+              const to = new Date().toISOString().split('T')[0];
+              const from = new Date(Date.now() - p.days * 864e5).toISOString().split('T')[0];
+              setDateFrom(from); setDateTo(to);
+            }} className="px-2 py-1.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-700">{p.label}</button>
+          ))}
+        </div>
         <div><label className="block text-[10px] text-gray-500 mb-1">از تاریخ</label><JalaliDatePicker value={dateFrom} onChange={setDateFrom} placeholder="از" /></div>
         <div><label className="block text-[10px] text-gray-500 mb-1">تا تاریخ</label><JalaliDatePicker value={dateTo} onChange={setDateTo} placeholder="تا" /></div>
         <button onClick={() => window.print()} className="text-xs bg-slate-700 text-white px-3 py-2 rounded-lg">🖨️ چاپ</button>
@@ -135,11 +150,11 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
     try {
       const prev = getPrevPeriod(dateFrom, dateTo);
       // Current period sales
-      const curSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['invoice_date', '>=', dateFrom], ['invoice_date', '<=', dateTo]], ['amount_total', 'partner_id']);
+      const curSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['amount_total', 'partner_id']);
       // Previous period sales
-      const prevSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['invoice_date', '>=', prev.from], ['invoice_date', '<=', prev.to]], ['amount_total']);
+      const prevSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['date', '>=', prev.from], ['date', '<=', prev.to]], ['amount_total']);
       // Current period purchases (for gross margin)
-      const curPurchases = await searchRead('account.move', [['move_type', '=', 'in_invoice'], ['state', '=', 'posted'], ['invoice_date', '>=', dateFrom], ['invoice_date', '<=', dateTo]], ['amount_total']);
+      const curPurchases = await searchRead('account.move', [['move_type', '=', 'in_invoice'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['amount_total']);
 
       const curTotal = (curSales || []).reduce((s: number, r: any) => s + (r.amount_total || 0), 0);
       const prevTotal = (prevSales || []).reduce((s: number, r: any) => s + (r.amount_total || 0), 0);
@@ -196,13 +211,20 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
   async function load() {
     setLoading(true);
     try {
-      // Get all sale invoice lines in period
-      const lines = await searchRead('account.move.line', [
-        ['parent_state', '=', 'posted'],
-        ['move_id.move_type', '=', 'out_invoice'],
+      // Step 1: Get sale invoice IDs in period
+      const invoices = await searchRead('account.move', [
+        ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
         ['date', '>=', dateFrom], ['date', '<=', dateTo],
+      ], ['id']);
+      const invoiceIds = (invoices || []).map((inv: any) => inv.id);
+
+      if (invoiceIds.length === 0) { setData([]); setLoading(false); return; }
+
+      // Step 2: Get invoice lines for these invoices
+      const lines = await searchRead('account.move.line', [
+        ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['exclude_from_invoice_tab', '=', false],
+        ['quantity', '>', 0],
       ], ['product_id', 'quantity', 'price_subtotal']);
 
       // Group by product
@@ -210,22 +232,21 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
       for (const l of (lines || [])) {
         const pid = l.product_id?.[0];
         const pname = l.product_id?.[1] || '';
-        if (!pid) continue;
+        if (!pid || !pname) continue;
         if (!productMap.has(pid)) productMap.set(pid, { name: pname, qty: 0, revenue: 0 });
         const p = productMap.get(pid)!;
         p.qty += l.quantity || 0;
         p.revenue += l.price_subtotal || 0;
       }
 
-      // Get cost prices for profit calculation
+      // Get cost prices
       const productIds = [...productMap.keys()];
-      let costMap = new Map<number, number>();
+      const costMap = new Map<number, number>();
       if (productIds.length > 0) {
         const products = await searchRead('product.product', [['id', 'in', productIds]], ['id', 'standard_price']);
         for (const p of (products || [])) costMap.set(p.id, p.standard_price || 0);
       }
 
-      // Build result
       const result = [...productMap.entries()].map(([id, info]) => {
         const cost = costMap.get(id) || 0;
         const totalCost = cost * info.qty;
@@ -234,7 +255,7 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
       });
 
       setData(result);
-    } catch { setData([]); }
+    } catch (e) { console.error('[TopProducts]', e); setData([]); }
     setLoading(false);
   }
 
@@ -289,12 +310,20 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
   async function load() {
     setLoading(true);
     try {
-      const lines = await searchRead('account.move.line', [
-        ['parent_state', '=', 'posted'],
-        ['move_id.move_type', '=', 'out_invoice'],
+      // Step 1: Get sale invoice IDs
+      const invoices = await searchRead('account.move', [
+        ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
         ['date', '>=', dateFrom], ['date', '<=', dateTo],
+      ], ['id']);
+      const invoiceIds = (invoices || []).map((inv: any) => inv.id);
+
+      if (invoiceIds.length === 0) { setData([]); setLoading(false); return; }
+
+      // Step 2: Get lines
+      const lines = await searchRead('account.move.line', [
+        ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['exclude_from_invoice_tab', '=', false],
+        ['quantity', '>', 0],
       ], ['product_id', 'quantity', 'price_subtotal']);
 
       const productMap = new Map<number, { name: string; qty: number; revenue: number }>();
@@ -308,7 +337,7 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
       }
 
       const productIds = [...productMap.keys()];
-      let costMap = new Map<number, number>();
+      const costMap = new Map<number, number>();
       if (productIds.length > 0) {
         const products = await searchRead('product.product', [['id', 'in', productIds]], ['id', 'standard_price']);
         for (const p of (products || [])) costMap.set(p.id, p.standard_price || 0);
@@ -323,7 +352,7 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
       }).sort((a, b) => b.marginPct - a.marginPct);
 
       setData(result);
-    } catch { setData([]); }
+    } catch (e) { console.error('[ProfitMargin]', e); setData([]); }
     setLoading(false);
   }
 
@@ -388,16 +417,22 @@ function DeadStockTab() {
       const products = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available', 'standard_price', 'id']);
       // Get last sale date per product
       const cutoffDate = new Date(Date.now() - minDays * 864e5).toISOString().split('T')[0];
-      // Find products that HAVE been sold after cutoff (to exclude them)
-      const recentSales = await searchRead('account.move.line', [
-        ['parent_state', '=', 'posted'],
-        ['move_id.move_type', '=', 'out_invoice'],
+      // Find products that HAVE been sold after cutoff
+      const recentInvoices = await searchRead('account.move', [
+        ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
         ['date', '>=', cutoffDate],
-        ['product_id', '!=', false],
-        ['exclude_from_invoice_tab', '=', false],
-      ], ['product_id']);
-
-      const recentlySoldIds = new Set((recentSales || []).map((l: any) => l.product_id?.[0]).filter(Boolean));
+      ], ['id']);
+      const recentInvIds = (recentInvoices || []).map((inv: any) => inv.id);
+      
+      let recentlySoldIds = new Set<number>();
+      if (recentInvIds.length > 0) {
+        const recentSales = await searchRead('account.move.line', [
+          ['move_id', 'in', recentInvIds],
+          ['product_id', '!=', false],
+          ['quantity', '>', 0],
+        ], ['product_id']);
+        recentlySoldIds = new Set((recentSales || []).map((l: any) => l.product_id?.[0]).filter(Boolean));
+      }
 
       // Products with stock but NOT sold recently
       const deadStock = (products || [])
@@ -484,24 +519,28 @@ function SmartInventoryTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: str
       // Get all products
       const products = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available', 'standard_price', 'id']);
       // Get sales in the period to calculate daily consumption
-      const lines = await searchRead('account.move.line', [
-        ['parent_state', '=', 'posted'],
-        ['move_id.move_type', '=', 'out_invoice'],
+      const invoices = await searchRead('account.move', [
+        ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
         ['date', '>=', dateFrom], ['date', '<=', dateTo],
-        ['product_id', '!=', false],
-        ['exclude_from_invoice_tab', '=', false],
-      ], ['product_id', 'quantity']);
+      ], ['id']);
+      const invoiceIds = (invoices || []).map((inv: any) => inv.id);
+      
+      let soldMap = new Map<number, number>();
+      if (invoiceIds.length > 0) {
+        const lines = await searchRead('account.move.line', [
+          ['move_id', 'in', invoiceIds],
+          ['product_id', '!=', false],
+          ['quantity', '>', 0],
+        ], ['product_id', 'quantity']);
 
-      // Period days
-      const periodDays = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 864e5) + 1);
-
-      // Total sold per product in period
-      const soldMap = new Map<number, number>();
-      for (const l of (lines || [])) {
-        const pid = l.product_id?.[0];
-        if (!pid) continue;
-        soldMap.set(pid, (soldMap.get(pid) || 0) + (l.quantity || 0));
+        for (const l of (lines || [])) {
+          const pid = l.product_id?.[0];
+          if (!pid) continue;
+          soldMap.set(pid, (soldMap.get(pid) || 0) + (l.quantity || 0));
+        }
       }
+
+      const periodDays = Math.max(1, Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 864e5) + 1);
 
       // Build result
       const result = (products || [])
@@ -586,8 +625,8 @@ function TimeAnalysisTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
       // Get invoices with create_date (has time) for hourly analysis
       const invoices = await searchRead('account.move', [
         ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
-        ['invoice_date', '>=', dateFrom], ['invoice_date', '<=', dateTo],
-      ], ['amount_total', 'create_date', 'invoice_date']);
+        ['date', '>=', dateFrom], ['date', '<=', dateTo],
+      ], ['amount_total', 'create_date', 'date']);
 
       // Hourly breakdown (based on create_date time)
       const hourMap: Record<number, { count: number; total: number }> = {};
@@ -599,7 +638,7 @@ function TimeAnalysisTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
 
       for (const inv of (invoices || [])) {
         const created = inv.create_date ? new Date(inv.create_date) : null;
-        const invDate = inv.invoice_date ? new Date(inv.invoice_date) : null;
+        const invDate = inv.date ? new Date(inv.date) : null;
 
         if (created) {
           const hour = created.getHours();
@@ -679,12 +718,18 @@ function ABCTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   async function load() {
     setLoading(true);
     try {
-      const lines = await searchRead('account.move.line', [
-        ['parent_state', '=', 'posted'],
-        ['move_id.move_type', '=', 'out_invoice'],
+      const invoices = await searchRead('account.move', [
+        ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
         ['date', '>=', dateFrom], ['date', '<=', dateTo],
+      ], ['id']);
+      const invoiceIds = (invoices || []).map((inv: any) => inv.id);
+
+      if (invoiceIds.length === 0) { setData([]); setLoading(false); return; }
+
+      const lines = await searchRead('account.move.line', [
+        ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
-        ['exclude_from_invoice_tab', '=', false],
+        ['quantity', '>', 0],
       ], ['product_id', 'price_subtotal']);
 
       // Sum revenue per product
@@ -768,7 +813,7 @@ function EmployeesTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
       // In Odoo, invoices have create_uid (the user who created it = the cashier)
       const invoices = await searchRead('account.move', [
         ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
-        ['invoice_date', '>=', dateFrom], ['invoice_date', '<=', dateTo],
+        ['date', '>=', dateFrom], ['date', '<=', dateTo],
       ], ['amount_total', 'create_uid']);
 
       // Group by user
