@@ -92,6 +92,7 @@ export default function InventoryPage() {
   const [adjQty, setAdjQty] = useState('');
   const [adjReason, setAdjReason] = useState<'damaged'|'expired'|'lost'|'other'>('damaged');
   const [adjNote, setAdjNote] = useState('');
+  const [inventoryTab, setInventoryTab] = useState<'products'|'lowstock'>('products');
 
   async function fetchTemplates() {
     setLoading(true);
@@ -386,16 +387,23 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => setInventoryTab('products')} className={`px-4 py-2 rounded-lg text-xs font-bold ${inventoryTab === 'products' ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>📦 همه کالاها</button>
+        <button onClick={() => setInventoryTab('lowstock')} className={`px-4 py-2 rounded-lg text-xs font-bold ${inventoryTab === 'lowstock' ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}>⚠️ موجودی کم</button>
+      </div>
+
       {/* Search & Filter */}
-      <div className="mb-4 flex gap-3 flex-wrap items-center">
+      {inventoryTab === 'products' && <div className="mb-4 flex gap-3 flex-wrap items-center">
         <input type="text" placeholder="🔍 جستجو..." value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 max-w-md p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
         <select value={filterCategory} onChange={(e) => setFilterCategory(Number(e.target.value))} className="p-2 border border-gray-200 rounded-lg text-sm">
           <option value={0}>همه دسته‌ها</option>
           {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <button onClick={() => setShowCategoryForm(true)} className="text-xs bg-gray-100 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-200">+ دسته‌بندی</button>
-      </div>
+      </div>}
 
+      {inventoryTab === 'products' && (<>
       {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
 
       {loading ? <div className="text-center py-12 text-gray-400">بارگذاری...</div> : filtered.length === 0 ? (
@@ -480,6 +488,53 @@ export default function InventoryPage() {
               )}
             </div>
           ))}
+        </div>
+      )}
+      </>)}
+
+      {/* Low Stock Tab */}
+      {inventoryTab === 'lowstock' && (
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b bg-orange-50">
+            <h3 className="text-sm font-bold text-orange-700">⚠️ کالاهای با موجودی کم</h3>
+            <p className="text-[10px] text-orange-600">واریانت‌هایی که موجودی آنها کمتر از حد نصاب تعریف‌شده است</p>
+          </div>
+          {(() => {
+            const lowStockProducts = (templates || []).flatMap(t => 
+              (variantsMap[t.id] || []).filter((v: any) => v.qty_available > 0 && v.qty_available <= (t.fmcg_reorder_threshold || 5))
+                .map((v: any) => ({ ...v, templateName: t.name, threshold: t.fmcg_reorder_threshold || 5 }))
+            );
+            // Also check templates without expanded variants - use total_qty
+            const lowTemplates = templates.filter(t => t.total_qty > 0 && t.total_qty <= (t.fmcg_reorder_threshold || 5) && t.product_variant_count <= 1);
+            
+            const allLow = [
+              ...lowTemplates.map(t => ({ name: t.name, qty: t.total_qty, threshold: t.fmcg_reorder_threshold || 5 })),
+              ...lowStockProducts.map((v: any) => ({ name: v.display_name || `${v.templateName} - ${v.name}`, qty: v.qty_available, threshold: v.threshold })),
+            ];
+
+            return allLow.length === 0 ? (
+              <div className="p-8 text-center text-gray-400 text-sm">همه کالاها موجودی کافی دارند ✓</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50"><tr>
+                  <th className="text-right p-3">نام کالا</th>
+                  <th className="text-right p-3">موجودی فعلی</th>
+                  <th className="text-right p-3">حد نصاب</th>
+                  <th className="text-right p-3">وضعیت</th>
+                </tr></thead>
+                <tbody>
+                  {allLow.map((item, i) => (
+                    <tr key={i} className="border-t hover:bg-orange-50">
+                      <td className="p-3 font-medium">{item.name}</td>
+                      <td className="p-3 text-red-600 font-bold">{toPersianDigits(Math.round(item.qty))}</td>
+                      <td className="p-3 text-gray-500">{toPersianDigits(item.threshold)}</td>
+                      <td className="p-3"><span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">کمبود</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })()}
         </div>
       )}
 

@@ -55,6 +55,7 @@ export default function PurchasePage() {
   const [editingProduct, setEditingProduct] = useState<OdooProduct | null>(null);
   const [editPrice, setEditPrice] = useState('');
   const [editSellPrice, setEditSellPrice] = useState('');
+  const [editThreshold, setEditThreshold] = useState('10');
   const [journals, setJournals] = useState<{id:number;name:string;type:string}[]>([]);
   const [showPayment, setShowPayment] = useState(false);
   const [paymentJournal, setPaymentJournal] = useState<number>(0);
@@ -579,7 +580,7 @@ export default function PurchasePage() {
                 </button>
                 <button onClick={async (e) => {
                   e.stopPropagation();
-                  setEditingProduct(product); setEditPrice(String(product.standard_price)); setEditSellPrice(String(product.list_price));
+                  setEditingProduct(product); setEditPrice(String(product.standard_price)); setEditSellPrice(String(product.list_price)); setEditThreshold(String(product.fmcg_reorder_threshold || 10));
                   // Load discount prices
                   const prices: Record<number, string> = {};
                   for (const cat of discountCats) {
@@ -886,6 +887,10 @@ export default function PurchasePage() {
                   <label className="block text-xs text-gray-500 mb-1">قیمت فروش</label>
                   <PriceInput value={editSellPrice} onChange={(v) => setEditSellPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
                 </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">حداقل موجودی</label>
+                  <input type="number" value={editThreshold} onChange={(e) => setEditThreshold(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                </div>
               </div>
 
               {/* Discount prices */}
@@ -925,7 +930,7 @@ export default function PurchasePage() {
                       }
                     }
                   } else {
-                    await updateProduct(editingProduct.id, { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
+                    await updateProduct(editingProduct.id, { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0, fmcg_reorder_threshold: parseInt(editThreshold)||10 });
                     // Save discount prices
                     for (const cat of discountCats) {
                       const price = parseFloat(editDiscountPrices[cat.id] || '');

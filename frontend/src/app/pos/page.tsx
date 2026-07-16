@@ -22,6 +22,7 @@ export default function PosPage() {
   const { items, addItem, updateQuantity, clearCart, total, updateAllPrices } = useCartStore();
   const [products, setProducts] = useState<OdooProduct[]>([]);
   const [search, setSearch] = useState('');
+  const [showAllProducts, setShowAllProducts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showCredit, setShowCredit] = useState(false);
@@ -188,6 +189,8 @@ export default function PosPage() {
 
   const filteredProducts = products.filter(
     (p) => {
+      // Hide zero-stock unless showAllProducts is enabled
+      if (!showAllProducts && (p.qty_available || 0) <= 0) return false;
       if (!search) return true;
       if (p.name.includes(search)) return true;
       if (p.barcode) {
@@ -498,6 +501,11 @@ export default function PosPage() {
             className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
             autoFocus
           />
+          {/* Show all products toggle */}
+          <label className="flex items-center gap-2 mt-2 cursor-pointer">
+            <input type="checkbox" checked={showAllProducts} onChange={(e) => setShowAllProducts(e.target.checked)} className="w-3.5 h-3.5 rounded" />
+            <span className="text-xs text-gray-500">نمایش همه محصولات (شامل موجودی صفر)</span>
+          </label>
           {/* Discount category selector */}
           {discountCategories.length > 0 && (
             <div className="flex gap-2 mt-2 flex-wrap">
