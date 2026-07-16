@@ -156,15 +156,16 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
       // Current period purchases (for gross margin)
       const curPurchases = await searchRead('account.move', [['move_type', '=', 'in_invoice'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['amount_total']);
 
-      const curTotal = (curSales || []).reduce((s: number, r: any) => s + (r.amount_total || 0), 0);
-      const prevTotal = (prevSales || []).reduce((s: number, r: any) => s + (r.amount_total || 0), 0);
-      const curPurchaseTotal = (curPurchases || []).reduce((s: number, r: any) => s + (r.amount_total || 0), 0);
+      const curTotal = (curSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
+      const prevTotal = (prevSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
+      const curPurchaseTotal = (curPurchases || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
       const curCount = (curSales || []).length;
       const prevCount = (prevSales || []).length;
       const avgBasket = curCount > 0 ? curTotal / curCount : 0;
       const prevAvgBasket = prevCount > 0 ? prevTotal / prevCount : 0;
       const grossProfit = curTotal - curPurchaseTotal;
       const grossMarginPct = curTotal > 0 ? (grossProfit / curTotal) * 100 : 0;
+      console.log('[Dashboard] Sales:', curTotal, 'Purchases:', curPurchaseTotal, 'Profit:', grossProfit, 'Invoices:', curSales?.length, 'Bills:', curPurchases?.length);
       // Unique customers
       const uniqueCustomers = new Set((curSales || []).map((s: any) => s.partner_id?.[0]).filter(Boolean)).size;
 
