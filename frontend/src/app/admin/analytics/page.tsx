@@ -166,12 +166,15 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
       let cogs = 0;
       const saleInvoiceIds = (curSales || []).map((inv: any) => inv.id);
       if (saleInvoiceIds.length > 0) {
-        // Get sale lines — in Odoo 18, product lines have quantity != 0
-        // We need price_subtotal to identify real product lines (not receivable)
+        // Get sale lines — only INCOME lines (not COGS/expense lines that Odoo also creates)
+        // In Odoo 18, each sale invoice has both income lines AND COGS lines
+        // We identify income lines by: they have the HIGHER price_subtotal for same product
+        // Better approach: filter by account type (income accounts only)
         const saleLines = await searchRead('account.move.line', [
           ['move_id', 'in', saleInvoiceIds],
           ['product_id', '!=', false],
           ['price_subtotal', '>', 0],
+          ['account_id.account_type', 'in', ['income', 'income_other']],
         ], ['product_id', 'quantity', 'price_subtotal']);
 
         // Get cost prices
@@ -258,11 +261,12 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
 
       if (invoiceIds.length === 0) { setData([]); setLoading(false); return; }
 
-      // Step 2: Get invoice lines for these invoices
+      // Step 2: Get invoice lines — only income account lines (not COGS)
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
         ['price_subtotal', '>', 0],
+        ['account_id.account_type', 'in', ['income', 'income_other']],
       ], ['product_id', 'quantity', 'price_subtotal']);
 
       // Group by product
@@ -363,11 +367,12 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
 
       if (invoiceIds.length === 0) { setData([]); setLoading(false); return; }
 
-      // Step 2: Get lines
+      // Step 2: Get lines — income lines only
       const lines = await searchRead('account.move.line', [
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
         ['price_subtotal', '>', 0],
+        ['account_id.account_type', 'in', ['income', 'income_other']],
       ], ['product_id', 'quantity', 'price_subtotal']);
 
       const productMap = new Map<number, { name: string; qty: number; revenue: number }>();
@@ -805,6 +810,7 @@ function ABCTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
         ['price_subtotal', '>', 0],
+        ['account_id.account_type', 'in', ['income', 'income_other']],
       ], ['product_id', 'price_subtotal']);
 
       // Sum revenue per product
