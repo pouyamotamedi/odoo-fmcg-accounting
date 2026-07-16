@@ -225,7 +225,7 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
         ['move_id', 'in', invoiceIds],
         ['product_id', '!=', false],
         ['quantity', '>', 0],
-      ], ['product_id', 'quantity', 'price_subtotal']);
+      ], ['product_id', 'quantity', 'price_subtotal', 'credit']);
 
       // Group by product
       const productMap = new Map<number, { name: string; qty: number; revenue: number }>();
@@ -236,7 +236,9 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
         if (!productMap.has(pid)) productMap.set(pid, { name: pname, qty: 0, revenue: 0 });
         const p = productMap.get(pid)!;
         p.qty += l.quantity || 0;
-        p.revenue += l.price_subtotal || 0;
+        // In Odoo 18, sale invoice lines have negative price_subtotal (credit side)
+        // Use absolute value, or use credit field directly
+        p.revenue += Math.abs(l.price_subtotal || 0);
       }
 
       // Get cost prices
@@ -333,7 +335,8 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
         if (!productMap.has(pid)) productMap.set(pid, { name: l.product_id?.[1] || '', qty: 0, revenue: 0 });
         const p = productMap.get(pid)!;
         p.qty += l.quantity || 0;
-        p.revenue += l.price_subtotal || 0;
+        // Absolute value because Odoo 18 stores sale lines as negative (credit)
+        p.revenue += Math.abs(l.price_subtotal || 0);
       }
 
       const productIds = [...productMap.keys()];
@@ -738,7 +741,7 @@ function ABCTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
         const pid = l.product_id?.[0];
         if (!pid) continue;
         if (!productMap.has(pid)) productMap.set(pid, { name: l.product_id?.[1] || '', revenue: 0 });
-        productMap.get(pid)!.revenue += l.price_subtotal || 0;
+        productMap.get(pid)!.revenue += Math.abs(l.price_subtotal || 0);
       }
 
       // Sort by revenue descending
