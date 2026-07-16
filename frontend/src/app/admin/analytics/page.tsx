@@ -253,7 +253,9 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
         const cost = costMap.get(id) || 0;
         const totalCost = cost * info.qty;
         const profit = info.revenue - totalCost;
-        return { id, name: info.name, qty: info.qty, revenue: info.revenue, cost: totalCost, profit, marginPct: info.revenue > 0 ? (profit / info.revenue) * 100 : 0 };
+        const avgSellPrice = info.qty > 0 ? info.revenue / info.qty : 0;
+        const profitPerUnit = avgSellPrice - cost;
+        return { id, name: info.name, qty: info.qty, revenue: info.revenue, cost: totalCost, profit, marginPct: info.revenue > 0 ? (profit / info.revenue) * 100 : 0, avgBuyPrice: cost, avgSellPrice, profitPerUnit };
       });
 
       setData(result);
@@ -273,15 +275,17 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
           <button key={key} onClick={() => setSortBy(key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${sortBy === key ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600'}`}>{label}</button>
         ))}
       </div>
-      <div className="bg-white rounded-xl border overflow-hidden">
+      <div className="bg-white rounded-xl border overflow-hidden overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b"><tr>
             <th className="text-right p-3 w-8">#</th>
             <th className="text-right p-3">کالا</th>
-            <th className="text-right p-3">تعداد فروش</th>
-            <th className="text-right p-3">مبلغ فروش</th>
-            <th className="text-right p-3">سود</th>
-            <th className="text-right p-3">حاشیه</th>
+            <th className="text-right p-3">تعداد</th>
+            <th className="text-right p-3">میانگین خرید</th>
+            <th className="text-right p-3">میانگین فروش</th>
+            <th className="text-right p-3">سود واحد</th>
+            <th className="text-right p-3">سود کل</th>
+            <th className="text-right p-3">حاشیه %</th>
           </tr></thead>
           <tbody>
             {top20.map((item, i) => (
@@ -289,7 +293,9 @@ function TopProductsTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
                 <td className="p-3 text-gray-400 text-xs">{toPersianDigits(i + 1)}</td>
                 <td className="p-3 font-medium">{item.name}</td>
                 <td className="p-3">{toPersianDigits(Math.round(item.qty))}</td>
-                <td className="p-3">{formatPrice(item.revenue)}</td>
+                <td className="p-3 text-gray-500">{formatPrice(Math.round(item.avgBuyPrice))}</td>
+                <td className="p-3">{formatPrice(Math.round(item.avgSellPrice))}</td>
+                <td className={`p-3 ${item.profitPerUnit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPrice(Math.round(item.profitPerUnit))}</td>
                 <td className={`p-3 font-bold ${item.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPrice(item.profit)}</td>
                 <td className="p-3 text-xs">{toPersianDigits(Math.round(item.marginPct))}%</td>
               </tr>
@@ -376,18 +382,23 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
           <thead className="bg-gray-50 border-b"><tr>
             <th className="text-right p-3">کالا</th>
             <th className="text-right p-3">تعداد</th>
-            <th className="text-right p-3">قیمت خرید</th>
-            <th className="text-right p-3">فروش</th>
-            <th className="text-right p-3">سود</th>
+            <th className="text-right p-3">میانگین خرید (واحد)</th>
+            <th className="text-right p-3">میانگین فروش (واحد)</th>
+            <th className="text-right p-3">سود واحد</th>
+            <th className="text-right p-3">سود کل</th>
             <th className="text-right p-3">حاشیه %</th>
           </tr></thead>
           <tbody>
-            {data.map((item) => (
+            {data.map((item) => {
+              const avgSell = item.qty > 0 ? item.revenue / item.qty : 0;
+              const profitPerUnit = avgSell - item.unitCost;
+              return (
               <tr key={item.id} className="border-b hover:bg-gray-50">
                 <td className="p-3 font-medium">{item.name}</td>
                 <td className="p-3">{toPersianDigits(Math.round(item.qty))}</td>
-                <td className="p-3 text-gray-500">{formatPrice(item.unitCost)}</td>
-                <td className="p-3">{formatPrice(item.revenue)}</td>
+                <td className="p-3 text-gray-500">{formatPrice(Math.round(item.unitCost))}</td>
+                <td className="p-3">{formatPrice(Math.round(avgSell))}</td>
+                <td className={`p-3 ${profitPerUnit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPrice(Math.round(profitPerUnit))}</td>
                 <td className={`p-3 font-bold ${item.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPrice(item.profit)}</td>
                 <td className="p-3">
                   <div className="flex items-center gap-1">
@@ -396,7 +407,8 @@ function ProfitMarginTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
