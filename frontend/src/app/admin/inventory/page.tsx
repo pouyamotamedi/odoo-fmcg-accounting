@@ -46,6 +46,67 @@ interface ProductForm {
   categ_id: number;
 }
 
+function LowStockList() {
+  const [items, setItems] = useState<{name: string; qty: number; threshold: number}[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        // Fetch ALL products with qty_available and threshold
+        let prods: any[] = [];
+        try {
+          prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available', 'fmcg_reorder_threshold'], 0, 0, 'qty_available asc');
+        } catch {
+          prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available'], 0, 0, 'qty_available asc');
+        }
+        const lowItems = (prods || [])
+          .filter((p: any) => {
+            const threshold = p.fmcg_reorder_threshold || 5;
+            return p.qty_available >= 0 && p.qty_available <= threshold;
+          })
+          .map((p: any) => ({ name: p.display_name || p.name, qty: p.qty_available || 0, threshold: p.fmcg_reorder_threshold || 5 }));
+        setItems(lowItems);
+      } catch { setItems([]); }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  if (loading) return <div className="text-center py-12 text-gray-400">بارگذاری...</div>;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+      <div className="p-4 border-b bg-orange-50">
+        <h3 className="text-sm font-bold text-orange-700">⚠️ کالاهای با موجودی کم ({toPersianDigits(items.length)} مورد)</h3>
+        <p className="text-[10px] text-orange-600">واریانت‌هایی که موجودی آنها کمتر یا مساوی حد نصاب است</p>
+      </div>
+      {items.length === 0 ? (
+        <div className="p-8 text-center text-gray-400 text-sm">همه کالاها موجودی کافی دارند ✓</div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50"><tr>
+            <th className="text-right p-3">نام کالا</th>
+            <th className="text-right p-3">موجودی فعلی</th>
+            <th className="text-right p-3">حد نصاب</th>
+            <th className="text-right p-3">وضعیت</th>
+          </tr></thead>
+          <tbody>
+            {items.map((item, i) => (
+              <tr key={i} className="border-t hover:bg-orange-50">
+                <td className="p-3 font-medium">{item.name}</td>
+                <td className="p-3 text-red-600 font-bold">{toPersianDigits(Math.round(item.qty))}</td>
+                <td className="p-3 text-gray-500">{toPersianDigits(item.threshold)}</td>
+                <td className="p-3"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${item.qty === 0 ? 'bg-red-200 text-red-800' : 'bg-orange-100 text-orange-700'}`}>{item.qty === 0 ? 'ناموجود' : 'کمبود'}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export default function InventoryPage() {
   const [templates, setTemplates] = useState<ProductTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -494,48 +555,7 @@ export default function InventoryPage() {
 
       {/* Low Stock Tab */}
       {inventoryTab === 'lowstock' && (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          <div className="p-4 border-b bg-orange-50">
-            <h3 className="text-sm font-bold text-orange-700">⚠️ کالاهای با موجودی کم</h3>
-            <p className="text-[10px] text-orange-600">واریانت‌هایی که موجودی آنها کمتر از حد نصاب تعریف‌شده است</p>
-          </div>
-          {(() => {
-            const lowStockProducts = (templates || []).flatMap(t => 
-              (variantsMap[t.id] || []).filter((v: any) => v.qty_available > 0 && v.qty_available <= (t.fmcg_reorder_threshold || 5))
-                .map((v: any) => ({ ...v, templateName: t.name, threshold: t.fmcg_reorder_threshold || 5 }))
-            );
-            // Also check templates without expanded variants - use total_qty
-            const lowTemplates = templates.filter(t => t.total_qty > 0 && t.total_qty <= (t.fmcg_reorder_threshold || 5) && t.product_variant_count <= 1);
-            
-            const allLow = [
-              ...lowTemplates.map(t => ({ name: t.name, qty: t.total_qty, threshold: t.fmcg_reorder_threshold || 5 })),
-              ...lowStockProducts.map((v: any) => ({ name: v.display_name || `${v.templateName} - ${v.name}`, qty: v.qty_available, threshold: v.threshold })),
-            ];
-
-            return allLow.length === 0 ? (
-              <div className="p-8 text-center text-gray-400 text-sm">همه کالاها موجودی کافی دارند ✓</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50"><tr>
-                  <th className="text-right p-3">نام کالا</th>
-                  <th className="text-right p-3">موجودی فعلی</th>
-                  <th className="text-right p-3">حد نصاب</th>
-                  <th className="text-right p-3">وضعیت</th>
-                </tr></thead>
-                <tbody>
-                  {allLow.map((item, i) => (
-                    <tr key={i} className="border-t hover:bg-orange-50">
-                      <td className="p-3 font-medium">{item.name}</td>
-                      <td className="p-3 text-red-600 font-bold">{toPersianDigits(Math.round(item.qty))}</td>
-                      <td className="p-3 text-gray-500">{toPersianDigits(item.threshold)}</td>
-                      <td className="p-3"><span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">کمبود</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            );
-          })()}
-        </div>
+        <LowStockList />
       )}
 
       {/* Product Form Modal */}
