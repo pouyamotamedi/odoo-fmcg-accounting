@@ -53,30 +53,25 @@ function LowStockList() {
   useEffect(() => {
     async function load() {
       try {
-        // Fetch ALL products with qty_available and threshold
+        // Fetch ALL products — qty_available is computed (not stored) so no ORDER BY on it
         let prods: any[] = [];
         try {
-          prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available', 'fmcg_reorder_threshold'], 0, 0, 'qty_available asc');
+          prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available', 'fmcg_reorder_threshold']);
         } catch {
           try {
-            prods = await searchRead('product.product', [['active', '=', true]], ['display_name', 'qty_available', 'fmcg_reorder_threshold'], 0, 0, 'qty_available asc');
+            prods = await searchRead('product.product', [['active', '=', true]], ['display_name', 'qty_available', 'fmcg_reorder_threshold']);
           } catch {
-            try {
-              prods = await searchRead('product.product', [['active', '=', true]], ['display_name', 'qty_available'], 0, 0, 'qty_available asc');
-            } catch {
-              prods = await searchRead('product.product', [], ['display_name', 'qty_available'], 0, 0, 'qty_available asc');
-            }
+            prods = await searchRead('product.product', [['active', '=', true]], ['display_name', 'qty_available']);
           }
         }
-        console.log('[LowStock] products loaded:', prods?.length, 'sample:', prods?.slice(0, 3));
         const lowItems = (prods || [])
           .filter((p: any) => {
             const threshold = p.fmcg_reorder_threshold || 5;
             const qty = p.qty_available ?? 0;
             return qty <= threshold;
           })
-          .map((p: any) => ({ name: p.display_name || p.name, qty: p.qty_available ?? 0, threshold: p.fmcg_reorder_threshold || 5 }));
-        console.log('[LowStock] low items:', lowItems.length);
+          .map((p: any) => ({ name: p.display_name || p.name, qty: p.qty_available ?? 0, threshold: p.fmcg_reorder_threshold || 5 }))
+          .sort((a, b) => a.qty - b.qty);
         setItems(lowItems);
       } catch (e) { console.error('[LowStock] error:', e); setItems([]); }
       setLoading(false);
