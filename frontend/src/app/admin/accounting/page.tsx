@@ -72,7 +72,6 @@ export default function AccountingPage() {
   const [msg, setMsg] = useState('');
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set());
   const [entryLinesMap, setEntryLinesMap] = useState<Record<number, any[]>>({});
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [filterType, setFilterType] = useState<'all' | 'in' | 'out' | 'invoice' | 'out_invoice' | 'in_invoice' | 'out_refund' | 'in_refund'>('all');
   const [searchText, setSearchText] = useState('');
 
@@ -496,114 +495,34 @@ export default function AccountingPage() {
               </tr>
             </thead>
             <tbody>
-              {(() => {
-                // Group related entries by ref into nested accordion
-                const refGroups = new Map<string, typeof filtered>();
-                const standalone: typeof filtered = [];
-                for (const e of filtered) {
-                  const ref = e.ref || '';
-                  if (ref) {
-                    if (!refGroups.has(ref)) refGroups.set(ref, []);
-                    refGroups.get(ref)!.push(e);
-                  } else {
-                    standalone.push(e);
-                  }
-                }
-
-                const rows: React.ReactNode[] = [];
-                const groupColors = ['bg-indigo-50 border-indigo-200', 'bg-orange-50 border-orange-200', 'bg-green-50 border-green-200', 'bg-pink-50 border-pink-200', 'bg-cyan-50 border-cyan-200'];
-                let colorIdx = 0;
-
-                // Render grouped entries
-                for (const [ref, groupEntries] of refGroups) {
-                  if (groupEntries.length > 1) {
-                    const color = groupColors[colorIdx % groupColors.length];
-                    colorIdx++;
-                    const isGroupOpen = expandedGroups.has(ref);
-                    const totalAmount = groupEntries.reduce((s, e) => s + e.amount_total, 0);
-                    const mainEntry = groupEntries.find(e => e.move_type === 'in_invoice' || e.move_type === 'out_invoice') || groupEntries[0];
-                    const partnerName = mainEntry.partner_id ? mainEntry.partner_id[1] : '';
-
-                    // Group header row
-                    rows.push(
-                      <tr key={`group-${ref}`} className={`border-b cursor-pointer hover:bg-gray-100 ${color}`} onClick={() => { const next = new Set(expandedGroups); if (next.has(ref)) next.delete(ref); else next.add(ref); setExpandedGroups(next); }}>
-                        <td className="p-3 text-xs font-bold" colSpan={2}>
-                          <span className="ml-2">{isGroupOpen ? '▼' : '◀'}</span>
-                          {` ${ref}`}
-                        </td>
-                        <td className="p-3"><span className="text-[10px] bg-gray-200 px-2 py-0.5 rounded-full font-bold">{toPersianDigits(groupEntries.length)} سند</span></td>
-                        <td className="p-3 text-xs">{partnerName}</td>
-                        <td className="p-3 text-xs text-gray-500">{mainEntry.date ? toJalali(mainEntry.date) : ''}</td>
-                        <td className="p-3 text-xs"></td>
-                        <td className="p-3 font-bold">{formatPrice(totalAmount / groupEntries.length)}</td>
-                      </tr>
-                    );
-
-                    // Child entries (if group is open)
-                    if (isGroupOpen) {
-                      for (const entry of groupEntries) {
-                        rows.push(
-                          <React.Fragment key={entry.id}>
-                          <tr className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer bg-white" onClick={() => handleExpandEntry(entry.id)}>
-                            <td className="p-3 text-gray-400 text-xs pr-8">↳ {entry.name}</td>
-                            <td className="p-3 text-xs">{entry.date ? toJalali(entry.date) : ''}</td>
-                            <td className="p-3"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getMoveTypeColor(entry)}`}>{getMoveTypeLabel(entry)}</span></td>
-                            <td className="p-3 text-xs">{entry.partner_id ? entry.partner_id[1] : ''}</td>
-                            <td className="p-3 text-xs text-gray-600 max-w-[150px] truncate">{getDescription(entry)}</td>
-                            <td className="p-3 text-xs">{entry.journal_id ? entry.journal_id[1] : ''}</td>
-                            <td className="p-3 font-bold">{formatPrice(entry.amount_total)}</td>
-                          </tr>
-                          {expandedEntries.has(entry.id) && (
-                            <tr><td colSpan={7} className="p-3 bg-gray-50">
-                              <div className="text-xs font-bold mb-2">آرتیکل‌های سند:</div>
-                              {(entryLinesMap[entry.id] || []).length === 0 ? <p className="text-xs text-gray-400">بدون آرتیکل</p> : (
-                                <table className="w-full text-xs"><thead><tr><th className="text-right p-1">شرح</th><th className="text-right p-1">کالا</th><th className="text-right p-1">حساب</th><th className="text-right p-1">بدهکار</th><th className="text-right p-1">بستانکار</th></tr></thead>
-                                <tbody>{(entryLinesMap[entry.id] || []).map((l: any) => (
-                                  <tr key={l.id}><td className="p-1">{l.name || '\u2014'}</td><td className="p-1 text-gray-500">{l.product_id?.[1] || ''}</td><td className="p-1">{l.account_id?.[1] || '\u2014'}</td><td className="p-1">{l.debit > 0 ? formatPrice(l.debit) : ''}</td><td className="p-1">{l.credit > 0 ? formatPrice(l.credit) : ''}</td></tr>
-                                ))}</tbody></table>
-                              )}
-                            </td></tr>
-                          )}
-                          </React.Fragment>
-                        );
-                      }
-                    }
-                  } else {
-                    // Single entry with ref — treat as standalone
-                    standalone.push(groupEntries[0]);
-                  }
-                }
-
-                // Render standalone entries
-                for (const entry of standalone) {
-                  rows.push(
-                    <React.Fragment key={entry.id}>
-                    <tr className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => handleExpandEntry(entry.id)}>
-                      <td className="p-3 text-gray-500 text-xs">{entry.name}</td>
-                      <td className="p-3">{entry.date ? toJalali(entry.date) : '\u2014'}</td>
-                      <td className="p-3"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getMoveTypeColor(entry)}`}>{getMoveTypeLabel(entry)}</span></td>
-                      <td className="p-3 text-xs">{entry.partner_id ? entry.partner_id[1] : '\u2014'}</td>
-                      <td className="p-3 text-xs text-gray-600 max-w-[200px] truncate">{getDescription(entry)}</td>
-                      <td className="p-3 text-xs">{entry.journal_id ? entry.journal_id[1] : '\u2014'}</td>
-                      <td className="p-3 font-bold">{formatPrice(entry.amount_total)}</td>
-                    </tr>
-                    {expandedEntries.has(entry.id) && (
-                      <tr><td colSpan={7} className="p-3 bg-gray-50">
-                        <div className="text-xs font-bold mb-2">آرتیکل‌های سند:</div>
-                        {(entryLinesMap[entry.id] || []).length === 0 ? <p className="text-xs text-gray-400">بدون آرتیکل</p> : (
-                          <table className="w-full text-xs"><thead><tr><th className="text-right p-1">شرح</th><th className="text-right p-1">کالا</th><th className="text-right p-1">حساب</th><th className="text-right p-1">بدهکار</th><th className="text-right p-1">بستانکار</th></tr></thead>
-                          <tbody>{(entryLinesMap[entry.id] || []).map((l: any) => (
-                            <tr key={l.id}><td className="p-1">{l.name || '\u2014'}</td><td className="p-1 text-gray-500">{l.product_id?.[1] || ''}</td><td className="p-1">{l.account_id?.[1] || '\u2014'}</td><td className="p-1">{l.debit > 0 ? formatPrice(l.debit) : ''}</td><td className="p-1">{l.credit > 0 ? formatPrice(l.credit) : ''}</td></tr>
-                          ))}</tbody></table>
-                        )}
-                      </td></tr>
+              {filtered.map((entry) => (
+                <React.Fragment key={entry.id}>
+                <tr className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => handleExpandEntry(entry.id)}>
+                  <td className="p-3 text-gray-500 text-xs">{entry.name}</td>
+                  <td className="p-3">{entry.date ? toJalali(entry.date) : '\u2014'}</td>
+                  <td className="p-3">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getMoveTypeColor(entry)}`}>
+                      {getMoveTypeLabel(entry)}
+                    </span>
+                  </td>
+                  <td className="p-3 text-xs">{entry.partner_id ? entry.partner_id[1] : '\u2014'}</td>
+                  <td className="p-3 text-xs text-gray-600 max-w-[200px] truncate">{getDescription(entry)}</td>
+                  <td className="p-3 text-xs">{entry.journal_id ? entry.journal_id[1] : '\u2014'}</td>
+                  <td className="p-3 font-bold">{formatPrice(entry.amount_total)}</td>
+                </tr>
+                {expandedEntries.has(entry.id) && (
+                  <tr><td colSpan={7} className="p-3 bg-gray-50">
+                    <div className="text-xs font-bold mb-2">آرتیکل‌های سند:</div>
+                    {(entryLinesMap[entry.id] || []).length === 0 ? <p className="text-xs text-gray-400">بدون آرتیکل</p> : (
+                      <table className="w-full text-xs"><thead><tr><th className="text-right p-1">شرح</th><th className="text-right p-1">کالا</th><th className="text-right p-1">حساب</th><th className="text-right p-1">بدهکار</th><th className="text-right p-1">بستانکار</th></tr></thead>
+                      <tbody>{(entryLinesMap[entry.id] || []).map((l: any) => (
+                        <tr key={l.id}><td className="p-1">{l.name || '\u2014'}</td><td className="p-1 text-gray-500">{l.product_id?.[1] || ''}</td><td className="p-1">{l.account_id?.[1] || '\u2014'}</td><td className="p-1">{l.debit > 0 ? formatPrice(l.debit) : ''}</td><td className="p-1">{l.credit > 0 ? formatPrice(l.credit) : ''}</td></tr>
+                      ))}</tbody></table>
                     )}
-                    </React.Fragment>
-                  );
-                }
-
-                return rows;
-              })()}
+                  </td></tr>
+                )}
+                </React.Fragment>
+              ))}
             </tbody>
           </table>
         </div>

@@ -22,6 +22,7 @@ interface ProductTemplate {
   product_variant_count: number;
   image_512: string | false;
   total_qty: number;
+  fmcg_reorder_threshold?: number;
 }
 
 interface Variant {
@@ -97,7 +98,7 @@ export default function InventoryPage() {
     try {
       // Read product.product and group by template for accurate prices
       const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512',
+        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512', 'fmcg_reorder_threshold',
       ], 0, 0, 'name asc');
       
       const tmplMap = new Map<number, ProductTemplate>();
@@ -113,6 +114,7 @@ export default function InventoryPage() {
             product_variant_count: 0,
             image_512: p.image_512 || false,
             total_qty: 0,
+            fmcg_reorder_threshold: p.fmcg_reorder_threshold || 10,
           });
         }
         const t = tmplMap.get(tmplId)!;
@@ -155,7 +157,7 @@ export default function InventoryPage() {
   }
 
   function openEditForm(t: ProductTemplate) {
-    setForm({ name: t.name, barcode: '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: '10', categ_id: t.categ_id ? t.categ_id[0] : 0 });
+    setForm({ name: t.name, barcode: '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold || 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
     setEditingId(t.id); setImageFile(null);
     // Load existing discount prices for this product
     loadDiscountPricesForTemplate(t.id);

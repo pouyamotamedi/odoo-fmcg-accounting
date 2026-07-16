@@ -292,8 +292,8 @@ export default function AdminDashboard() {
           ?.filter((b: any) => b.type === 'cash')
           .reduce((sum: number, b: any) => sum + (b.fmcg_running_balance || 0), 0) || 0;
         const outstanding = partners?.reduce((sum: number, p: any) => sum + (p.receivable || 0), 0) || 0;
-        // Low stock alerts
-        const lowStock = (allProducts || []).filter((p: any) => p.qty_available <= (p.fmcg_reorder_threshold || 5)).map((p: any) => p.name);
+        // Low stock alerts — use display_name to show variant info
+        const lowStock = (allProducts || []).filter((p: any) => p.qty_available <= (p.fmcg_reorder_threshold || 5)).map((p: any) => p.display_name || p.name);
         // High debt customers
         const highDebt = (partners || []).filter((p: any) => p.receivable > 500000).map((p: any) => `${p.name} (${formatPrice(p.receivable)})`);
 
