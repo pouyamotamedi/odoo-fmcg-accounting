@@ -58,16 +58,27 @@ function LowStockList() {
         try {
           prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available', 'fmcg_reorder_threshold'], 0, 0, 'qty_available asc');
         } catch {
-          prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], ['display_name', 'qty_available'], 0, 0, 'qty_available asc');
+          try {
+            prods = await searchRead('product.product', [['active', '=', true]], ['display_name', 'qty_available', 'fmcg_reorder_threshold'], 0, 0, 'qty_available asc');
+          } catch {
+            try {
+              prods = await searchRead('product.product', [['active', '=', true]], ['display_name', 'qty_available'], 0, 0, 'qty_available asc');
+            } catch {
+              prods = await searchRead('product.product', [], ['display_name', 'qty_available'], 0, 0, 'qty_available asc');
+            }
+          }
         }
+        console.log('[LowStock] products loaded:', prods?.length, 'sample:', prods?.slice(0, 3));
         const lowItems = (prods || [])
           .filter((p: any) => {
             const threshold = p.fmcg_reorder_threshold || 5;
-            return p.qty_available >= 0 && p.qty_available <= threshold;
+            const qty = p.qty_available ?? 0;
+            return qty <= threshold;
           })
-          .map((p: any) => ({ name: p.display_name || p.name, qty: p.qty_available || 0, threshold: p.fmcg_reorder_threshold || 5 }));
+          .map((p: any) => ({ name: p.display_name || p.name, qty: p.qty_available ?? 0, threshold: p.fmcg_reorder_threshold || 5 }));
+        console.log('[LowStock] low items:', lowItems.length);
         setItems(lowItems);
-      } catch { setItems([]); }
+      } catch (e) { console.error('[LowStock] error:', e); setItems([]); }
       setLoading(false);
     }
     load();
