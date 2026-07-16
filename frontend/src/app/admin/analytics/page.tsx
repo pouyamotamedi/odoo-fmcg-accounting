@@ -189,7 +189,16 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
           const cost = costMap.get(pid) || 0;
           cogs += Math.abs(l.quantity || 0) * cost;
         }
-        console.log('[Dashboard] Sale lines:', saleLines?.length, 'Sample:', saleLines?.slice(0, 3), 'COGS:', cogs, 'Revenue:', curTotal);
+        // Debug: show top cost items
+        const debugItems = (saleLines || []).slice(0, 10).map((l: any) => ({
+          product: l.product_id?.[1],
+          qty: l.quantity,
+          revenue: l.price_subtotal,
+          unitCost: costMap.get(l.product_id?.[0]) || 0,
+          lineCogs: Math.abs(l.quantity || 0) * (costMap.get(l.product_id?.[0]) || 0),
+        }));
+        console.log('[Dashboard] Revenue:', curTotal, 'COGS:', cogs, 'Profit:', curTotal - cogs);
+        console.log('[Dashboard] Line details:', debugItems);
       }
 
       const grossProfit = curTotal - cogs;
