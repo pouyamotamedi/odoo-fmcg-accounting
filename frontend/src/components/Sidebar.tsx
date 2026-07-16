@@ -17,6 +17,7 @@ const menuItems = [
   { href: '/admin/accounting', label: 'اسناد حسابداری', icon: '📋' },
   { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️' },
   { href: '/admin/reports', label: 'گزارش‌ها', icon: '📈' },
+  { href: '/admin/analytics', label: 'تحلیل مدیریتی', icon: '📊' },
   { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️' },
   { href: '/admin/discounts', label: 'تخفیفات', icon: '🏷️' },
   { href: '/admin/stock-count', label: 'انبارگردانی', icon: '📋' },
