@@ -149,27 +149,52 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
     setLoading(true);
     try {
       const prev = getPrevPeriod(dateFrom, dateTo);
-      // Current period sales
-      const curSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['amount_total', 'partner_id']);
+      // Current period sales invoices
+      const curSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['id', 'amount_total', 'partner_id']);
       // Previous period sales
       const prevSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['date', '>=', prev.from], ['date', '<=', prev.to]], ['amount_total']);
-      // Current period purchases (for gross margin)
-      const curPurchases = await searchRead('account.move', [['move_type', '=', 'in_invoice'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['amount_total']);
 
       const curTotal = (curSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
       const prevTotal = (prevSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
-      const curPurchaseTotal = (curPurchases || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
       const curCount = (curSales || []).length;
       const prevCount = (prevSales || []).length;
       const avgBasket = curCount > 0 ? curTotal / curCount : 0;
       const prevAvgBasket = prevCount > 0 ? prevTotal / prevCount : 0;
-      const grossProfit = curTotal - curPurchaseTotal;
+
+      // Calculate COGS (Cost of Goods Sold) properly:
+      // COGS = sum of (quantity_sold × cost_price) for each product sold
+      let cogs = 0;
+      const saleInvoiceIds = (curSales || []).map((inv: any) => inv.id);
+      if (saleInvoiceIds.length > 0) {
+        const saleLines = await searchRead('account.move.line', [
+          ['move_id', 'in', saleInvoiceIds],
+          ['product_id', '!=', false],
+          ['quantity', '>', 0],
+        ], ['product_id', 'quantity']);
+
+        // Get cost prices
+        const productIds = [...new Set((saleLines || []).map((l: any) => l.product_id?.[0]).filter(Boolean))];
+        const costMap = new Map<number, number>();
+        if (productIds.length > 0) {
+          const products = await searchRead('product.product', [['id', 'in', productIds]], ['id', 'standard_price']);
+          for (const p of (products || [])) costMap.set(p.id, p.standard_price || 0);
+        }
+
+        // COGS = qty × cost for each sold line
+        for (const l of (saleLines || [])) {
+          const pid = l.product_id?.[0];
+          if (!pid) continue;
+          const cost = costMap.get(pid) || 0;
+          cogs += (l.quantity || 0) * cost;
+        }
+      }
+
+      const grossProfit = curTotal - cogs;
       const grossMarginPct = curTotal > 0 ? (grossProfit / curTotal) * 100 : 0;
-      console.log('[Dashboard] Sales:', curTotal, 'Purchases:', curPurchaseTotal, 'Profit:', grossProfit, 'Invoices:', curSales?.length, 'Bills:', curPurchases?.length);
       // Unique customers
       const uniqueCustomers = new Set((curSales || []).map((s: any) => s.partner_id?.[0]).filter(Boolean)).size;
 
-      setData({ curTotal, prevTotal, curCount, prevCount, avgBasket, prevAvgBasket, grossProfit, grossMarginPct, uniqueCustomers, curPurchaseTotal });
+      setData({ curTotal, prevTotal, curCount, prevCount, avgBasket, prevAvgBasket, grossProfit, grossMarginPct, uniqueCustomers, cogs });
     } catch { setData(null); }
     setLoading(false);
   }
