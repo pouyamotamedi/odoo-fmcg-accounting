@@ -31,13 +31,13 @@ taskkill /f /im python.exe 2>nul
 timeout /t 2 /nobreak >nul
 
 echo [2/4] Dropping database...
-"C:\Program Files\PostgreSQL\17\bin\psql.exe" -U odoo -h localhost -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='fmcg_shop' AND pid <> pg_backend_pid();" 2>nul
-"C:\Program Files\PostgreSQL\17\bin\psql.exe" -U odoo -h localhost -d postgres -c "DROP DATABASE IF EXISTS fmcg_shop;"
-"C:\Program Files\PostgreSQL\17\bin\psql.exe" -U odoo -h localhost -d postgres -c "CREATE DATABASE fmcg_shop OWNER odoo ENCODING 'UTF8';"
+"C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='fmcg_shop' AND pid <> pg_backend_pid();" 2>nul
+"C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d postgres -c "DROP DATABASE IF EXISTS fmcg_shop;"
+"C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d postgres -c "CREATE DATABASE fmcg_shop OWNER odoo ENCODING 'UTF8';"
 
 echo [3/4] Initializing Odoo with modules...
 echo This may take 2-3 minutes...
-start /wait "" "C:\Users\pouya\Desktop\accounting\odoo\python.exe" "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d fmcg_shop -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount --stop-after-init
+start /wait "" python "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d fmcg_shop -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount --stop-after-init
 
 echo [4/4] Done!
 echo.
@@ -52,11 +52,11 @@ if "%DBNAME%"=="" goto :cancel
 
 echo.
 echo [1/3] Creating database '%DBNAME%'...
-"C:\Program Files\PostgreSQL\17\bin\psql.exe" -U odoo -h localhost -d postgres -c "CREATE DATABASE %DBNAME% OWNER odoo ENCODING 'UTF8';"
+"C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d postgres -c "CREATE DATABASE %DBNAME% OWNER odoo ENCODING 'UTF8';"
 
 echo [2/3] Installing modules on '%DBNAME%'...
 echo This may take 2-3 minutes...
-start /wait "" "C:\Users\pouya\Desktop\accounting\odoo\python.exe" "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d %DBNAME% -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount --stop-after-init
+start /wait "" python "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d %DBNAME% -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount --stop-after-init
 
 echo [3/3] Done!
 echo.
