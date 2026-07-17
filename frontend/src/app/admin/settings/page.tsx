@@ -233,6 +233,39 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* System Update & Backup */}
+        <div className="bg-white rounded-xl p-6 border border-gray-100">
+          <h3 className="font-bold text-sm mb-4">🔄 بروزرسانی و پشتیبان‌گیری</h3>
+          <div className="flex gap-3 flex-wrap">
+            <button onClick={async () => {
+              if (!confirm('بروزرسانی سیستم از GitHub؟\n\nاین عملیات:\n- آخرین تغییرات کد را دریافت میکند\n- ماژول‌ها را بروز میکند\n- فرانت‌اند را بازسازی میکند\n\nداده‌ها آسیب نمیبینند.')) return;
+              setMsg('🔄 در حال بروزرسانی...');
+              try {
+                const res = await fetch('/api/system/update', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) { setMsg('✅ بروزرسانی انجام شد. صفحه را رفرش کنید.'); }
+                else { setMsg('❌ خطا: ' + (data.error || 'ناشناخته')); }
+              } catch { setMsg('❌ API بروزرسانی در دسترس نیست (فقط روی سرور کار میکند)'); }
+              setTimeout(() => setMsg(''), 5000);
+            }} className="px-4 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold hover:bg-blue-600">
+              🔄 بروزرسانی از GitHub
+            </button>
+            <button onClick={async () => {
+              setMsg('📦 در حال پشتیبان‌گیری...');
+              try {
+                const res = await fetch('/api/system/backup', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) { setMsg(`✅ بکاپ انجام شد: ${data.file || ''}`); }
+                else { setMsg('❌ خطا: ' + (data.error || 'ناشناخته')); }
+              } catch { setMsg('❌ API بکاپ در دسترس نیست (فقط روی سرور)'); }
+              setTimeout(() => setMsg(''), 5000);
+            }} className="px-4 py-2 bg-green-500 text-white rounded-lg text-xs font-bold hover:bg-green-600">
+              📦 پشتیبان‌گیری دستی
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-2">بکاپ خودکار: هر روز ساعت ۳ صبح (در صورت فعال بودن cron روی سرور)</p>
+        </div>
+
         {/* Actions */}
         <div className="flex gap-3 flex-wrap">
           <button onClick={handleSave} disabled={saving} className="bg-indigo-500 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition disabled:opacity-50">
