@@ -38,7 +38,7 @@ set PGPASSWORD=odoo
 
 echo [3/4] Initializing Odoo with modules...
 echo This may take 2-3 minutes...
-python "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d fmcg_shop -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount --stop-after-init
+python "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d fmcg_shop -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports --stop-after-init --without-demo=all
 
 echo [4/4] Done!
 echo.
