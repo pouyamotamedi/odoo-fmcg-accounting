@@ -19,6 +19,10 @@ if "%DBNAME%"=="" (
 )
 
 echo.
+echo Stopping any running Odoo instance...
+taskkill /f /im python.exe 2>nul
+timeout /t 3 /nobreak >nul
+
 echo [1/6] Creating database '%DBNAME%'...
 set PGPASSWORD=odoo
 "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d postgres -c "CREATE DATABASE %DBNAME% OWNER odoo ENCODING 'UTF8';" 2>nul
@@ -38,6 +42,8 @@ if errorlevel 1 (
 
 echo [2/6] Installing modules + Persian language (3-5 minutes)...
 echo       Please wait...
+echo       (updating odoo.conf first to point to new db)
+powershell -Command "(Get-Content 'C:\Users\pouya\Desktop\accounting\odoo.conf') -replace 'db_name = .*', 'db_name = %DBNAME%' | Set-Content 'C:\Users\pouya\Desktop\accounting\odoo.conf'"
 python "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d %DBNAME% -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports --stop-after-init --without-demo=all --load-language=fa_IR
 if errorlevel 1 (
     echo ERROR: Module install failed!
@@ -50,10 +56,7 @@ set PGPASSWORD=odoo
 "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d %DBNAME% -c "UPDATE res_users SET lang='fa_IR' WHERE id=2;"
 "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d %DBNAME% -c "UPDATE res_partner SET lang='fa_IR' WHERE id IN (SELECT partner_id FROM res_users WHERE id=2);"
 
-echo [4/6] Updating odoo.conf...
-powershell -Command "(Get-Content 'C:\Users\pouya\Desktop\accounting\odoo.conf') -replace 'db_name = .*', 'db_name = %DBNAME%' | Set-Content 'C:\Users\pouya\Desktop\accounting\odoo.conf'"
-
-echo [5/6] Updating frontend config...
+echo [4/6] Updating frontend config...
 echo NEXT_PUBLIC_ODOO_URL=/api> "C:\Users\pouya\Desktop\accounting\frontend\.env.local"
 echo NEXT_PUBLIC_ODOO_DB=%DBNAME%>> "C:\Users\pouya\Desktop\accounting\frontend\.env.local"
 
