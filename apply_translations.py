@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply Persian translations to journals and account names.
+"""Apply Persian translations to a fresh Odoo database.
 Usage: python apply_translations.py [database_name]
 If no database name provided, reads from odoo.conf.
 """
@@ -38,17 +38,30 @@ except Exception as e:
     print(f"ERROR: Cannot connect to Odoo: {e}")
     sys.exit(1)
 
+# ============ Set Admin User Language to Persian ============
+print("  Setting admin language to Persian...")
+try:
+    # In Odoo 18, lang is on res.partner, not res_users
+    admin_partner = models.execute_kw(db, uid, password, 'res.users', 'read', [[2]], {'fields': ['partner_id']})
+    if admin_partner:
+        partner_id = admin_partner[0]['partner_id'][0]
+        models.execute_kw(db, uid, password, 'res.partner', 'write', [[partner_id], {'lang': 'fa_IR'}])
+        print("    Admin language set to fa_IR")
+except Exception as e:
+    print(f"    Warning: {e}")
+
 # ============ Journal Renames ============
 print("  Renaming journals...")
 journal_renames = {
     'Customer Invoices': 'فاکتورهای فروش',
-    'Vendor Bills': 'فاکتورهای خرید',
+    'Vendor Bills': 'صورتحساب\u200cهای خرید',
     'Miscellaneous Operations': 'عملیات متفرقه',
     'Exchange Difference': 'تفاوت تسعیر ارز',
     'Tax Adjustments': 'تعدیلات مالیاتی',
     'Manual Payment': 'پرداخت دستی',
     'Bank': 'بانک',
     'Cash': 'صندوق نقدی',
+    'Cash Basis Taxes': 'مالیات نقدی',
     'Stock Interim (Received)': 'موجودی مبانی (دریافتی)',
     'Stock Interim (Sent)': 'موجودی مبانی (ارسالی)',
     'Stock Valuation': 'ارزشگذاری موجودی',
@@ -60,29 +73,44 @@ for eng_name, fa_name in journal_renames.items():
         models.execute_kw(db, uid, password, 'account.journal', 'write', [ids, {'name': fa_name}])
         print(f"    {eng_name} -> {fa_name}")
 
-# ============ Account Renames ============
+# ============ Account Renames (ALL) ============
 print("  Renaming accounts...")
 account_renames = {
     '101000': 'دارایی\u200cهای جاری',
+    '101100': 'حساب\u200cهای دریافتنی',
+    '101200': 'حساب دریافتنی تجاری',
     '101300': 'حساب دریافتنی (صندوق فروش)',
     '101401': 'بانک',
     '101402': 'حساب معلق بانک',
     '101403': 'دریافت\u200cهای معلق',
     '101404': 'پرداخت\u200cهای معلق',
     '101501': 'صندوق نقدی',
+    '101600': 'پیش\u200cپرداخت\u200cها',
+    '101700': 'مالیات قابل استرداد',
     '110000': 'دارایی\u200cهای ثابت',
     '110100': 'موجودی مبانی (دریافتی)',
     '110200': 'ارزشگذاری موجودی',
     '110300': 'موجودی مبانی (ارسالی)',
+    '120000': 'دارایی\u200cهای غیرجاری',
+    '120100': 'اموال و تجهیزات',
+    '120200': 'استهلاک انباشته',
     '211000': 'حساب پرداختنی',
     '211100': 'بدهی\u200cهای جاری',
+    '211200': 'بدهی مالیاتی',
+    '211300': 'سایر بدهی\u200cهای جاری',
+    '220000': 'بدهی\u200cهای بلندمدت',
     '300000': 'حقوق صاحبان سهام',
     '310000': 'سرمایه',
+    '320000': 'سود انباشته',
     '400000': 'درآمد',
     '400100': 'درآمد فروش',
+    '400200': 'سایر درآمدها',
     '500000': 'هزینه\u200cها',
     '500100': 'بهای تمام شده کالا',
     '500200': 'هزینه\u200cهای عملیاتی',
+    '500300': 'هزینه استهلاک',
+    '500400': 'هزینه حقوق و دستمزد',
+    '500500': 'هزینه\u200cهای اداری',
     '999999': 'سود (زیان) تخصیص نیافته',
 }
 
@@ -92,39 +120,60 @@ for code, fa_name in account_renames.items():
         models.execute_kw(db, uid, password, 'account.account', 'write', [ids, {'name': fa_name}])
         print(f"    {code}: {fa_name}")
 
-# ============ Payment Labels ============
-print("  Fixing payment method labels...")
-try:
-    # Rename sequences
-    seq_renames = {
-        'Customer Invoices': 'فاکتو',
-        'Vendor Bills': 'صورتح',
-    }
-    for eng, fa in seq_renames.items():
-        journal_ids = models.execute_kw(db, uid, password, 'account.journal', 'search', [[['name', 'ilike', eng]]])
-        if not journal_ids:
-            journal_ids = models.execute_kw(db, uid, password, 'account.journal', 'search', [[['name', 'ilike', fa]]])
-        # Update sequence prefix if found
-except:
-    pass
+# ============ Product Category Renames ============
+print("  Renaming product categories...")
+category_renames = {
+    'All': 'همه',
+    'All / Saleable': 'همه / قابل فروش',
+    'All / Expenses': 'همه / هزینه\u200cها',
+    'All / Internal': 'همه / داخلی',
+    'Saleable': 'قابل فروش',
+    'Expenses': 'هزینه\u200cها',
+    'Internal': 'داخلی',
+}
 
-# ============ Set Company Language ============
-print("  Setting company language to Persian...")
-try:
-    # Install Persian language
-    lang_ids = models.execute_kw(db, uid, password, 'res.lang', 'search', [[['code', '=', 'fa_IR']]])
-    if not lang_ids:
-        # Try to activate it
-        models.execute_kw(db, uid, password, 'base.language.install', 'create', [{'overwrite': True, 'lang_ids': [[0, 0, {'lang': 'fa_IR'}]]}])
-except:
-    pass
+for eng_name, fa_name in category_renames.items():
+    ids = models.execute_kw(db, uid, password, 'product.category', 'search', [[['complete_name', '=', eng_name]]])
+    if not ids:
+        ids = models.execute_kw(db, uid, password, 'product.category', 'search', [[['name', '=', eng_name]]])
+    if ids:
+        models.execute_kw(db, uid, password, 'product.category', 'write', [ids, {'name': fa_name}])
+        print(f"    {eng_name} -> {fa_name}")
 
+# ============ Sequence Prefixes (Invoice numbers in Persian) ============
+print("  Setting invoice sequence prefixes...")
 try:
-    # Set company to Persian
+    # Find sale journal and set sequence prefix
+    sale_journals = models.execute_kw(db, uid, password, 'account.journal', 'search_read',
+        [[['type', '=', 'sale']]], {'fields': ['id', 'name', 'sequence_override_regex']})
+    for j in sale_journals:
+        models.execute_kw(db, uid, password, 'account.journal', 'write', [[j['id']], {'code': 'INV'}])
+
+    purchase_journals = models.execute_kw(db, uid, password, 'account.journal', 'search_read',
+        [[['type', '=', 'purchase']]], {'fields': ['id', 'name']})
+    for j in purchase_journals:
+        models.execute_kw(db, uid, password, 'account.journal', 'write', [[j['id']], {'code': 'BILL'}])
+except Exception as e:
+    print(f"    Warning: {e}")
+
+# ============ Set Company Name ============
+print("  Setting company name...")
+try:
     company_ids = models.execute_kw(db, uid, password, 'res.company', 'search', [[]])
     if company_ids:
         models.execute_kw(db, uid, password, 'res.company', 'write', [company_ids, {'name': 'فروشگاه من'}])
+        print("    Company: فروشگاه من")
 except:
     pass
 
-print("\nDone! Translations applied.")
+# ============ Set Currency to Toman display ============
+print("  Setting currency display...")
+try:
+    irr_ids = models.execute_kw(db, uid, password, 'res.currency', 'search', [[['name', '=', 'IRR']]])
+    if irr_ids:
+        models.execute_kw(db, uid, password, 'res.currency', 'write', [irr_ids, {'symbol': 'تومان', 'rounding': 1.0}])
+        print("    IRR symbol: تومان")
+except:
+    pass
+
+print("\nDone! All translations applied.")

@@ -53,7 +53,6 @@ if errorlevel 1 (
 
 echo [3/6] Setting admin language to Persian...
 set PGPASSWORD=odoo
-"C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d %DBNAME% -c "UPDATE res_users SET lang='fa_IR' WHERE id=2;"
 "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U odoo -h localhost -d %DBNAME% -c "UPDATE res_partner SET lang='fa_IR' WHERE id IN (SELECT partner_id FROM res_users WHERE id=2);"
 
 echo [4/6] Updating frontend config...
