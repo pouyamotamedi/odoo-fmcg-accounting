@@ -25,8 +25,10 @@ DB_NAME="${2:-${DOMAIN%%.*}}"
 INSTALL_DIR="/opt/fmcg-${DB_NAME}"
 REPO_URL="https://github.com/pouyamotamedi/odoo-fmcg-accounting.git"
 BRANCH="feature/frontend-api-integration"
-ODOO_PORT=$((8069 + RANDOM % 100))
-FRONTEND_PORT=$((3000 + RANDOM % 100))
+ODOO_PORT=$(ss -tlnp | grep -oP ':\K(80[6-9][0-9]|81[0-9][0-9])' | sort -n | tail -1 | awk '{print $1+1}')
+[ -z "$ODOO_PORT" ] && ODOO_PORT=8069
+FRONTEND_PORT=$(ss -tlnp | grep -oP ':\K(30[0-9][0-9])' | sort -n | tail -1 | awk '{print $1+1}')
+[ -z "$FRONTEND_PORT" ] && FRONTEND_PORT=3000
 DB_USER="odoo"
 DB_PASS="odoo"
 ADMIN_PASS="admin"
@@ -160,6 +162,19 @@ echo "  Modules installed."
 # ============ [8/10] Frontend Build ============
 echo -e "${GREEN}[8/10] Building frontend...${NC}"
 cd "${INSTALL_DIR}/frontend"
+
+# Fix next.config.ts to use dynamic port from env
+cat > next.config.ts << 'NEXTCFG'
+import type { NextConfig } from "next";
+const ODOO_INTERNAL_URL = process.env.ODOO_INTERNAL_URL || 'http://localhost:8069';
+const nextConfig: NextConfig = {
+  async rewrites() {
+    return [{ source: '/api/:path*', destination: `${ODOO_INTERNAL_URL}/:path*` }];
+  },
+};
+export default nextConfig;
+NEXTCFG
+
 cat > .env.local << EOF
 NEXT_PUBLIC_ODOO_URL=/api
 NEXT_PUBLIC_ODOO_DB=${DB_NAME}
@@ -200,6 +215,8 @@ WorkingDirectory=${INSTALL_DIR}/frontend
 ExecStart=/usr/bin/npm start
 Environment=PORT=${FRONTEND_PORT}
 Environment=NODE_ENV=production
+Environment=ODOO_INTERNAL_URL=http://localhost:${ODOO_PORT}
+Environment=NEXT_PUBLIC_ODOO_DB=${DB_NAME}
 Restart=always
 RestartSec=5
 

@@ -47,3 +47,42 @@ bash /opt/fmcg-smoke/deploy/update.sh smoke
 ```bash
 echo "0 3 * * * /opt/fmcg-smoke/deploy/backup.sh smoke" | crontab -
 ```
+
+
+## پاک کردن
+
+برای حذف کامل یه فروشگاه از سرور، این دستورها رو اجرا کن:
+
+```bash
+# مثلاً حذف فروشگاه "t"
+DB_NAME="t"
+
+# 1. Stop services
+systemctl stop odoo-${DB_NAME} fmcg-${DB_NAME}
+systemctl disable odoo-${DB_NAME} fmcg-${DB_NAME}
+
+# 2. Remove service files
+rm -f /etc/systemd/system/odoo-${DB_NAME}.service
+rm -f /etc/systemd/system/fmcg-${DB_NAME}.service
+systemctl daemon-reload
+
+# 3. Drop database
+sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}' AND pid <> pg_backend_pid();"
+sudo -u postgres psql -c "DROP DATABASE ${DB_NAME};"
+
+# 4. Remove files
+rm -rf /opt/fmcg-${DB_NAME}
+
+# 5. Remove Odoo config
+rm -f /etc/odoo-${DB_NAME}.conf
+
+# 6. Remove nginx config
+rm -f /etc/nginx/sites-enabled/t.mediumco.org
+rm -f /etc/nginx/sites-available/t.mediumco.org
+systemctl restart nginx
+
+# 7. Remove logs
+rm -f /var/log/odoo/odoo-${DB_NAME}.log
+```
+
+یا اگه میخوای یه script آماده داشته باشی بگو بسازم.
