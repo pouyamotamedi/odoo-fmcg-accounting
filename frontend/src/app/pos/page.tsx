@@ -124,11 +124,7 @@ export default function PosPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [data, jrnls, discCats] = await Promise.all([
-          // Load only recent 50 products initially for speed
-          searchRead('product.product', [['active', '=', true], ['type', '=', 'consu']], ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'image_128', 'product_tmpl_id', 'fmcg_reorder_threshold'], 50, 0, 'write_date desc'),
-          getBankCashBalances(), getDiscountCategories()
-        ]);
+        const [data, jrnls, discCats] = await Promise.all([getProducts(), getBankCashBalances(), getDiscountCategories()]);
         setProducts(data || []);
         setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
         setDiscountCategories(discCats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
@@ -190,29 +186,6 @@ export default function PosPage() {
       return next;
     });
   }
-
-  // Server-side search when local results are insufficient (for large product catalogs)
-  useEffect(() => {
-    if (!search || search.length < 2) return;
-    const localResults = products.filter(p => p.name.includes(search) || (p.barcode && String(p.barcode).includes(search)));
-    if (localResults.length >= 3) return;
-    const timer = setTimeout(async () => {
-      try {
-        const serverResults = await searchRead('product.product', [
-          ['active', '=', true], ['type', '=', 'consu'],
-          '|', ['name', 'ilike', search], ['barcode', 'ilike', search]
-        ], ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'image_128', 'product_tmpl_id', 'fmcg_reorder_threshold'], 20);
-        if (serverResults && serverResults.length > 0) {
-          setProducts((prev: any[]) => {
-            const existingIds = new Set(prev.map((p: any) => p.id));
-            const newOnes = serverResults.filter((p: any) => !existingIds.has(p.id));
-            return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
-          });
-        }
-      } catch {}
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
 
   const filteredProducts = products.filter(
     (p) => {
