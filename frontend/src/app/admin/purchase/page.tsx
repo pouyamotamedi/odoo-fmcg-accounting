@@ -38,6 +38,7 @@ export default function PurchasePage() {
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductSellPrice, setNewProductSellPrice] = useState('');
   const [newProductThreshold, setNewProductThreshold] = useState('10');
+  const [newProductImage, setNewProductImage] = useState<File | null>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [histFilter, setHistFilter] = useState<'all' | 'draft' | 'posted' | 'paid'>('all');
   const [showHistory, setShowHistory] = useState(false);
@@ -56,6 +57,7 @@ export default function PurchasePage() {
   const [editPrice, setEditPrice] = useState('');
   const [editSellPrice, setEditSellPrice] = useState('');
   const [editThreshold, setEditThreshold] = useState('10');
+  const [editImage, setEditImage] = useState<File | null>(null);
   const [journals, setJournals] = useState<{id:number;name:string;type:string}[]>([]);
   const [showPayment, setShowPayment] = useState(false);
   const [paymentJournal, setPaymentJournal] = useState<number>(0);
@@ -390,19 +392,29 @@ export default function PurchasePage() {
     }
     setSubmitting(true);
     try {
-      await createProduct({
+      const productValues: any = {
         name: newProductName,
         barcode: newProductBarcode || undefined,
         standard_price: parseFloat(newProductPrice.replace(/[^\d.]/g, '')) || 0,
         list_price: parseFloat(newProductSellPrice.replace(/[^\d.]/g, '')) || 0,
         fmcg_reorder_threshold: parseInt(newProductThreshold) || 10,
-      });
+      };
+      if (newProductImage) {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.readAsDataURL(newProductImage);
+        });
+        productValues.image_1920 = base64;
+      }
+      await createProduct(productValues);
       setShowNewProduct(false);
       setNewProductName('');
       setNewProductBarcode('');
       setNewProductPrice('');
       setNewProductSellPrice('');
       setNewProductThreshold('10');
+      setNewProductImage(null);
       await loadData();
     } catch (e:any) {
       alert(e.message || 'خطا در ثبت کالا');
@@ -763,6 +775,10 @@ export default function PurchasePage() {
                   <label className="block text-xs text-gray-500 mb-1">حداقل موجودی</label>
                   <input type="number" value={newProductThreshold} onChange={(e) => setNewProductThreshold(e.target.value)} placeholder="۱۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
                 </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">تصویر</label>
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setNewProductImage(e.target.files?.[0] || null)} className="w-full text-xs" />
+                </div>
               </div>
             </div>
             <div className="flex gap-3 mt-5">
@@ -891,7 +907,10 @@ export default function PurchasePage() {
                   <label className="block text-xs text-gray-500 mb-1">حداقل موجودی</label>
                   <input type="number" value={editThreshold} onChange={(e) => setEditThreshold(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
                 </div>
-              </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">تصویر</label>
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setEditImage(e.target.files?.[0] || null)} className="w-full text-xs" />
+                </div>
 
               {/* Discount prices */}
               {discountCats.length > 0 && (
@@ -930,7 +949,13 @@ export default function PurchasePage() {
                       }
                     }
                   } else {
-                    await updateProduct(editingProduct.id, { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0, fmcg_reorder_threshold: parseInt(editThreshold)||10 });
+                    const updateValues: any = { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0, fmcg_reorder_threshold: parseInt(editThreshold)||10 };
+                    if (editImage) {
+                      const reader = new FileReader();
+                      const base64 = await new Promise<string>((resolve) => { reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.readAsDataURL(editImage); });
+                      updateValues.image_1920 = base64;
+                    }
+                    await updateProduct(editingProduct.id, updateValues);
                     // Save discount prices
                     for (const cat of discountCats) {
                       const price = parseFloat(editDiscountPrices[cat.id] || '');
