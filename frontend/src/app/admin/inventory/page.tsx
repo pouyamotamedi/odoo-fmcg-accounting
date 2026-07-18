@@ -282,20 +282,28 @@ export default function InventoryPage() {
           }
         }
       } else {
-        const newId = await createProduct(values);
+        const newTmplId = await createProduct(values);
+        // If image was uploaded, also write to the product.product variant(s)
+        if (newTmplId && imageFile) {
+          const base64 = await fileToBase64(imageFile);
+          const variants = await searchRead('product.product', [['product_tmpl_id', '=', newTmplId]], ['id']);
+          if (variants && variants.length > 0) {
+            await write('product.product', variants.map((v: any) => v.id), { image_1920: base64 });
+          }
+        }
         // Save discount prices for new product
-        if (newId) {
+        if (newTmplId) {
           for (const cat of discountCats) {
             const price = parseFloat(discountPrices[cat.id] || '');
             if (price && price !== parseFloat(form.list_price)) {
-              await setDiscountPrice(cat.id, newId, price);
+              await setDiscountPrice(cat.id, newTmplId, price);
             }
           }
         }
       }
       setShowForm(false);
-      // Small delay for Odoo to process image thumbnails
-      await new Promise(r => setTimeout(r, 500));
+      // Delay for Odoo to compute image thumbnails
+      await new Promise(r => setTimeout(r, 1000));
       await fetchTemplates();
     } catch (e: any) { alert(e.message || 'خطا'); }
     setSaving(false);
