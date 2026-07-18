@@ -139,14 +139,14 @@ export async function getProducts(limit?: number) {
     return await searchRead(
       'product.product',
       [['active', '=', true], ['type', '=', 'consu']],
-      ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'product_tmpl_id'],
+      ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'image_128', 'product_tmpl_id'],
       limit
     );
   } catch {
     return await searchRead(
       'product.product',
       [['active', '=', true], ['type', '=', 'consu']],
-      ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'product_tmpl_id'],
+      ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'image_128', 'product_tmpl_id'],
       limit
     );
   }

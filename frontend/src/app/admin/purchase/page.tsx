@@ -911,6 +911,7 @@ export default function PurchasePage() {
                   <label className="block text-xs text-gray-500 mb-1">تصویر</label>
                   <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setEditImage(e.target.files?.[0] || null)} className="w-full text-xs" />
                 </div>
+              </div>
 
               {/* Discount prices */}
               {discountCats.length > 0 && (
