@@ -166,7 +166,7 @@ export default function InventoryPage() {
     try {
       // Read product.product and group by template for accurate prices
       const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_128', 'fmcg_reorder_threshold',
+        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_256', 'fmcg_reorder_threshold',
       ], 0, 0, 'name asc');
       
       const tmplMap = new Map<number, ProductTemplate>();
@@ -180,7 +180,7 @@ export default function InventoryPage() {
             standard_price: p.standard_price,
             categ_id: p.categ_id || false,
             product_variant_count: 0,
-            image_512: p.image_128 || false,
+            image_512: p.image_256 || false,
             total_qty: 0,
             fmcg_reorder_threshold: p.fmcg_reorder_threshold || 10,
           });
