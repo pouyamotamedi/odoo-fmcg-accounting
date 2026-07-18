@@ -65,19 +65,19 @@ PATCH
 
 # Update Odoo modules
 echo "[3/4] Updating Odoo modules..."
-systemctl stop "odoo-${DB_NAME}"
+sudo systemctl stop "odoo-${DB_NAME}"
 sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
     -u fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
     --stop-after-init 2>&1 | grep -E "^(INFO|ERROR)" | tail -3
-systemctl start "odoo-${DB_NAME}"
+sudo systemctl start "odoo-${DB_NAME}"
 
 # Rebuild frontend
 echo "[4/4] Rebuilding frontend..."
-systemctl stop "fmcg-${DB_NAME}"
+sudo systemctl stop "fmcg-${DB_NAME}"
 cd "${INSTALL_DIR}/frontend"
 sudo -u odoo npm install --quiet 2>/dev/null
 sudo -u odoo npm run build 2>&1 | tail -2
-systemctl start "fmcg-${DB_NAME}"
+sudo systemctl start "fmcg-${DB_NAME}"
 
 echo ""
 echo "============================================"
