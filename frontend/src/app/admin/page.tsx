@@ -274,10 +274,12 @@ export default function AdminDashboard() {
   useEffect(() => {
     async function fetchData() {
       try {
-        // Check if any products exist — if not, redirect to onboarding
+        // Check if any products exist — if not, show empty state (don't redirect to onboarding)
         const products = await getProducts(1);
         if (!products || products.length === 0) {
-          router.replace('/onboarding');
+          // Fresh install - just show empty dashboard
+          setData({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [] });
+          setLoading(false);
           return;
         }
 
