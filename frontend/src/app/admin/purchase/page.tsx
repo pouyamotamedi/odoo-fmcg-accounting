@@ -75,7 +75,11 @@ export default function PurchasePage() {
 
   async function loadData() {
     try {
-      const [prods, sups, cats, jrnls, discCats] = await Promise.all([getProducts(), getPartners('supplier'), getCategories(), getBankCashBalances(), getDiscountCategories()]);
+      const [prods, sups, cats, jrnls, discCats] = await Promise.all([
+        // Only load first 30 products initially (without images for speed)
+        searchRead('product.product', [['active', '=', true], ['type', '=', 'consu']], ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'product_tmpl_id', 'fmcg_reorder_threshold'], 30, 0, 'write_date desc'),
+        getPartners('supplier'), getCategories(), getBankCashBalances(), getDiscountCategories()
+      ]);
       setProducts(prods || []);
       setSuppliers(sups?.map((s:any) => ({ id: s.id, name: s.name })) || []);
       setCategories(cats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
@@ -123,6 +127,7 @@ export default function PurchasePage() {
   }
 
   const filteredProducts = products.filter((p) => {
+    if (!search) return true;
     const normalizedSearch = normalizePersian(search);
     const nameMatch = p.name.includes(search) || p.name.includes(normalizedSearch);
     const barcodeMatch = p.barcode && (
@@ -131,6 +136,29 @@ export default function PurchasePage() {
     );
     return nameMatch || barcodeMatch;
   });
+
+  // Server-side search when local results are insufficient
+  useEffect(() => {
+    if (!search || search.length < 2) return;
+    const localResults = products.filter(p => p.name.includes(search) || (p.barcode && p.barcode.includes(search)));
+    if (localResults.length >= 3) return; // enough local results
+    const timer = setTimeout(async () => {
+      try {
+        const serverResults = await searchRead('product.product', [
+          ['active', '=', true], ['type', '=', 'consu'],
+          '|', ['name', 'ilike', search], ['barcode', 'ilike', search]
+        ], ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'product_tmpl_id', 'fmcg_reorder_threshold'], 20);
+        if (serverResults && serverResults.length > 0) {
+          setProducts(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newOnes = serverResults.filter((p: any) => !existingIds.has(p.id));
+            return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+          });
+        }
+      } catch {}
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   // Group by template for display
   const displayProducts = (() => {
