@@ -160,6 +160,7 @@ export async function createProduct(values: {
   type?: string;
   fmcg_reorder_threshold?: number;
   categ_id?: number;
+  image_1920?: string;
 }) {
   const data: any = {
     name: values.name,
@@ -172,6 +173,9 @@ export async function createProduct(values: {
   // Only set categ_id if a valid one is provided (not 0/false)
   if (values.categ_id) {
     data.categ_id = values.categ_id;
+  }
+  if (values.image_1920) {
+    data.image_1920 = values.image_1920;
   }
   try { data.fmcg_reorder_threshold = values.fmcg_reorder_threshold || 10; } catch {}
   return create('product.product', data);

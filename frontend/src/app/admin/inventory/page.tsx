@@ -166,7 +166,7 @@ export default function InventoryPage() {
     try {
       // Read product.product and group by template for accurate prices
       const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512', 'image_1920', 'fmcg_reorder_threshold',
+        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_128', 'fmcg_reorder_threshold',
       ], 0, 0, 'name asc');
       
       const tmplMap = new Map<number, ProductTemplate>();
@@ -180,7 +180,7 @@ export default function InventoryPage() {
             standard_price: p.standard_price,
             categ_id: p.categ_id || false,
             product_variant_count: 0,
-            image_512: p.image_512 || p.image_1920 || false,
+            image_512: p.image_128 || false,
             total_qty: 0,
             fmcg_reorder_threshold: p.fmcg_reorder_threshold || 10,
           });
@@ -283,14 +283,6 @@ export default function InventoryPage() {
         }
       } else {
         const newTmplId = await createProduct(values);
-        // If image was uploaded, also write to the product.product variant(s)
-        if (newTmplId && imageFile) {
-          const base64 = await fileToBase64(imageFile);
-          const variants = await searchRead('product.product', [['product_tmpl_id', '=', newTmplId]], ['id']);
-          if (variants && variants.length > 0) {
-            await write('product.product', variants.map((v: any) => v.id), { image_1920: base64 });
-          }
-        }
         // Save discount prices for new product
         if (newTmplId) {
           for (const cat of discountCats) {
@@ -302,8 +294,6 @@ export default function InventoryPage() {
         }
       }
       setShowForm(false);
-      // Delay for Odoo to compute image thumbnails
-      await new Promise(r => setTimeout(r, 1000));
       await fetchTemplates();
     } catch (e: any) { alert(e.message || 'خطا'); }
     setSaving(false);
