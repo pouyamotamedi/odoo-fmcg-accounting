@@ -166,7 +166,7 @@ export default function InventoryPage() {
     try {
       // Read product.product and group by template for accurate prices
       const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512', 'fmcg_reorder_threshold',
+        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512', 'image_1920', 'fmcg_reorder_threshold',
       ], 0, 0, 'name asc');
       
       const tmplMap = new Map<number, ProductTemplate>();
@@ -180,7 +180,7 @@ export default function InventoryPage() {
             standard_price: p.standard_price,
             categ_id: p.categ_id || false,
             product_variant_count: 0,
-            image_512: p.image_512 || false,
+            image_512: p.image_512 || p.image_1920 || false,
             total_qty: 0,
             fmcg_reorder_threshold: p.fmcg_reorder_threshold || 10,
           });
@@ -397,6 +397,17 @@ export default function InventoryPage() {
 
       setShowAttrForm(false); await fetchTemplates();
       if (expandedIds.has(attrTemplateId)) { const vars = await getProductVariants(attrTemplateId); setVariantsMap(prev => ({ ...prev, [attrTemplateId]: vars || [] })); }
+      // Ensure new variants inherit the template's standard_price
+      try {
+        const tmpl = templates.find(t => t.id === attrTemplateId);
+        if (tmpl && tmpl.standard_price) {
+          const allVars = await searchRead('product.product', [['product_tmpl_id', '=', attrTemplateId]], ['id', 'standard_price']);
+          const zeroVars = (allVars || []).filter((v: any) => !v.standard_price || v.standard_price === 0);
+          if (zeroVars.length > 0) {
+            await write('product.product', zeroVars.map((v: any) => v.id), { standard_price: tmpl.standard_price, list_price: tmpl.list_price });
+          }
+        }
+      } catch {}
     } catch (e: any) { alert(e.message || 'خطا'); }
     setSaving(false);
   }
@@ -417,7 +428,17 @@ export default function InventoryPage() {
     return matchSearch && matchCat;
   });
 
-  const imgUrl = (img128: string | false) => img128 ? `data:image/png;base64,${img128}` : null;
+  const imgUrl = (img: string | false) => {
+    if (!img) return null;
+    // Odoo stores images as base64. Try to detect format from header bytes.
+    // PNG starts with iVBOR, JPEG with /9j/, WEBP with UklG, GIF with R0lG
+    if (img.startsWith('iVBOR')) return `data:image/png;base64,${img}`;
+    if (img.startsWith('/9j/')) return `data:image/jpeg;base64,${img}`;
+    if (img.startsWith('UklG')) return `data:image/webp;base64,${img}`;
+    if (img.startsWith('R0lG')) return `data:image/gif;base64,${img}`;
+    // Default: let browser figure it out
+    return `data:image/png;base64,${img}`;
+  };
 
   return (
     <div>
@@ -601,7 +622,7 @@ export default function InventoryPage() {
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">تصویر محصول</label>
-                <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="w-full text-sm" />
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="w-full text-sm" />
               </div>
               {/* Discount prices */}
               {discountCats.length > 0 && (
