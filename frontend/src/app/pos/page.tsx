@@ -13,7 +13,7 @@ interface OdooProduct {
   barcode: string | false;
   list_price: number;
   qty_available: number;
-  image_512?: string | false;
+  image_128?: string | false;
   display_name?: string;
   product_tmpl_id?: [number, string] | number;
 }
@@ -540,8 +540,8 @@ export default function PosPage() {
                   onClick={() => handleProductClick(product)}
                   className={`group relative rounded-xl overflow-hidden border-2 ${pinnedIds.has(product.id) ? 'border-yellow-400' : 'border-transparent'} hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square w-full`}
                 >
-                  {product.image_512 ? (
-                    <img src={`data:image/png;base64,${product.image_512}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  {product.image_128 ? (
+                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
                       <span className="text-3xl opacity-30">📦</span>

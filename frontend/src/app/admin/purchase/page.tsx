@@ -20,7 +20,7 @@ interface OdooProduct {
   list_price: number;
   standard_price: number;
   product_tmpl_id?: [number, string] | number;
-  image_512?: string | false;
+  image_128?: string | false;
 }
 
 export default function PurchasePage() {
@@ -573,8 +573,8 @@ export default function PurchasePage() {
                   onClick={() => handleProductClick(product)}
                   className="w-full h-full"
                 >
-                  {product.image_512 ? (
-                    <img src={`data:image/png;base64,${product.image_512}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  {product.image_128 ? (
+                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
                       <span className="text-3xl opacity-30">📦</span>
