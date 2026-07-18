@@ -37,6 +37,16 @@ export default function SettingsPage() {
           setPaxPort(String(data.fmcg_pax_terminal_port || 10009));
         }
         setJournals((jrnls || []).map((j: any) => ({ id: j.id, name: j.name, type: j.type })));
+        // Load tax status from Odoo
+        try {
+          const taxes = await searchRead('account.tax', [['type_tax_use', '=', 'sale'], ['active', 'in', [true, false]]], ['active', 'amount'], 1);
+          if (taxes && taxes.length > 0) {
+            setTaxEnabled(taxes[0].active);
+            setTaxRate(String(taxes[0].amount || 9));
+          } else {
+            setTaxEnabled(false);
+          }
+        } catch { setTaxEnabled(false); }
         // Load POS journal settings from localStorage
         try {
           const saved = localStorage.getItem('pos_journal_settings');
@@ -119,7 +129,19 @@ export default function SettingsPage() {
         <div className="bg-white rounded-xl p-6 border border-gray-100">
           <h3 className="font-bold text-sm mb-4">💰 تنظیمات مالیات</h3>
           <label className="flex items-center gap-2 mb-3 cursor-pointer">
-            <input type="checkbox" checked={taxEnabled} onChange={(e) => setTaxEnabled(e.target.checked)} className="w-4 h-4 rounded" />
+            <input type="checkbox" checked={taxEnabled} onChange={async (e) => {
+              const newVal = e.target.checked;
+              setTaxEnabled(newVal);
+              // Auto-save tax status
+              try {
+                const taxes = await searchRead('account.tax', [['type_tax_use', 'in', ['sale', 'purchase']], ['active', 'in', [true, false]]], ['id'], 20);
+                if (taxes && taxes.length > 0) {
+                  for (const tax of taxes) { await write('account.tax', [tax.id], { active: newVal }); }
+                }
+                setMsg(newVal ? '✅ مالیات فعال شد' : '✅ مالیات غیرفعال شد');
+                setTimeout(() => setMsg(''), 3000);
+              } catch {}
+            }} className="w-4 h-4 rounded" />
             <span className="text-sm">فعال‌سازی مالیات بر ارزش افزوده</span>
           </label>
           {taxEnabled && (

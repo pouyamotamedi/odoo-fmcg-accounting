@@ -41,6 +41,7 @@ bash install.sh shop2.mediumco.org shop2
 ## بروزرسانی:
 ```bash
 bash /opt/fmcg-smoke/deploy/update.sh smoke
+bash /opt/fmcg-shop1/deploy/update.sh shop1
 ```
 
 ## بکاپ روزانه:
@@ -56,6 +57,7 @@ echo "0 3 * * * /opt/fmcg-smoke/deploy/backup.sh smoke" | crontab -
 ```bash
 # مثلاً حذف فروشگاه "t"
 DB_NAME="t"
+DB_NAME="shop1"
 
 # 1. Stop services
 systemctl stop odoo-${DB_NAME} fmcg-${DB_NAME}
@@ -86,3 +88,6 @@ rm -f /var/log/odoo/odoo-${DB_NAME}.log
 ```
 
 یا اگه میخوای یه script آماده داشته باشی بگو بسازم.
+
+
+bash install.sh shop1.mediumco.org shop1
