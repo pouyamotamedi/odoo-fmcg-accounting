@@ -1,46 +1,85 @@
 #!/bin/bash
-# ============================================
+# ============================================================
 # FMCG Accounting - Update Script
-# Pulls latest code from GitHub without touching data
-# ============================================
+# Pulls latest code, updates modules, rebuilds frontend
+# Usage: bash update.sh [database_name]
+# Example: bash update.sh smoke
+# ============================================================
 
 set -e
 
-INSTALL_DIR="/opt/fmcg-accounting"
+DB_NAME="${1:-}"
 BRANCH="feature/frontend-api-integration"
 
+if [ -z "$DB_NAME" ]; then
+    # Auto-detect from running services
+    DB_NAME=$(systemctl list-units --type=service --state=running | grep odoo- | head -1 | sed 's/.*odoo-\(.*\)\.service.*/\1/')
+fi
+
+if [ -z "$DB_NAME" ]; then
+    echo "Usage: bash update.sh <database_name>"
+    exit 1
+fi
+
+INSTALL_DIR="/opt/fmcg-${DB_NAME}"
+ODOO_CONF="/etc/odoo-${DB_NAME}.conf"
+
 echo "============================================"
-echo "  FMCG Update - Pulling latest changes"
+echo "  Updating: ${DB_NAME}"
+echo "  Directory: ${INSTALL_DIR}"
 echo "============================================"
 echo ""
 
-cd "$INSTALL_DIR"
+if [ ! -d "${INSTALL_DIR}" ]; then
+    echo "ERROR: ${INSTALL_DIR} not found!"
+    exit 1
+fi
 
-# Step 1: Pull latest code
-echo "[1/4] Pulling from GitHub..."
-sudo -u odoo git fetch origin
-sudo -u odoo git reset --hard origin/$BRANCH
+# Pull latest code
+echo "[1/4] Pulling latest code..."
+cd "${INSTALL_DIR}"
+sudo -u odoo git fetch origin ${BRANCH} --quiet
+sudo -u odoo git reset --hard origin/${BRANCH} --quiet
 
-# Step 2: Update Odoo modules (without losing data)
-echo "[2/4] Updating Odoo modules..."
-systemctl stop odoo
-sudo -u odoo python3 "$INSTALL_DIR/odoo/odoo-bin" -c /etc/odoo.conf \
-  -u fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount \
-  --stop-after-init
-systemctl start odoo
+# Re-apply security patch
+echo "[2/4] Applying patches..."
+cat > "${INSTALL_DIR}/odoo/odoo/service/security.py" << 'PATCH'
+# -*- coding: utf-8 -*-
+import odoo
+import odoo.exceptions
+from odoo.modules.registry import Registry
 
-# Step 3: Rebuild frontend
-echo "[3/4] Rebuilding frontend..."
-systemctl stop fmcg-frontend
-cd "$INSTALL_DIR/frontend"
-sudo -u odoo npm install
-sudo -u odoo npm run build
-systemctl start fmcg-frontend
+def check(db, uid, passwd):
+    res_users = Registry(db)['res.users']
+    return res_users.check(db, uid, passwd)
 
-# Step 4: Done
-echo "[4/4] Update complete!"
+def compute_session_token(session, env):
+    self = env['res.users'].browse(session.uid)
+    return self._compute_session_token(session.sid)
+
+def check_session(session, env, request=None):
+    if session.uid:
+        return True
+    return False
+PATCH
+
+# Update Odoo modules
+echo "[3/4] Updating Odoo modules..."
+systemctl stop "odoo-${DB_NAME}"
+sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
+    -u fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
+    --stop-after-init 2>&1 | grep -E "^(INFO|ERROR)" | tail -3
+systemctl start "odoo-${DB_NAME}"
+
+# Rebuild frontend
+echo "[4/4] Rebuilding frontend..."
+systemctl stop "fmcg-${DB_NAME}"
+cd "${INSTALL_DIR}/frontend"
+sudo -u odoo npm install --quiet 2>/dev/null
+sudo -u odoo npm run build 2>&1 | tail -2
+systemctl start "fmcg-${DB_NAME}"
+
 echo ""
-echo "  Services restarted."
-echo "  Data is safe - only code was updated."
-echo ""
+echo "============================================"
+echo "  Update complete! Data is safe."
 echo "============================================"

@@ -1,107 +1,137 @@
 # FMCG Accounting - Deployment Guide
 
-## Requirements
-- Ubuntu 22.04+ (or any Debian-based Linux)
-- Minimum: 2 CPU, 4GB RAM, 40GB SSD
-- Root access
-
-## Quick Install (New Server)
+## One-Click Install (New Server)
 
 ```bash
-# 1. SSH into server
+# SSH into your Ubuntu 22.04+ server
 ssh root@YOUR_SERVER_IP
 
-# 2. Download and run installer
-git clone -b feature/frontend-api-integration https://github.com/pouyamotamedi/odoo-fmcg-accounting.git /opt/fmcg-accounting
-cd /opt/fmcg-accounting/deploy
-chmod +x install.sh update.sh backup.sh setup-cron.sh
-./install.sh
+# Download and run the installer
+curl -sSL https://raw.githubusercontent.com/pouyamotamedi/odoo-fmcg-accounting/feature/frontend-api-integration/deploy/install.sh -o install.sh
+bash install.sh YOUR_SUBDOMAIN.example.com [database_name]
 ```
 
-## After Installation
+### Example:
+```bash
+bash install.sh smoke.mediumco.org smoke
+bash install.sh shop2.mediumco.org shop2
+```
 
-- Frontend: `http://YOUR_IP:3000`
-- Odoo Backend: `http://YOUR_IP:8069`
-- Admin login: `admin` / `admin`
+### What it does automatically:
+1. Installs all system dependencies (Python, Node.js, PostgreSQL, Nginx)
+2. Creates PostgreSQL database
+3. Clones the repo + Odoo 18 source
+4. Installs all Python packages
+5. Installs all FMCG modules + Persian language
+6. Builds Next.js frontend
+7. Creates systemd services (auto-start on boot)
+8. Configures Nginx reverse proxy
+9. Gets SSL certificate (Let's Encrypt)
+10. Applies Persian translations (accounts, journals, categories)
 
-## Update (Pull latest code)
+### Requirements:
+- Ubuntu 22.04 or 24.04
+- Minimum 2 CPU, 4GB RAM, 40GB disk
+- Domain/subdomain DNS pointing to server IP
+- Root access
+
+---
+
+## Update (Pull latest changes)
 
 ```bash
-cd /opt/fmcg-accounting/deploy
-./update.sh
+bash /opt/fmcg-smoke/deploy/update.sh smoke
 ```
 
 Or use the **Update button** in Settings page.
 
+What it does:
+- Pulls latest code from GitHub
+- Re-applies security patch
+- Updates Odoo modules (data preserved)
+- Rebuilds frontend
+
+---
+
 ## Backup
 
-### Automatic (recommended)
+### Setup daily automatic backup:
 ```bash
-./setup-cron.sh
-```
-Runs daily at 3:00 AM. Keeps 30 days of backups in `/opt/fmcg-backups/`.
-
-### Manual
-```bash
-./backup.sh
+echo "0 3 * * * /opt/fmcg-smoke/deploy/backup.sh smoke" | crontab -
 ```
 
-### Restore from backup
+### Manual backup:
 ```bash
-# Stop Odoo
-systemctl stop odoo
-
-# Restore database
-gunzip < /opt/fmcg-backups/db_fmcg_shop_2024-01-15_03-00.sql.gz | psql -U odoo fmcg_shop
-
-# Start Odoo
-systemctl start odoo
+bash /opt/fmcg-smoke/deploy/backup.sh smoke
 ```
+
+### Restore:
+```bash
+systemctl stop odoo-smoke
+gunzip < /opt/fmcg-backups/smoke/db_2024-01-15_03-00.sql.gz | psql -U odoo smoke
+systemctl start odoo-smoke
+```
+
+---
 
 ## Multi-Store Setup
 
-For each new store, create a separate database:
+Each store gets its own:
+- Database
+- Odoo instance (separate port)
+- Frontend instance (separate port)
+- Nginx config
+- SSL certificate
+
+Just run `install.sh` again with a different subdomain:
+```bash
+bash install.sh store1.mediumco.org store1
+bash install.sh store2.mediumco.org store2
+```
+
+---
+
+## Management Commands
 
 ```bash
-# Create new database
-sudo -u postgres psql -c "CREATE DATABASE store2 OWNER odoo;"
+# Status
+systemctl status odoo-smoke
+systemctl status fmcg-smoke
 
-# Install modules on new database
-python3 /opt/fmcg-accounting/odoo/odoo-bin -c /etc/odoo.conf -d store2 \
-  -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount \
-  --stop-after-init
+# Restart
+systemctl restart odoo-smoke fmcg-smoke
+
+# Logs
+tail -f /var/log/odoo/odoo-smoke.log
+journalctl -u fmcg-smoke -f
+
+# Odoo shell (for debugging)
+sudo -u odoo python3 /opt/fmcg-smoke/odoo/odoo-bin shell -c /etc/odoo-smoke.conf
 ```
 
-Then update the frontend `.env` or use different ports per store.
+---
 
-## File Structure
+## File Structure (per store)
 
 ```
-/opt/fmcg-accounting/
-├── odoo/              # Odoo source
-├── custom_addons/     # Our Python modules
-├── frontend/          # Next.js frontend
-├── deploy/            # Deployment scripts
-│   ├── install.sh     # Initial server setup
-│   ├── update.sh      # Update from GitHub
-│   ├── backup.sh      # Database backup
-│   └── setup-cron.sh  # Setup daily backup
-├── odoo.conf          # Local development config
-└── start.bat          # Windows development startup
+/opt/fmcg-smoke/
+├── odoo/              # Odoo 18 source
+├── custom_addons/     # FMCG modules
+├── frontend/          # Next.js app
+├── deploy/            # Scripts
+├── apply_translations.py
+└── ...
+
+/etc/odoo-smoke.conf           # Odoo config
+/etc/nginx/sites-available/    # Nginx configs
+/opt/fmcg-backups/smoke/       # Backups
+/var/log/odoo/                 # Logs
 ```
 
-## Services
+---
 
-```bash
-systemctl status odoo
-systemctl status fmcg-frontend
-systemctl restart odoo
-systemctl restart fmcg-frontend
-```
+## Default Credentials
 
-## Logs
-
-```bash
-tail -f /var/log/odoo/odoo.log
-journalctl -u fmcg-frontend -f
-```
+- **Frontend**: admin / admin
+- **Odoo Backend**: admin / admin (port varies)
+- **PostgreSQL**: odoo / odoo
