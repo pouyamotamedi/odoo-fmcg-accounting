@@ -293,7 +293,10 @@ export default function InventoryPage() {
           }
         }
       }
-      setShowForm(false); await fetchTemplates();
+      setShowForm(false);
+      // Small delay for Odoo to process image thumbnails
+      await new Promise(r => setTimeout(r, 500));
+      await fetchTemplates();
     } catch (e: any) { alert(e.message || 'خطا'); }
     setSaving(false);
   }
@@ -395,8 +398,7 @@ export default function InventoryPage() {
         await addAttributeToTemplate(attrTemplateId, selectedAttr, selectedValues);
       }
 
-      setShowAttrForm(false); await fetchTemplates();
-      if (expandedIds.has(attrTemplateId)) { const vars = await getProductVariants(attrTemplateId); setVariantsMap(prev => ({ ...prev, [attrTemplateId]: vars || [] })); }
+      setShowAttrForm(false);
       // Ensure new variants inherit the template's standard_price
       try {
         const tmpl = templates.find(t => t.id === attrTemplateId);
@@ -408,6 +410,12 @@ export default function InventoryPage() {
           }
         }
       } catch {}
+      // Now refresh everything
+      await fetchTemplates();
+      if (expandedIds.has(attrTemplateId)) {
+        const vars = await getProductVariants(attrTemplateId);
+        setVariantsMap(prev => ({ ...prev, [attrTemplateId]: vars || [] }));
+      }
     } catch (e: any) { alert(e.message || 'خطا'); }
     setSaving(false);
   }
