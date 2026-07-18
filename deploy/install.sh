@@ -163,6 +163,7 @@ cd "${INSTALL_DIR}/frontend"
 cat > .env.local << EOF
 NEXT_PUBLIC_ODOO_URL=/api
 NEXT_PUBLIC_ODOO_DB=${DB_NAME}
+ODOO_INTERNAL_URL=http://localhost:${ODOO_PORT}
 EOF
 sudo -u odoo npm install --quiet 2>/dev/null
 sudo -u odoo npm run build 2>&1 | tail -2
