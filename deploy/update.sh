@@ -39,7 +39,8 @@ fi
 echo "[1/4] Pulling latest code..."
 cd "${INSTALL_DIR}"
 sudo -u odoo git fetch origin ${BRANCH} --quiet
-sudo -u odoo git reset --hard origin/${BRANCH} --quiet
+sudo -u odoo git checkout -- . 2>/dev/null
+sudo -u odoo git pull origin ${BRANCH} --quiet
 
 # Re-apply security patch
 echo "[2/4] Applying patches..."
