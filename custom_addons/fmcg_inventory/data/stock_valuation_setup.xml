@@ -5,18 +5,22 @@
         This ensures purchase invoices debit Stock Interim (Input) instead of Expense,
         and sales properly record Cost of Goods Sold.
         
-        Account mapping:
-        - Stock Input (interim receipt): 110100 - موجودی میانی (دریافتی)
-        - Stock Output (interim delivery): 110300 - موجودی میانی (ارسالی)
-        - Stock Valuation: 110200 - ارزشگذاری موجودی
+        Account mapping (searched by code for reliability):
+        - Stock Input (interim receipt): code 110100
+        - Stock Output (interim delivery): code 110300
+        - Stock Valuation: code 110200
+        
+        Note: noupdate="0" means this runs on every module upgrade,
+        ensuring settings are always correct.
     -->
 
     <!-- Set default product category "All" to real-time FIFO valuation -->
+    <!-- Child categories inherit these settings from parent automatically -->
     <record id="product.product_category_all" model="product.category">
         <field name="property_valuation">real_time</field>
         <field name="property_cost_method">fifo</field>
-        <field name="property_stock_account_input_categ_id" search="[('account_type', '=', 'asset_current'), ('name', 'ilike', 'مبانی'), ('name', 'ilike', 'دریافت')]" model="account.account"/>
-        <field name="property_stock_account_output_categ_id" search="[('account_type', '=', 'asset_current'), ('name', 'ilike', 'مبانی'), ('name', 'ilike', 'ارسال')]" model="account.account"/>
-        <field name="property_stock_valuation_account_id" search="[('account_type', '=', 'asset_current'), ('name', 'ilike', 'ارزش')]" model="account.account"/>
+        <field name="property_stock_account_input_categ_id" search="[('code', '=', '110100')]" model="account.account"/>
+        <field name="property_stock_account_output_categ_id" search="[('code', '=', '110300')]" model="account.account"/>
+        <field name="property_stock_valuation_account_id" search="[('code', '=', '110200')]" model="account.account"/>
     </record>
 </odoo>
