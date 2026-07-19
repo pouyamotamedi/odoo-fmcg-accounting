@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { searchRead, write, create, callMethod, getBankCashBalances, getProducts } from '@/lib/odoo-api';
+import { searchRead, write, create, callMethod, getBankCashBalances, getProducts, getPartners } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
@@ -22,6 +22,9 @@ interface LockInfo {
 interface OpeningItem {
   account_id: number;
   account_name: string;
+  account_type: string;
+  partner_id: number;
+  partner_name: string;
   debit: string;
   credit: string;
   type: 'asset' | 'liability' | 'equity';
@@ -65,6 +68,7 @@ export default function FiscalYearPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [balanceSheetAccounts, setBalanceSheetAccounts] = useState<{id: number; name: string; code: string; account_type: string}[]>([]);
   const [allProducts, setAllProducts] = useState<{id: number; name: string; standard_price: number}[]>([]);
+  const [allPartners, setAllPartners] = useState<{id: number; name: string}[]>([]);
 
   async function loadData() {
     setLoading(true);
@@ -171,7 +175,26 @@ export default function FiscalYearPage() {
           const lines: any[] = profitLossAmount > 0
             ? [[0,0,{account_id:cyeId, debit:profitLossAmount, credit:0, name:`بستن ${closingYear.name}`}],[0,0,{account_id:retainedEarningsAccount, debit:0, credit:profitLossAmount, name:`سود انباشته`}]]
             : [[0,0,{account_id:cyeId, debit:0, credit:Math.abs(profitLossAmount), name:`بستن ${closingYear.name}`}],[0,0,{account_id:retainedEarningsAccount, debit:Math.abs(profitLossAmount), credit:0, name:`زیان انباشته`}]];
-          const moveId = await create('account.move', { move_type:'entry', date:closingYear.date_to, line_ids:lines, narration:`سند بستن ${closingYear.name}` });
+
+          // Find general journal for closing entry
+          let closingJournalId: number | undefined;
+          try {
+            const miscJournals = await searchRead('account.journal', [['type', '=', 'general']], ['id'], 1);
+            closingJournalId = miscJournals?.[0]?.id;
+          } catch {}
+
+          const closingMoveVals: Record<string, any> = {
+            move_type: 'entry',
+            date: closingYear.date_to,
+            ref: `بستن سال مالی ${closingYear.name}`,
+            line_ids: lines,
+            narration: `سند بستن ${closingYear.name}`,
+          };
+          if (closingJournalId) {
+            closingMoveVals.journal_id = closingJournalId;
+          }
+
+          const moveId = await create('account.move', closingMoveVals);
           await callMethod('account.move', 'action_post', [[moveId]]);
         }
       }
@@ -204,6 +227,10 @@ export default function FiscalYearPage() {
       const prods = await getProducts();
       setAllProducts((prods || []).map((p: any) => ({ id: p.id, name: p.display_name || p.name, standard_price: p.standard_price || 0 })));
 
+      // Load partners for receivable/payable accounts
+      const partners = await getPartners();
+      setAllPartners((partners || []).map((p: any) => ({ id: p.id, name: p.name })));
+
       // Pre-fill with current bank/cash balances
       const journals = await getBankCashBalances();
       const prefillItems: OpeningItem[] = [];
@@ -213,20 +240,20 @@ export default function FiscalYearPage() {
           const defaultAccount = j.default_account_id?.[0];
           const accMatch = bsAccounts?.find((a: any) => a.id === defaultAccount);
           if (accMatch) {
-            prefillItems.push({ account_id: accMatch.id, account_name: `${accMatch.code} - ${accMatch.name}`, debit: String(Math.round(j.fmcg_running_balance)), credit: '', type: 'asset' });
+            prefillItems.push({ account_id: accMatch.id, account_name: `${accMatch.code} - ${accMatch.name}`, account_type: accMatch.account_type, partner_id: 0, partner_name: '', debit: String(Math.round(j.fmcg_running_balance)), credit: '', type: 'asset' });
           }
         }
       }
       // Add empty row for capital/equity
-      prefillItems.push({ account_id: 0, account_name: '', debit: '', credit: '', type: 'equity' });
-      setOpeningItems(prefillItems.length > 0 ? prefillItems : [{ account_id: 0, account_name: '', debit: '', credit: '', type: 'asset' }]);
+      prefillItems.push({ account_id: 0, account_name: '', account_type: '', partner_id: 0, partner_name: '', debit: '', credit: '', type: 'equity' });
+      setOpeningItems(prefillItems.length > 0 ? prefillItems : [{ account_id: 0, account_name: '', account_type: '', partner_id: 0, partner_name: '', debit: '', credit: '', type: 'asset' }]);
       setInventoryItems([]);
     } catch {}
     setShowOpening(true);
   }
 
   function addOpeningItem() {
-    setOpeningItems([...openingItems, { account_id: 0, account_name: '', debit: '', credit: '', type: 'asset' }]);
+    setOpeningItems([...openingItems, { account_id: 0, account_name: '', account_type: '', partner_id: 0, partner_name: '', debit: '', credit: '', type: 'asset' }]);
   }
 
   function updateOpeningItem(idx: number, field: string, value: any) {
@@ -235,10 +262,20 @@ export default function FiscalYearPage() {
     if (field === 'account_id') {
       const acc = balanceSheetAccounts.find(a => a.id === value);
       items[idx].account_name = acc ? `${acc.code} - ${acc.name}` : '';
+      items[idx].account_type = acc?.account_type || '';
       // Auto-detect type
       if (acc?.account_type.startsWith('asset')) items[idx].type = 'asset';
       else if (acc?.account_type.startsWith('liability')) items[idx].type = 'liability';
       else items[idx].type = 'equity';
+      // Reset partner when account changes
+      if (acc?.account_type !== 'asset_receivable' && acc?.account_type !== 'liability_payable') {
+        items[idx].partner_id = 0;
+        items[idx].partner_name = '';
+      }
+    }
+    if (field === 'partner_id') {
+      const partner = allPartners.find(p => p.id === value);
+      items[idx].partner_name = partner?.name || '';
     }
     setOpeningItems(items);
   }
@@ -268,6 +305,14 @@ export default function FiscalYearPage() {
     // Validate: only balance sheet accounts
     const validItems = openingItems.filter(item => item.account_id && (Number(item.debit) > 0 || Number(item.credit) > 0));
 
+    // Validate: partner is required for receivable/payable accounts
+    for (const item of validItems) {
+      if ((item.account_type === 'asset_receivable' || item.account_type === 'liability_payable') && !item.partner_id) {
+        alert(`حساب "${item.account_name}" از نوع دریافتنی/پرداختنی است و انتخاب شخص (حساب تفصیلی) الزامی است.`);
+        return;
+      }
+    }
+
     // Add inventory value as a debit to stock valuation account if inventory items exist
     let inventoryAccountId: number | undefined;
     if (inventoryItems.length > 0 && inventoryTotalValue > 0) {
@@ -282,7 +327,7 @@ export default function FiscalYearPage() {
         inventoryAccountId = anyAssetCurrent?.id;
       }
       if (inventoryAccountId) {
-        validItems.push({ account_id: inventoryAccountId, account_name: '', debit: String(inventoryTotalValue), credit: '', type: 'asset' });
+        validItems.push({ account_id: inventoryAccountId, account_name: '', account_type: 'asset_current', partner_id: 0, partner_name: '', debit: String(inventoryTotalValue), credit: '', type: 'asset' });
       }
     }
 
@@ -297,14 +342,34 @@ export default function FiscalYearPage() {
 
     setSaving(true);
     try {
-      // 1. Create opening journal entry
+      // Find or use the miscellaneous journal for opening entries
+      let openingJournalId: number | undefined;
+      try {
+        const miscJournals = await searchRead('account.journal', [['type', '=', 'general']], ['id', 'name'], 1);
+        openingJournalId = miscJournals?.[0]?.id;
+      } catch {}
+
+      // 1. Create opening journal entry with proper journal_id and partner_id on lines
       const lines = validItems.map(item => [0, 0, {
         account_id: item.account_id,
         debit: Number(item.debit) || 0,
         credit: Number(item.credit) || 0,
         name: 'سند افتتاحیه',
+        partner_id: item.partner_id || false,
       }]);
-      const moveId = await create('account.move', { move_type: 'entry', date: openingDate, line_ids: lines, narration: 'سند افتتاحیه سال مالی' });
+
+      const moveVals: Record<string, any> = {
+        move_type: 'entry',
+        date: openingDate,
+        ref: 'سند افتتاحیه',
+        line_ids: lines,
+        narration: 'سند افتتاحیه سال مالی',
+      };
+      if (openingJournalId) {
+        moveVals.journal_id = openingJournalId;
+      }
+
+      const moveId = await create('account.move', moveVals);
       await callMethod('account.move', 'action_post', [[moveId]]);
 
       // 2. Create stock adjustments for inventory items (sets qty_available)
@@ -312,6 +377,13 @@ export default function FiscalYearPage() {
         for (const item of inventoryItems) {
           if (!item.product_id || !Number(item.qty)) continue;
           try {
+            // Update product standard_price if user entered a different cost
+            if (Number(item.unit_cost) > 0) {
+              await write('product.product', [item.product_id], {
+                standard_price: Number(item.unit_cost),
+              });
+            }
+
             // Use stock.quant to set initial quantity
             // First check if quant exists
             const existingQuants = await searchRead('stock.quant', [
@@ -518,12 +590,15 @@ export default function FiscalYearPage() {
                 <table className="w-full text-xs border rounded-lg overflow-hidden">
                   <thead className="bg-gray-50"><tr>
                     <th className="text-right p-2">حساب (فقط ترازنامه‌ای)</th>
+                    <th className="text-right p-2 w-36">شخص (تفصیلی)</th>
                     <th className="text-right p-2 w-28">بدهکار</th>
                     <th className="text-right p-2 w-28">بستانکار</th>
                     <th className="p-2 w-8"></th>
                   </tr></thead>
                   <tbody>
-                    {openingItems.map((item, idx) => (
+                    {openingItems.map((item, idx) => {
+                      const needsPartner = item.account_type === 'asset_receivable' || item.account_type === 'liability_payable';
+                      return (
                       <tr key={idx} className="border-t">
                         <td className="p-1">
                           <select value={item.account_id} onChange={(e) => updateOpeningItem(idx, 'account_id', Number(e.target.value))} className="w-full p-1.5 border rounded text-xs">
@@ -531,11 +606,22 @@ export default function FiscalYearPage() {
                             {balanceSheetAccounts.map(a => <option key={a.id} value={a.id}>{a.code} - {a.name}</option>)}
                           </select>
                         </td>
+                        <td className="p-1">
+                          {needsPartner ? (
+                            <select value={item.partner_id} onChange={(e) => updateOpeningItem(idx, 'partner_id', Number(e.target.value))} className="w-full p-1.5 border rounded text-xs border-amber-300 bg-amber-50">
+                              <option value={0}>— شخص —</option>
+                              {allPartners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          ) : (
+                            <span className="text-gray-300 text-[10px] p-1.5 block">—</span>
+                          )}
+                        </td>
                         <td className="p-1"><PriceInput value={item.debit} onChange={(v) => updateOpeningItem(idx, 'debit', v)} placeholder="۰" className="w-full p-1.5 border rounded text-xs" /></td>
                         <td className="p-1"><PriceInput value={item.credit} onChange={(v) => updateOpeningItem(idx, 'credit', v)} placeholder="۰" className="w-full p-1.5 border rounded text-xs" /></td>
                         <td className="p-1"><button onClick={() => setOpeningItems(openingItems.filter((_,i)=>i!==idx))} className="text-red-400 text-xs">✕</button></td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 <button onClick={addOpeningItem} className="text-xs text-blue-600 font-bold mt-2">+ افزودن ردیف</button>
@@ -607,7 +693,7 @@ export default function FiscalYearPage() {
                     <div className="text-xs font-bold mb-2">حساب‌های مالی:</div>
                     {openingItems.filter(i => i.account_id).map((item, idx) => (
                       <div key={idx} className="flex justify-between text-[10px] py-0.5">
-                        <span>{item.account_name || `حساب #${item.account_id}`}</span>
+                        <span>{item.account_name || `حساب #${item.account_id}`}{item.partner_name ? ` (${item.partner_name})` : ''}</span>
                         <span>{Number(item.debit) > 0 ? `بدهکار: ${formatPrice(Number(item.debit))}` : `بستانکار: ${formatPrice(Number(item.credit))}`}</span>
                       </div>
                     ))}
