@@ -70,28 +70,54 @@ export default function FiscalYearPage() {
   const [allProducts, setAllProducts] = useState<{id: number; name: string; standard_price: number}[]>([]);
   const [allPartners, setAllPartners] = useState<{id: number; name: string}[]>([]);
 
+  // localStorage helpers for fiscal years (fallback when no Odoo model exists)
+  const LS_KEY = 'fmcg_fiscal_years';
+  function loadFiscalYearsFromLocal(): FiscalYear[] {
+    try {
+      const stored = localStorage.getItem(LS_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch { return []; }
+  }
+  function saveFiscalYearsToLocal(years: FiscalYear[]) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(years)); } catch {}
+  }
+
   async function loadData() {
     setLoading(true);
     try {
+      // Try loading fiscal years from Odoo models
+      let yearsLoaded = false;
       try {
         const years = await searchRead('account.fiscal.year', [], ['name', 'date_from', 'date_to'], 0, 0, 'date_from desc');
-        setFiscalYears(years || []);
-        setFiscalYearModelExists(true);
+        if (years && years.length >= 0) {
+          setFiscalYears(years);
+          setFiscalYearModelExists(true);
+          yearsLoaded = true;
+        }
       } catch {
         setFiscalYearModelExists(false);
-        // Fallback: load from date.range with fiscal type
+      }
+
+      // Fallback: try date.range
+      if (!yearsLoaded) {
         try {
           const rangeTypes = await searchRead('date.range.type', [['name', 'ilike', 'fiscal']], ['id'], 1);
           if (rangeTypes && rangeTypes.length > 0) {
             const ranges = await searchRead('date.range', [['type_id', '=', rangeTypes[0].id]], ['name', 'date_start', 'date_end'], 0, 0, 'date_start desc');
-            setFiscalYears((ranges || []).map((r: any) => ({ id: r.id, name: r.name, date_from: r.date_start, date_to: r.date_end })));
-          } else {
-            setFiscalYears([]);
+            if (ranges && ranges.length > 0) {
+              setFiscalYears(ranges.map((r: any) => ({ id: r.id, name: r.name, date_from: r.date_start, date_to: r.date_end })));
+              yearsLoaded = true;
+            }
           }
-        } catch {
-          setFiscalYears([]);
-        }
+        } catch {}
       }
+
+      // Final fallback: localStorage
+      if (!yearsLoaded) {
+        const localYears = loadFiscalYearsFromLocal();
+        setFiscalYears(localYears);
+      }
+
       try {
         const companies = await searchRead('res.company', [], ['fiscalyear_lock_date', 'tax_lock_date', 'hard_lock_date'], 1);
         if (companies?.[0]) {
@@ -115,16 +141,39 @@ export default function FiscalYearPage() {
     if (!newName || !newFrom || !newTo) { alert('تمام فیلدها الزامی'); return; }
     setSaving(true);
     try {
+      let created = false;
+
       if (fiscalYearModelExists) {
         await create('account.fiscal.year', { name: newName, date_from: newFrom, date_to: newTo });
-      } else {
+        created = true;
+      }
+
+      // Try date.range as secondary option
+      if (!created) {
         try {
           const rangeTypes = await searchRead('date.range.type', [['name', 'ilike', 'fiscal']], ['id'], 1);
           let typeId = rangeTypes?.[0]?.id;
           if (!typeId) typeId = await create('date.range.type', { name: 'Fiscal Year' });
           await create('date.range', { name: newName, date_start: newFrom, date_end: newTo, type_id: typeId });
-        } catch {}
+          created = true;
+        } catch {
+          // date.range also not available
+        }
       }
+
+      // Final fallback: save to localStorage
+      if (!created) {
+        const localYears = loadFiscalYearsFromLocal();
+        const newYear: FiscalYear = {
+          id: Date.now(),
+          name: newName,
+          date_from: newFrom,
+          date_to: newTo,
+        };
+        localYears.unshift(newYear);
+        saveFiscalYearsToLocal(localYears);
+      }
+
       setShowNewForm(false); setNewName(''); setNewFrom(''); setNewTo('');
       setMsg('✅ سال مالی ایجاد شد'); setTimeout(() => setMsg(''), 3000);
       await loadData();
@@ -491,7 +540,6 @@ export default function FiscalYearPage() {
                 <button onClick={() => setShowNewForm(true)} className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-bold hover:bg-green-600">+ سال جدید</button>
               </div>
             </div>
-            {!fiscalYearModelExists && fiscalYears.length === 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-700">ℹ️ مدل سال مالی نصب نیست. از date.range استفاده می‌شود. سند افتتاحیه و قفل مستقل کار می‌کنند.</div>}
             {fiscalYears.length === 0 ? (
               <div className="text-center py-6 text-gray-400 text-sm">سال مالی تعریف نشده</div>
             ) : (

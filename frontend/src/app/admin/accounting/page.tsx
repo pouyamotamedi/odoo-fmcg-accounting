@@ -518,9 +518,9 @@ export default function AccountingPage() {
                   <tr><td colSpan={7} className="p-3 bg-gray-50">
                     <div className="text-xs font-bold mb-2">آرتیکل‌های سند:</div>
                     {(entryLinesMap[entry.id] || []).length === 0 ? <p className="text-xs text-gray-400">بدون آرتیکل</p> : (
-                      <table className="w-full text-xs"><thead><tr><th className="text-right p-1">شرح</th><th className="text-right p-1">کالا</th><th className="text-right p-1">حساب</th><th className="text-right p-1">بدهکار</th><th className="text-right p-1">بستانکار</th></tr></thead>
+                      <table className="w-full text-xs"><thead><tr><th className="text-right p-1">شرح</th><th className="text-right p-1">شخص</th><th className="text-right p-1">کالا</th><th className="text-right p-1">حساب</th><th className="text-right p-1">بدهکار</th><th className="text-right p-1">بستانکار</th></tr></thead>
                       <tbody>{(entryLinesMap[entry.id] || []).map((l: any) => (
-                        <tr key={l.id}><td className="p-1">{l.name || '\u2014'}</td><td className="p-1 text-gray-500">{l.product_id?.[1] || ''}</td><td className="p-1">{l.account_id?.[1] || '\u2014'}</td><td className="p-1">{l.debit > 0 ? formatPrice(l.debit) : ''}</td><td className="p-1">{l.credit > 0 ? formatPrice(l.credit) : ''}</td></tr>
+                        <tr key={l.id}><td className="p-1">{l.name || '\u2014'}</td><td className="p-1 text-indigo-600 font-medium">{l.partner_id?.[1] || ''}</td><td className="p-1 text-gray-500">{l.product_id?.[1] || ''}</td><td className="p-1">{l.account_id?.[1] || '\u2014'}</td><td className="p-1">{l.debit > 0 ? formatPrice(l.debit) : ''}</td><td className="p-1">{l.credit > 0 ? formatPrice(l.credit) : ''}</td></tr>
                       ))}</tbody></table>
                     )}
                   </td></tr>
