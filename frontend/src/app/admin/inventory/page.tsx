@@ -273,11 +273,13 @@ export default function InventoryPage() {
             standard_price: parseFloat(form.standard_price),
             list_price: parseFloat(form.list_price),
           });
-          // Save discount prices for first variant
+          // Save discount prices for ALL variants
           for (const cat of discountCats) {
             const price = parseFloat(discountPrices[cat.id] || '');
             if (price && price !== parseFloat(form.list_price)) {
-              await setDiscountPrice(cat.id, varIds[0], price);
+              for (const varId of varIds) {
+                await setDiscountPrice(cat.id, varId, price);
+              }
             }
           }
         }

@@ -945,11 +945,13 @@ export default function PurchasePage() {
                     const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id']);
                     if (vars && vars.length > 0) {
                       await write('product.product', vars.map((v:any)=>v.id), { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
-                      // Save discount prices
+                      // Save discount prices for ALL variants
                       for (const cat of discountCats) {
                         const price = parseFloat(editDiscountPrices[cat.id] || '');
                         if (price && price !== (Number(editSellPrice)||0)) {
-                          await setDiscountPrice(cat.id, vars[0].id, price);
+                          for (const v of vars) {
+                            await setDiscountPrice(cat.id, v.id, price);
+                          }
                         }
                       }
                     }
