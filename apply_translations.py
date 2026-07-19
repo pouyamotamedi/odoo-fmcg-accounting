@@ -65,6 +65,7 @@ journal_renames = {
     'Stock Interim (Received)': 'موجودی مبانی (دریافتی)',
     'Stock Interim (Sent)': 'موجودی مبانی (ارسالی)',
     'Stock Valuation': 'ارزشگذاری موجودی',
+    'Inventory Valuation': 'ارزشگذاری موجودی',
 }
 
 for eng_name, fa_name in journal_renames.items():
