@@ -16,12 +16,14 @@
     'license': 'LGPL-3',
     'depends': [
         'stock',
+        'stock_account',
         'product',
         'barcodes',
         'fmcg_base',
     ],
     'data': [
         'security/ir.model.access.csv',
+        'data/stock_valuation_setup.xml',
         'views/product_template_views.xml',
         'views/fmcg_stock_adjustment_views.xml',
     ],

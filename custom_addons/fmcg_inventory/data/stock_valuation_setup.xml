@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="0">
+    <!--
+        Configure product categories for perpetual (real-time) inventory valuation.
+        This ensures purchase invoices debit Stock Interim (Input) instead of Expense,
+        and sales properly record Cost of Goods Sold.
+        
+        Account mapping:
+        - Stock Input (interim receipt): 110100 - موجودی میانی (دریافتی)
+        - Stock Output (interim delivery): 110300 - موجودی میانی (ارسالی)
+        - Stock Valuation: 110200 - ارزشگذاری موجودی
+    -->
+
+    <!-- Set default product category "All" to real-time FIFO valuation -->
+    <record id="product.product_category_all" model="product.category">
+        <field name="property_valuation">real_time</field>
+        <field name="property_cost_method">fifo</field>
+        <field name="property_stock_account_input_categ_id" search="[('account_type', '=', 'asset_current'), ('name', 'ilike', 'مبانی'), ('name', 'ilike', 'دریافت')]" model="account.account"/>
+        <field name="property_stock_account_output_categ_id" search="[('account_type', '=', 'asset_current'), ('name', 'ilike', 'مبانی'), ('name', 'ilike', 'ارسال')]" model="account.account"/>
+        <field name="property_stock_valuation_account_id" search="[('account_type', '=', 'asset_current'), ('name', 'ilike', 'ارزش')]" model="account.account"/>
+    </record>
+</odoo>

@@ -62,8 +62,8 @@ journal_renames = {
     'Bank': 'بانک',
     'Cash': 'صندوق نقدی',
     'Cash Basis Taxes': 'مالیات نقدی',
-    'Stock Interim (Received)': 'موجودی مبانی (دریافتی)',
-    'Stock Interim (Sent)': 'موجودی مبانی (ارسالی)',
+    'Stock Interim (Received)': 'موجودی میانی (دریافتی)',
+    'Stock Interim (Sent)': 'موجودی میانی (ارسالی)',
     'Stock Valuation': 'ارزشگذاری موجودی',
     'Inventory Valuation': 'ارزشگذاری موجودی',
 }
@@ -90,9 +90,9 @@ account_renames = {
     '101700': 'مالیات قابل استرداد',
     '101701': 'انتقال نقدینگی',
     '110000': 'دارایی\u200cهای ثابت',
-    '110100': 'موجودی مبانی (دریافتی)',
+    '110100': 'موجودی میانی (دریافتی)',
     '110200': 'ارزشگذاری موجودی',
-    '110300': 'موجودی مبانی (ارسالی)',
+    '110300': 'موجودی میانی (ارسالی)',
     '110400': 'بهای تولید',
     '110500': 'کار در جریان ساخت',
     '120000': 'دارایی\u200cهای غیرجاری',
@@ -241,5 +241,34 @@ try:
         print("    IRR symbol: تومان")
 except:
     pass
+
+# ============ Configure Product Categories for Real-Time Valuation ============
+print("  Configuring product categories for perpetual inventory (real_time + FIFO)...")
+try:
+    # Find stock accounts
+    input_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '110100']]])
+    output_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '110300']]])
+    valuation_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '110200']]])
+
+    if input_acc and output_acc and valuation_acc:
+        # Get all product categories except "Expenses/هزینه‌ها"
+        all_cats = models.execute_kw(db, uid, password, 'product.category', 'search_read', [[]], {'fields': ['id', 'name']})
+        for cat in all_cats:
+            cat_name = cat['name']
+            # Skip expense categories
+            if 'هزینه' in cat_name or 'Expense' in cat_name:
+                continue
+            models.execute_kw(db, uid, password, 'product.category', 'write', [[cat['id']], {
+                'property_valuation': 'real_time',
+                'property_cost_method': 'fifo',
+                'property_stock_account_input_categ_id': input_acc[0],
+                'property_stock_account_output_categ_id': output_acc[0],
+                'property_stock_valuation_account_id': valuation_acc[0],
+            }])
+            print(f"    Category '{cat_name}': real_time + FIFO")
+    else:
+        print("    WARNING: Stock accounts (110100/110200/110300) not found. Skipping category setup.")
+except Exception as e:
+    print(f"    Warning: {e}")
 
 print("\nDone! All translations applied.")
