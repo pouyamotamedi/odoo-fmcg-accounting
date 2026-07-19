@@ -79,7 +79,18 @@ export default function FiscalYearPage() {
         setFiscalYearModelExists(true);
       } catch {
         setFiscalYearModelExists(false);
-        setFiscalYears([]);
+        // Fallback: load from date.range with fiscal type
+        try {
+          const rangeTypes = await searchRead('date.range.type', [['name', 'ilike', 'fiscal']], ['id'], 1);
+          if (rangeTypes && rangeTypes.length > 0) {
+            const ranges = await searchRead('date.range', [['type_id', '=', rangeTypes[0].id]], ['name', 'date_start', 'date_end'], 0, 0, 'date_start desc');
+            setFiscalYears((ranges || []).map((r: any) => ({ id: r.id, name: r.name, date_from: r.date_start, date_to: r.date_end })));
+          } else {
+            setFiscalYears([]);
+          }
+        } catch {
+          setFiscalYears([]);
+        }
       }
       try {
         const companies = await searchRead('res.company', [], ['fiscalyear_lock_date', 'tax_lock_date', 'hard_lock_date'], 1);
@@ -350,13 +361,20 @@ export default function FiscalYearPage() {
       } catch {}
 
       // 1. Create opening journal entry with proper journal_id and partner_id on lines
-      const lines = validItems.map(item => [0, 0, {
-        account_id: item.account_id,
-        debit: Number(item.debit) || 0,
-        credit: Number(item.credit) || 0,
-        name: 'سند افتتاحیه',
-        partner_id: item.partner_id || false,
-      }]);
+      const lines = validItems.map(item => {
+        // Build descriptive name: include partner name for receivable/payable
+        let lineName = 'سند افتتاحیه';
+        if (item.partner_name) {
+          lineName = `سند افتتاحیه - ${item.partner_name}`;
+        }
+        return [0, 0, {
+          account_id: item.account_id,
+          debit: Number(item.debit) || 0,
+          credit: Number(item.credit) || 0,
+          name: lineName,
+          partner_id: item.partner_id || false,
+        }];
+      });
 
       const moveVals: Record<string, any> = {
         move_type: 'entry',
@@ -473,7 +491,7 @@ export default function FiscalYearPage() {
                 <button onClick={() => setShowNewForm(true)} className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-bold hover:bg-green-600">+ سال جدید</button>
               </div>
             </div>
-            {!fiscalYearModelExists && <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-700">ℹ️ مدل سال مالی فعال نیست. سند افتتاحیه و قفل مستقل کار میکنند.</div>}
+            {!fiscalYearModelExists && fiscalYears.length === 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-700">ℹ️ مدل سال مالی نصب نیست. از date.range استفاده می‌شود. سند افتتاحیه و قفل مستقل کار می‌کنند.</div>}
             {fiscalYears.length === 0 ? (
               <div className="text-center py-6 text-gray-400 text-sm">سال مالی تعریف نشده</div>
             ) : (
