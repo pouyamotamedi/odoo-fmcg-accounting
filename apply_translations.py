@@ -177,16 +177,47 @@ for eng_name, fa_name in category_renames.items():
 # ============ Sequence Prefixes (Invoice numbers in Persian) ============
 print("  Setting invoice sequence prefixes...")
 try:
-    # Find sale journal and set sequence prefix
+    # Sale journal: code = فاکتو (shows as فاکتو/2026/00001)
     sale_journals = models.execute_kw(db, uid, password, 'account.journal', 'search_read',
-        [[['type', '=', 'sale']]], {'fields': ['id', 'name', 'sequence_override_regex']})
+        [[['type', '=', 'sale']]], {'fields': ['id', 'name']})
     for j in sale_journals:
-        models.execute_kw(db, uid, password, 'account.journal', 'write', [[j['id']], {'code': 'INV'}])
+        models.execute_kw(db, uid, password, 'account.journal', 'write', [[j['id']], {'code': 'فاکتو'}])
+        print(f"    Sale journal code -> فاکتو")
 
+    # Purchase journal: code = صورتح (shows as صورتح/2026/07/0001)
     purchase_journals = models.execute_kw(db, uid, password, 'account.journal', 'search_read',
         [[['type', '=', 'purchase']]], {'fields': ['id', 'name']})
     for j in purchase_journals:
-        models.execute_kw(db, uid, password, 'account.journal', 'write', [[j['id']], {'code': 'BILL'}])
+        models.execute_kw(db, uid, password, 'account.journal', 'write', [[j['id']], {'code': 'صورتح'}])
+        print(f"    Purchase journal code -> صورتح")
+except Exception as e:
+    print(f"    Warning: {e}")
+
+# ============ Payment Methods ============
+print("  Renaming payment methods...")
+try:
+    method_renames = {
+        'Manual': 'پرداخت دستی',
+        'Manual Payment': 'پرداخت دستی',
+        'Checks': 'چک',
+        'SEPA Credit Transfer': 'انتقال بانکی',
+        'SEPA Direct Debit': 'برداشت مستقیم',
+        'Batch Deposit': 'واریز دسته‌ای',
+    }
+    methods = models.execute_kw(db, uid, password, 'account.payment.method', 'search_read', [[]], {'fields': ['id', 'name']})
+    for m in methods:
+        if m['name'] in method_renames:
+            models.execute_kw(db, uid, password, 'account.payment.method', 'write', [[m['id']], {'name': method_renames[m['name']]}])
+            print(f"    {m['name']} -> {method_renames[m['name']]}")
+
+    # Payment method lines
+    line_ids = models.execute_kw(db, uid, password, 'account.payment.method.line', 'search', [[['name', 'in', list(method_renames.keys())]]])
+    if line_ids:
+        for lid in line_ids:
+            line = models.execute_kw(db, uid, password, 'account.payment.method.line', 'read', [[lid]], {'fields': ['name']})
+            if line and line[0]['name'] in method_renames:
+                models.execute_kw(db, uid, password, 'account.payment.method.line', 'write', [[lid], {'name': method_renames[line[0]['name']]}])
+        print(f"    Fixed {len(line_ids)} payment method lines")
 except Exception as e:
     print(f"    Warning: {e}")
 
