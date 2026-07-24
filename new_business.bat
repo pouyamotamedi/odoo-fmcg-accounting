@@ -44,7 +44,7 @@ echo [2/6] Installing modules + Persian language (3-5 minutes)...
 echo       Please wait...
 echo       (updating odoo.conf first to point to new db)
 powershell -Command "(Get-Content 'C:\Users\pouya\Desktop\accounting\odoo.conf') -replace 'db_name = .*', 'db_name = %DBNAME%' | Set-Content 'C:\Users\pouya\Desktop\accounting\odoo.conf'"
-python "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d %DBNAME% -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports --stop-after-init --without-demo=all --load-language=fa_IR
+python "C:\Users\pouya\Desktop\accounting\odoo\odoo-bin" -c "C:\Users\pouya\Desktop\accounting\odoo.conf" -d %DBNAME% -i base,account,stock,stock_account,product,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports --stop-after-init --without-demo=all --load-language=fa_IR
 if errorlevel 1 (
     echo ERROR: Module install failed!
     pause

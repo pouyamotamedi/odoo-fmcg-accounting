@@ -150,9 +150,61 @@ echo "  Config: ${ODOO_CONF}"
 
 # ============ [7/10] Install Odoo Modules ============
 echo -e "${GREEN}[7/10] Installing Odoo modules (3-5 minutes)...${NC}"
+
+# Step A: Install base + account first to set up chart of accounts
+echo "  Step A: Installing base accounting..."
 sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
-    -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
-    --stop-after-init --without-demo=all --load-language=fa_IR 2>&1 | grep -E "^(INFO|WARNING|ERROR)" | tail -5
+    -i base,account,stock,stock_account,product \
+    --stop-after-init --without-demo=all --load-language=fa_IR 2>&1 | tail -3
+
+# Step B: Set chart template to generic_coa if not set
+echo "  Step B: Ensuring chart of accounts (generic_coa)..."
+sudo -u odoo python3 -c "
+import xmlrpc.client
+import time
+url = 'http://localhost:${ODOO_PORT}'
+for attempt in range(3):
+    try:
+        common = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/common')
+        uid = common.authenticate('${DB_NAME}', 'admin', 'admin', {})
+        models = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/object')
+        # Check if chart is set
+        company = models.execute_kw('${DB_NAME}', uid, 'admin', 'res.company', 'search_read', [[]], {'fields': ['chart_template'], 'limit': 1})
+        if company and not company[0].get('chart_template'):
+            models.execute_kw('${DB_NAME}', uid, 'admin', 'res.company', 'write', [[1], {'chart_template': 'generic_coa'}])
+            # Try to load the chart
+            try:
+                models.execute_kw('${DB_NAME}', uid, 'admin', 'account.chart.template', 'try_loading', [['generic_coa']], {'context': {'default_company_id': 1}})
+            except:
+                pass
+        break
+    except:
+        time.sleep(3)
+print('  Chart of accounts configured.')
+" 2>/dev/null
+
+# If chart loading didn't work via RPC, try direct module approach
+ACCOUNT_COUNT=$(sudo -u odoo psql -t -d "${DB_NAME}" -c "SELECT count(*) FROM account_account;" 2>/dev/null | tr -d ' ')
+if [ "${ACCOUNT_COUNT}" = "0" ] || [ -z "${ACCOUNT_COUNT}" ]; then
+    echo "  Chart not loaded yet, re-initializing account module..."
+    sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
+        -u account --stop-after-init 2>&1 | tail -2
+fi
+
+# Step C: Install all FMCG modules
+echo "  Step C: Installing FMCG modules..."
+sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
+    -i fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
+    --stop-after-init 2>&1 | tail -3
+
+# Verify
+ACCOUNT_COUNT=$(sudo -u odoo psql -t -d "${DB_NAME}" -c "SELECT count(*) FROM account_account;" 2>/dev/null | tr -d ' ')
+FMCG_COUNT=$(sudo -u odoo psql -t -d "${DB_NAME}" -c "SELECT count(*) FROM ir_module_module WHERE name LIKE 'fmcg%' AND state='installed';" 2>/dev/null | tr -d ' ')
+echo "  Accounts: ${ACCOUNT_COUNT}, FMCG modules: ${FMCG_COUNT}/10"
+
+if [ "${FMCG_COUNT}" -lt "8" ] 2>/dev/null; then
+    echo -e "${RED}  WARNING: Not all modules installed! Check logs at /var/log/odoo/odoo-${DB_NAME}.log${NC}"
+fi
 
 # Set admin language
 sudo -u postgres psql -d "${DB_NAME}" -c "UPDATE res_partner SET lang='fa_IR' WHERE id IN (SELECT partner_id FROM res_users WHERE id=2);" >/dev/null 2>&1

@@ -45,7 +45,7 @@ chown -R odoo:odoo /opt/fmcg /var/log/odoo
 # Install Odoo modules
 echo "[5/7] Installing Odoo modules (3-5 minutes)..."
 sudo -u odoo python3 /opt/fmcg/odoo/odoo-bin -c /etc/odoo-smoke.conf -d smoke \
-  -i base,account,stock,product,l10n_ir,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
+  -i base,account,stock,stock_account,product,fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
   --stop-after-init --without-demo=all --load-language=fa_IR
 
 # Set admin lang
