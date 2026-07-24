@@ -265,9 +265,20 @@ echo "  Nginx configured."
 
 # ============ Apply Translations ============
 echo -e "${GREEN}[+] Applying Persian translations...${NC}"
-sleep 10  # Wait for Odoo to fully start
+# Wait for Odoo to be fully responsive
+echo "  Waiting for Odoo to start (port ${ODOO_PORT})..."
+for i in $(seq 1 30); do
+    if curl -s "http://localhost:${ODOO_PORT}/web/login" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+done
 cd "${INSTALL_DIR}"
-python3 apply_translations.py "${DB_NAME}" 2>&1 | grep -E "^\s+(Renaming|Setting|Done)" | head -10
+# Patch the translations script to use correct port
+sed -i "s|http://localhost:8069|http://localhost:${ODOO_PORT}|g" apply_translations.py
+python3 apply_translations.py "${DB_NAME}" 2>&1 | grep -v "^$" | tail -20
+# Restore default port in file (for local dev)
+sed -i "s|http://localhost:${ODOO_PORT}|http://localhost:8069|g" apply_translations.py
 echo "  Translations applied."
 
 # ============ Done ============

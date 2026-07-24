@@ -80,6 +80,20 @@ sudo -u odoo npm install --quiet 2>/dev/null
 sudo -u odoo npm run build 2>&1 | tail -2
 sudo systemctl start "fmcg-${DB_NAME}"
 
+# Re-apply translations (in case new ones were added)
+echo "[5/5] Applying translations..."
+ODOO_PORT=$(grep "http_port" "${ODOO_CONF}" | awk -F= '{print $2}' | tr -d ' ')
+[ -z "$ODOO_PORT" ] && ODOO_PORT=8069
+# Wait for Odoo
+for i in $(seq 1 20); do
+    curl -s "http://localhost:${ODOO_PORT}/web/login" >/dev/null 2>&1 && break
+    sleep 2
+done
+cd "${INSTALL_DIR}"
+sed -i "s|http://localhost:8069|http://localhost:${ODOO_PORT}|g" apply_translations.py
+python3 apply_translations.py "${DB_NAME}" 2>&1 | tail -5
+sed -i "s|http://localhost:${ODOO_PORT}|http://localhost:8069|g" apply_translations.py
+
 echo ""
 echo "============================================"
 echo "  Update complete! Data is safe."
