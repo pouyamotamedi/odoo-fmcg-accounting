@@ -376,15 +376,25 @@ export default function FiscalYearPage() {
     // Add inventory value as a debit to stock valuation account if inventory items exist
     let inventoryAccountId: number | undefined;
     if (inventoryItems.length > 0 && inventoryTotalValue > 0) {
-      // Find stock valuation account (usually asset_current with "موجودی" or code starting with 1)
+      // Find stock valuation account (code 110200 - ارزشگذاری موجودی)
+      // Priority: exact code match > name match > any asset_current
       const stockAccounts = balanceSheetAccounts.filter(a => 
-        a.account_type === 'asset_current' && (a.name.includes('موجودی') || a.name.includes('کالا') || a.name.includes('stock') || a.code.startsWith('14'))
+        a.account_type === 'asset_current' && a.code === '110200'
       );
       inventoryAccountId = stockAccounts[0]?.id;
       if (!inventoryAccountId) {
-        // Try to find or create
-        const anyAssetCurrent = balanceSheetAccounts.find(a => a.account_type === 'asset_current');
-        inventoryAccountId = anyAssetCurrent?.id;
+        // Fallback: search by name containing 'ارزش' (valuation)
+        const byName = balanceSheetAccounts.filter(a => 
+          a.account_type === 'asset_current' && (a.name.includes('ارزش') || a.name.includes('valuation'))
+        );
+        inventoryAccountId = byName[0]?.id;
+      }
+      if (!inventoryAccountId) {
+        // Last resort: any asset_current with 'موجودی' in name but NOT 'میانی' (interim)
+        const byStock = balanceSheetAccounts.filter(a => 
+          a.account_type === 'asset_current' && a.name.includes('موجودی') && !a.name.includes('میانی') && !a.name.includes('مبانی')
+        );
+        inventoryAccountId = byStock[0]?.id;
       }
       if (inventoryAccountId) {
         validItems.push({ account_id: inventoryAccountId, account_name: '', account_type: 'asset_current', partner_id: 0, partner_name: '', debit: String(inventoryTotalValue), credit: '', type: 'asset' });
