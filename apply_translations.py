@@ -235,12 +235,20 @@ except:
 # ============ Set Currency to Toman display ============
 print("  Setting currency display...")
 try:
-    irr_ids = models.execute_kw(db, uid, password, 'res.currency', 'search', [[['name', '=', 'IRR']]])
+    # Search including inactive currencies (IRR may be inactive by default)
+    irr_ids = models.execute_kw(db, uid, password, 'res.currency', 'search', [[['name', '=', 'IRR']]], {'context': {'active_test': False}})
     if irr_ids:
-        models.execute_kw(db, uid, password, 'res.currency', 'write', [irr_ids, {'symbol': 'تومان', 'rounding': 1.0}])
-        print("    IRR symbol: تومان")
-except:
-    pass
+        models.execute_kw(db, uid, password, 'res.currency', 'write', [irr_ids, {'active': True, 'symbol': 'تومان', 'rounding': 1.0}])
+        print("    IRR activated + symbol: تومان")
+        # Set as company currency
+        company_ids = models.execute_kw(db, uid, password, 'res.company', 'search', [[]])
+        if company_ids:
+            models.execute_kw(db, uid, password, 'res.company', 'write', [company_ids, {'currency_id': irr_ids[0]}])
+            print("    Company currency set to IRR (تومان)")
+    else:
+        print("    WARNING: IRR currency not found in database")
+except Exception as e:
+    print(f"    Warning: {e}")
 
 # ============ Configure Product Categories for Real-Time Valuation ============
 print("  Configuring product categories for perpetual inventory (real_time + FIFO)...")
