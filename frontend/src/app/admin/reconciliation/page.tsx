@@ -160,7 +160,7 @@ export default function ReconciliationPage() {
           debit: p.credit > 0 ? p.credit : 0,
           credit: p.debit > 0 ? p.debit : 0,
           name: `تسویه: ${p.name || p.move_id?.[1] || ''}`,
-          partner_id: p.partner_id?.[0] || false,
+          partner_id: p.partner_id ? (p.partner_id as [number, string])[0] : false,
         }]);
       }
 
