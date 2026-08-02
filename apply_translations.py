@@ -279,4 +279,16 @@ try:
 except Exception as e:
     print(f"    Warning: {e}")
 
-print("\nDone! All translations applied.")
+# ============ Fix all products to be storable ============
+print("  Ensuring all products are storable (for proper inventory valuation)...")
+try:
+    non_storable = models.execute_kw(db, uid, password, 'product.product', 'search', [[['type', '=', 'consu'], ['is_storable', '=', False]]])
+    if non_storable:
+        models.execute_kw(db, uid, password, 'product.product', 'write', [non_storable, {'is_storable': True}])
+        print(f"    Fixed {len(non_storable)} products to storable")
+    else:
+        print("    All products already storable")
+except Exception as e:
+    print(f"    Warning: {e}")
+
+print("\nDone! All translations and fixes applied.")

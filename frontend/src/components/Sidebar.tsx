@@ -14,6 +14,7 @@ const menuItems = [
   { href: '/admin/people', label: 'اشخاص', icon: '👥' },
   { href: '/admin/accounts', label: 'حساب اشخاص', icon: '📒' },
   { href: '/admin/treasury', label: 'بانک و صندوق', icon: '🏦' },
+  { href: '/admin/reconciliation', label: 'مغایرت‌گیری', icon: '🔄' },
   { href: '/admin/accounting', label: 'اسناد حسابداری', icon: '📋' },
   { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️' },
   { href: '/admin/reports', label: 'گزارش‌ها', icon: '📈' },

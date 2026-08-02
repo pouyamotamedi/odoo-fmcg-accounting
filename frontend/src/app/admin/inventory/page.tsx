@@ -378,6 +378,7 @@ export default function InventoryPage() {
 
   async function handleAddAttr() {
     if (!selectedAttr || selectedValues.length === 0) { alert('ویژگی و مقادیر را انتخاب کنید'); return; }
+    if (selectedValues.length < 2) { alert('حداقل ۲ مقدار برای ویژگی انتخاب کنید.\n\nمثلاً: لیمو نعناع + سیب یخ\n\nبا ۱ مقدار، Odoo واریانت جدید نمیسازد.'); return; }
     setSaving(true);
     try {
       // Check if this attribute already exists on the template - if so, add values to existing line
