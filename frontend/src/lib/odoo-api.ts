@@ -800,31 +800,34 @@ export async function createSalesReturn(values: {
   }
 
   // If waste (not return to stock), use Odoo's scrap mechanism
-  // This properly moves cost from inventory to expense (at cost price, not sale price)
+  // Steps: 1) Return from customer to warehouse, 2) Scrap from warehouse
   if (!values.return_to_stock) {
     try {
-      // First create incoming picking to get items back
-      const pickingTypes = await searchRead('stock.picking.type', [['code', '=', 'incoming']], ['id', 'default_location_src_id', 'default_location_dest_id'], 1);
-      if (pickingTypes && pickingTypes.length > 0) {
-        const pickingType = pickingTypes[0];
-        const srcLocation = pickingType.default_location_src_id?.[0] || false;
-        const destLocation = pickingType.default_location_dest_id?.[0] || false;
+      // Use customer location (like return-to-stock) so account 110300 is used
+      const customerLocs = await searchRead('stock.location', [['usage', '=', 'customer']], ['id'], 1);
+      const internalLocs = await searchRead('stock.location', [['usage', '=', 'internal']], ['id'], 1);
+      const pickingTypes = await searchRead('stock.picking.type', [['code', '=', 'incoming']], ['id'], 1);
 
-        // Create picking to receive items back temporarily
+      if (customerLocs?.length > 0 && internalLocs?.length > 0 && pickingTypes?.length > 0) {
+        const customerLocId = customerLocs[0].id;
+        const internalLocId = internalLocs[0].id;
+        const pickingTypeId = pickingTypes[0].id;
+
+        // Create picking: customer → warehouse (uses 110300)
         const moveLines = values.lines.map((line) => [0, 0, {
           product_id: line.product_id,
           name: 'Return for Scrap',
           product_uom_qty: line.quantity,
-          location_id: srcLocation,
-          location_dest_id: destLocation,
+          location_id: customerLocId,
+          location_dest_id: internalLocId,
         }]);
 
         const pickingId = await create('stock.picking', {
-          picking_type_id: pickingType.id,
+          picking_type_id: pickingTypeId,
           partner_id: partner_id || false,
           origin: `Sales Return (Scrap) ${refundId}`,
-          location_id: srcLocation,
-          location_dest_id: destLocation,
+          location_id: customerLocId,
+          location_dest_id: internalLocId,
           move_ids_without_package: moveLines,
         });
 
@@ -835,20 +838,15 @@ export async function createSalesReturn(values: {
         }
         try { await callMethod('stock.picking', 'button_validate', [[pickingId]]); } catch {}
 
-        // Now scrap each product (moves cost to scrap/expense account)
+        // Now scrap each product from internal location
         for (const line of values.lines) {
           try {
-            // Find internal location
-            const internalLocs = await searchRead('stock.location', [['usage', '=', 'internal']], ['id'], 1);
-            const locId = internalLocs?.[0]?.id;
-            if (locId) {
-              const scrapId = await create('stock.scrap', {
-                product_id: line.product_id,
-                scrap_qty: line.quantity,
-                location_id: locId,
-              });
-              await callMethod('stock.scrap', 'action_validate', [[scrapId]]);
-            }
+            const scrapId = await create('stock.scrap', {
+              product_id: line.product_id,
+              scrap_qty: line.quantity,
+              location_id: internalLocId,
+            });
+            await callMethod('stock.scrap', 'action_validate', [[scrapId]]);
           } catch { /* scrap failed for this item */ }
         }
       }

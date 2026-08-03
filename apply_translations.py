@@ -291,4 +291,33 @@ try:
 except Exception as e:
     print(f"    Warning: {e}")
 
+# ============ Configure Scrap Location Account ============
+print("  Configuring scrap location expense account...")
+try:
+    # Find scrap location
+    scrap_locs = models.execute_kw(db, uid, password, 'stock.location', 'search', [[['scrap_location', '=', True]]])
+    if not scrap_locs:
+        scrap_locs = models.execute_kw(db, uid, password, 'stock.location', 'search', [[['name', 'ilike', 'scrap']]])
+    
+    if scrap_locs:
+        # Find or create expense account for scrap (650000)
+        expense_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '650000']]])
+        if not expense_acc:
+            # Use general expense account 600000
+            expense_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '600000']]])
+        
+        if expense_acc:
+            # Set valuation_in_account_id on scrap location so Odoo debits expense when scrapping
+            models.execute_kw(db, uid, password, 'stock.location', 'write', [scrap_locs, {
+                'valuation_in_account_id': expense_acc[0],
+                'valuation_out_account_id': expense_acc[0],
+            }])
+            print(f"    Scrap location account set to {expense_acc[0]}")
+        else:
+            print("    WARNING: No expense account found for scrap")
+    else:
+        print("    WARNING: No scrap location found")
+except Exception as e:
+    print(f"    Warning: {e}")
+
 print("\nDone! All translations and fixes applied.")
