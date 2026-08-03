@@ -1033,7 +1033,30 @@ export async function getCategories() {
 }
 
 export async function createCategory(name: string, parent_id?: number) {
-  return create('product.category', { name, parent_id: parent_id || false });
+  // First find the stock accounts for proper valuation setup
+  let inputAcc: number | false = false;
+  let outputAcc: number | false = false;
+  let valAcc: number | false = false;
+  try {
+    const accounts = await searchRead('account.account', [['code', 'in', ['110100', '110200', '110300']]], ['id', 'code']);
+    for (const a of (accounts || [])) {
+      if (a.code === '110100') inputAcc = a.id;
+      if (a.code === '110200') valAcc = a.id;
+      if (a.code === '110300') outputAcc = a.id;
+    }
+  } catch {}
+
+  const values: any = {
+    name,
+    parent_id: parent_id || false,
+    property_valuation: 'real_time',
+    property_cost_method: 'fifo',
+  };
+  if (inputAcc) values.property_stock_account_input_categ_id = inputAcc;
+  if (outputAcc) values.property_stock_account_output_categ_id = outputAcc;
+  if (valAcc) values.property_stock_valuation_account_id = valAcc;
+
+  return create('product.category', values);
 }
 
 // ============ Chart of Accounts ============

@@ -403,6 +403,7 @@ export default function PurchasePage() {
         list_price: parseFloat(newProductSellPrice.replace(/[^\d.]/g, '')) || 0,
         fmcg_reorder_threshold: parseInt(newProductThreshold) || 10,
       };
+      if (newProductCategory) productValues.categ_id = newProductCategory;
       if (newProductImage) {
         const reader = new FileReader();
         const base64 = await new Promise<string>((resolve) => {
