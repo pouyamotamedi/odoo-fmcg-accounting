@@ -136,7 +136,8 @@ account_renames = {
     '500300': 'هزینه استهلاک',
     '500400': 'هزینه حقوق و دستمزد',
     '500500': 'هزینه\u200cهای اداری',
-    '600000': 'هزینه\u200cها',
+    '600000': 'هزینه\u200cهای عمومی و اداری',
+    '600010': 'هزینه ضایعات و کسری کالا',
     '611000': 'خرید تجهیزات',
     '612000': 'اجاره',
     '620000': 'کارمزد بانکی',
@@ -300,23 +301,44 @@ try:
         scrap_locs = models.execute_kw(db, uid, password, 'stock.location', 'search', [[['name', 'ilike', 'scrap']]])
     
     if scrap_locs:
-        # Find or create expense account for scrap (650000)
-        expense_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '650000']]])
-        if not expense_acc:
-            # Use general expense account 600000
-            expense_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '600000']]])
+        # Create dedicated scrap expense account (600010) if not exists
+        scrap_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '600010']]])
+        if not scrap_acc:
+            scrap_acc = [models.execute_kw(db, uid, password, 'account.account', 'create', [{
+                'code': '600010',
+                'name': 'هزینه ضایعات و کسری کالا',
+                'account_type': 'expense',
+            }])]
+            print("    Created account 600010: هزینه ضایعات و کسری کالا")
         
-        if expense_acc:
-            # Set valuation_in_account_id on scrap location so Odoo debits expense when scrapping
-            models.execute_kw(db, uid, password, 'stock.location', 'write', [scrap_locs, {
-                'valuation_in_account_id': expense_acc[0],
-                'valuation_out_account_id': expense_acc[0],
-            }])
-            print(f"    Scrap location account set to {expense_acc[0]}")
-        else:
-            print("    WARNING: No expense account found for scrap")
+        # Set scrap location accounts
+        models.execute_kw(db, uid, password, 'stock.location', 'write', [scrap_locs, {
+            'valuation_in_account_id': scrap_acc[0],
+            'valuation_out_account_id': scrap_acc[0],
+        }])
+        print(f"    Scrap location -> 600010 (هزینه ضایعات)")
     else:
         print("    WARNING: No scrap location found")
+except Exception as e:
+    print(f"    Warning: {e}")
+
+# ============ Set COGS Account on Product Categories ============
+# Standard accounting: COGS (500000) separate from operating expenses (600000)
+print("  Setting COGS account (500000) on product categories...")
+try:
+    cogs_acc = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '500000']]])
+    if cogs_acc:
+        # Get all product categories (except expense categories)
+        all_cats = models.execute_kw(db, uid, password, 'product.category', 'search_read', [[]], {'fields': ['id', 'name']})
+        for cat in all_cats:
+            if 'هزینه' in cat['name'] or 'Expense' in cat['name']:
+                continue
+            models.execute_kw(db, uid, password, 'product.category', 'write', [[cat['id']], {
+                'property_account_expense_categ_id': cogs_acc[0],
+            }])
+        print(f"    All product categories -> expense account 500000 (بهای تمام شده)")
+    else:
+        print("    WARNING: Account 500000 not found")
 except Exception as e:
     print(f"    Warning: {e}")
 
