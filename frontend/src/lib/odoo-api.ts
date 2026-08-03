@@ -799,43 +799,21 @@ export async function createSalesReturn(values: {
     } catch { /* fmcg.customer.credit module may not be installed */ }
   }
 
-  // If waste (not return to stock), record an expense journal entry
-  // so the cost goes to the expense account (code 600000)
+  // If waste (not return to stock), use Odoo's scrap mechanism
+  // This properly moves cost from inventory to expense (at cost price, not sale price)
   if (!values.return_to_stock) {
     try {
-      // Find expense account with code 600000
-      const expenseAccounts = await searchRead('account.account', [['code', '=', '600000']], ['id'], 1);
-      if (expenseAccounts && expenseAccounts.length > 0 && values.journal_id) {
-        const expenseAccountId = expenseAccounts[0].id;
-        const totalAmount = values.lines.reduce((sum, l) => sum + l.quantity * l.price_unit, 0);
-
-        // Create an outbound payment to expense account
-        const expensePaymentId = await create('account.payment', {
-          payment_type: 'outbound',
-          partner_type: 'supplier',
-          partner_id: partner_id || false,
-          amount: totalAmount,
-          journal_id: values.journal_id,
-          destination_account_id: expenseAccountId,
-        });
-        await callMethod('account.payment', 'action_post', [[expensePaymentId]]);
-      }
-    } catch { /* expense recording failed, refund still done */ }
-  }
-
-  // If return_to_stock, create a stock return (incoming picking)
-  if (values.return_to_stock) {
-    try {
-      // Find the receipt picking type (incoming)
+      // First create incoming picking to get items back
       const pickingTypes = await searchRead('stock.picking.type', [['code', '=', 'incoming']], ['id', 'default_location_src_id', 'default_location_dest_id'], 1);
       if (pickingTypes && pickingTypes.length > 0) {
         const pickingType = pickingTypes[0];
         const srcLocation = pickingType.default_location_src_id?.[0] || false;
         const destLocation = pickingType.default_location_dest_id?.[0] || false;
 
+        // Create picking to receive items back temporarily
         const moveLines = values.lines.map((line) => [0, 0, {
           product_id: line.product_id,
-          name: 'Return',
+          name: 'Return for Scrap',
           product_uom_qty: line.quantity,
           location_id: srcLocation,
           location_dest_id: destLocation,
@@ -844,18 +822,77 @@ export async function createSalesReturn(values: {
         const pickingId = await create('stock.picking', {
           picking_type_id: pickingType.id,
           partner_id: partner_id || false,
-          origin: `Sales Return ${refundId}`,
+          origin: `Sales Return (Scrap) ${refundId}`,
           location_id: srcLocation,
           location_dest_id: destLocation,
           move_ids_without_package: moveLines,
         });
 
         await callMethod('stock.picking', 'action_confirm', [[pickingId]]);
-        
+        const moves = await searchRead('stock.move', [['picking_id', '=', pickingId]], ['id', 'product_uom_qty']);
+        for (const move of (moves || [])) {
+          try { await write('stock.move', [move.id], { quantity: move.product_uom_qty }); } catch {}
+        }
+        try { await callMethod('stock.picking', 'button_validate', [[pickingId]]); } catch {}
+
+        // Now scrap each product (moves cost to scrap/expense account)
+        for (const line of values.lines) {
+          try {
+            // Find internal location
+            const internalLocs = await searchRead('stock.location', [['usage', '=', 'internal']], ['id'], 1);
+            const locId = internalLocs?.[0]?.id;
+            if (locId) {
+              const scrapId = await create('stock.scrap', {
+                product_id: line.product_id,
+                scrap_qty: line.quantity,
+                location_id: locId,
+              });
+              await callMethod('stock.scrap', 'action_validate', [[scrapId]]);
+            }
+          } catch { /* scrap failed for this item */ }
+        }
+      }
+    } catch { /* waste/scrap recording failed */ }
+  }
+
+  // If return_to_stock, create a stock return FROM CUSTOMER back to warehouse
+  // Using customer location as source ensures Odoo uses account 110300 (stock interim sent)
+  // instead of 110100 (stock interim received) which is for supplier receipts
+  if (values.return_to_stock) {
+    try {
+      // Find customer location and internal (warehouse) location
+      const customerLocs = await searchRead('stock.location', [['usage', '=', 'customer']], ['id'], 1);
+      const internalLocs = await searchRead('stock.location', [['usage', '=', 'internal']], ['id'], 1);
+      const pickingTypes = await searchRead('stock.picking.type', [['code', '=', 'incoming']], ['id'], 1);
+
+      if (customerLocs?.length > 0 && internalLocs?.length > 0 && pickingTypes?.length > 0) {
+        const customerLocId = customerLocs[0].id;
+        const internalLocId = internalLocs[0].id;
+        const pickingTypeId = pickingTypes[0].id;
+
+        const moveLines = values.lines.map((line) => [0, 0, {
+          product_id: line.product_id,
+          name: 'Customer Return',
+          product_uom_qty: line.quantity,
+          location_id: customerLocId,
+          location_dest_id: internalLocId,
+        }]);
+
+        const pickingId = await create('stock.picking', {
+          picking_type_id: pickingTypeId,
+          partner_id: partner_id || false,
+          origin: `Sales Return ${refundId}`,
+          location_id: customerLocId,
+          location_dest_id: internalLocId,
+          move_ids_without_package: moveLines,
+        });
+
+        await callMethod('stock.picking', 'action_confirm', [[pickingId]]);
+
         // Set quantities done
         const moves = await searchRead('stock.move', [['picking_id', '=', pickingId]], ['id', 'product_uom_qty']);
         for (const move of (moves || [])) {
-          await write('stock.move', [move.id], { quantity: move.product_uom_qty });
+          try { await write('stock.move', [move.id], { quantity: move.product_uom_qty }); } catch {}
         }
 
         try {
