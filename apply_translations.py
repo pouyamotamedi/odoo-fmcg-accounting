@@ -138,16 +138,18 @@ account_renames = {
     '500500': 'هزینه\u200cهای اداری',
     '600000': 'هزینه\u200cهای عمومی و اداری',
     '600010': 'هزینه ضایعات و کسری کالا',
-    '611000': 'خرید تجهیزات',
+    '611000': 'هزینه ملزومات مصرفی',
     '612000': 'اجاره',
     '620000': 'کارمزد بانکی',
-    '630000': 'هزینه حقوق',
+    '630000': 'هزینه حقوق و دستمزد',
     '641000': 'زیان تسعیر ارز',
     '642000': 'زیان اختلاف نقدی',
-    '643000': 'سود تخفیف نقدی',
+    '643000': 'زیان تخفیف نقدی',
     '961000': 'هزینه تحقیق و توسعه',
     '962000': 'هزینه\u200cهای فروش',
     '999999': 'سود (زیان) تخصیص نیافته',
+    '211100': 'سایر حساب\u200cهای پرداختنی',
+    '443000': 'سود تخفیف نقدی',
 }
 
 for code, fa_name in account_renames.items():
@@ -155,6 +157,39 @@ for code, fa_name in account_renames.items():
     if ids:
         models.execute_kw(db, uid, password, 'account.account', 'write', [ids, {'name': fa_name}])
         print(f"    {code}: {fa_name}")
+
+# ============ Create Missing Accounts (IFRS compliant for retail) ============
+print("  Creating missing accounts...")
+new_accounts = [
+    {'code': '101600', 'name': 'تنخواه\u200cگردان', 'account_type': 'asset_cash'},
+    {'code': '151100', 'name': 'استهلاک انباشته دارایی\u200cهای ثابت', 'account_type': 'asset_fixed'},
+    {'code': '410000', 'name': 'تخفیفات فروش', 'account_type': 'expense'},
+    {'code': '630100', 'name': 'هزینه پورسانت و پاداش فروش', 'account_type': 'expense'},
+    {'code': '650000', 'name': 'هزینه استهلاک', 'account_type': 'expense'},
+]
+for acc in new_accounts:
+    existing = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', acc['code']]]])
+    if not existing:
+        try:
+            models.execute_kw(db, uid, password, 'account.account', 'create', [acc])
+            print(f"    Created {acc['code']}: {acc['name']}")
+        except Exception as e:
+            print(f"    Warning creating {acc['code']}: {e}")
+    else:
+        # Ensure name is correct
+        models.execute_kw(db, uid, password, 'account.account', 'write', [existing, {'name': acc['name']}])
+
+# ============ Deactivate Unused Accounts (production/R&D - not needed for retail) ============
+print("  Deactivating unused accounts (production/R&D)...")
+deactivate_codes = ['110400', '110500', '961000', '962000']
+for code in deactivate_codes:
+    ids = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', code]]])
+    if ids:
+        try:
+            models.execute_kw(db, uid, password, 'account.account', 'write', [ids, {'deprecated': True}])
+            print(f"    Deactivated {code}")
+        except:
+            pass
 
 # ============ Product Category Renames ============
 print("  Renaming product categories...")
