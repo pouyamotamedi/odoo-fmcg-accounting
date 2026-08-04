@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProducts, getPartners, createSalesReturn, getSalesReturns, getBankCashBalances } from '@/lib/odoo-api';
+import { getProducts, getPartners, createSalesReturn, getSalesReturns, getBankCashBalances, searchRead } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 
 interface ReturnItem {
@@ -24,6 +24,78 @@ interface Journal {
   name: string;
   type: string;
   fmcg_running_balance?: number;
+}
+
+function ReturnHistoryItem({ item }: { item: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const [lines, setLines] = useState<any[]>([]);
+  const [loadingLines, setLoadingLines] = useState(false);
+
+  async function toggle() {
+    if (expanded) { setExpanded(false); return; }
+    setExpanded(true);
+    if (lines.length > 0) return;
+    setLoadingLines(true);
+    try {
+      const data = await searchRead('account.move.line', [
+        ['move_id', '=', item.id],
+        ['product_id', '!=', false],
+        ['price_subtotal', '!=', 0],
+      ], ['product_id', 'quantity', 'price_unit', 'price_subtotal']);
+      setLines(data || []);
+    } catch { setLines([]); }
+    setLoadingLines(false);
+  }
+
+  const narration = item.narration ? item.narration.replace(/<[^>]*>/g, '').trim() : '';
+  const isScrap = narration.includes('ضایعات') || narration.includes('scrap') || narration.includes('waste');
+  const isReturnToStock = !isScrap && narration !== '';
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer" onClick={toggle}>
+        <span className="text-gray-400 text-xs">{expanded ? '▼' : '◀'}</span>
+        <div className="flex-1 flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-xs text-gray-500 font-mono">{item.name}</span>
+          <span>{item.partner_id ? item.partner_id[1] : 'مشتری عمومی'}</span>
+          <span className="font-bold">{formatPrice(item.amount_total)}</span>
+          <span className="text-xs text-gray-400">{item.invoice_date ? toJalali(item.invoice_date) : ''}</span>
+        </div>
+        <div className="flex gap-2">
+          {narration && (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isScrap ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+              {isScrap ? '🗑️ ضایعات' : '📦 برگشت به انبار'}
+            </span>
+          )}
+        </div>
+      </div>
+      {expanded && (
+        <div className="px-8 pb-3">
+          {loadingLines ? <div className="text-xs text-gray-400">بارگذاری...</div> : lines.length === 0 ? <div className="text-xs text-gray-400">بدون آیتم</div> : (
+            <table className="w-full text-xs border rounded overflow-hidden">
+              <thead className="bg-gray-50"><tr>
+                <th className="text-right p-2">کالا</th>
+                <th className="text-right p-2">تعداد</th>
+                <th className="text-right p-2">قیمت واحد</th>
+                <th className="text-right p-2">مبلغ</th>
+              </tr></thead>
+              <tbody>
+                {lines.map((l: any) => (
+                  <tr key={l.id} className="border-t">
+                    <td className="p-2 font-medium">{l.product_id?.[1] || '—'}</td>
+                    <td className="p-2">{toPersianDigits(Math.abs(l.quantity))}</td>
+                    <td className="p-2">{formatPrice(Math.abs(l.price_unit))}</td>
+                    <td className="p-2 font-bold">{formatPrice(Math.abs(l.price_subtotal))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {narration && <div className="text-[10px] text-gray-400 mt-2">توضیحات: {narration}</div>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ReturnsPage() {
@@ -145,23 +217,11 @@ export default function ReturnsPage() {
               <div className="px-4 py-3 bg-gray-50 border-b">
                 <h3 className="text-sm font-bold text-slate-700">📋 سوابق برگشت‌ها</h3>
               </div>
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b"><tr>
-                  <th className="text-right p-3">شماره</th>
-                  <th className="text-right p-3">مشتری</th>
-                  <th className="text-right p-3">مبلغ</th>
-                  <th className="text-right p-3">تاریخ</th>
-                  <th className="text-right p-3">توضیحات</th>
-                </tr></thead>
-                <tbody>{returnHistory.map((r: any) => (
-                  <tr key={r.id} className="border-b hover:bg-gray-50">
-                    <td className="p-3 text-xs">{r.name}</td>
-                    <td className="p-3">{r.partner_id ? r.partner_id[1] : 'مشتری عمومی'}</td>
-                    <td className="p-3 font-bold">{formatPrice(r.amount_total)}</td>
-                    <td className="p-3">{r.invoice_date ? toJalali(r.invoice_date) : '—'}</td>
-                    <td className="p-3 text-xs text-gray-500">{r.narration ? r.narration.replace(/<[^>]*>/g, '').trim() : '—'}</td>
-                  </tr>))}</tbody>
-              </table>
+              <div className="divide-y">
+                {returnHistory.map((r: any) => (
+                  <ReturnHistoryItem key={r.id} item={r} />
+                ))}
+              </div>
             </div>
           ) : (
             <div className="bg-white rounded-xl p-8 text-center text-gray-400 border border-dashed border-gray-300">
