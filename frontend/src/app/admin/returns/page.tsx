@@ -14,6 +14,7 @@ interface ReturnItem {
 interface OdooProduct {
   id: number;
   name: string;
+  display_name?: string;
   barcode: string | false;
   list_price: number;
 }
