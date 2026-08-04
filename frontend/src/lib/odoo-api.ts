@@ -705,7 +705,7 @@ export async function getPartnerBalances() {
  */
 export async function getSalesReturns() {
   return searchRead('account.move', [['move_type', '=', 'out_refund']], [
-    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'narration', 'create_date',
+    'name', 'partner_id', 'amount_total', 'invoice_date', 'state', 'narration', 'create_date', 'invoice_line_ids',
   ], 50, 0, 'create_date desc');
 }
 

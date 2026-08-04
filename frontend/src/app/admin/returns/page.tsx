@@ -150,15 +150,15 @@ export default function ReturnsPage() {
                   <th className="text-right p-3">مشتری</th>
                   <th className="text-right p-3">مبلغ</th>
                   <th className="text-right p-3">تاریخ</th>
-                  <th className="text-right p-3">دلیل</th>
+                  <th className="text-right p-3">توضیحات</th>
                 </tr></thead>
                 <tbody>{returnHistory.map((r: any) => (
                   <tr key={r.id} className="border-b hover:bg-gray-50">
-                    <td className="p-3">{r.name}</td>
+                    <td className="p-3 text-xs">{r.name}</td>
                     <td className="p-3">{r.partner_id ? r.partner_id[1] : 'مشتری عمومی'}</td>
                     <td className="p-3 font-bold">{formatPrice(r.amount_total)}</td>
                     <td className="p-3">{r.invoice_date ? toJalali(r.invoice_date) : '—'}</td>
-                    <td className="p-3 text-xs text-gray-500">{r.narration || '—'}</td>
+                    <td className="p-3 text-xs text-gray-500">{r.narration ? r.narration.replace(/<[^>]*>/g, '').trim() : '—'}</td>
                   </tr>))}</tbody>
               </table>
             </div>
