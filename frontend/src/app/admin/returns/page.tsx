@@ -30,6 +30,7 @@ function ReturnHistoryItem({ item }: { item: any }) {
   const [expanded, setExpanded] = useState(false);
   const [lines, setLines] = useState<any[]>([]);
   const [loadingLines, setLoadingLines] = useState(false);
+  const [returnType, setReturnType] = useState<'scrap' | 'stock' | 'unknown'>('unknown');
 
   async function toggle() {
     if (expanded) { setExpanded(false); return; }
@@ -37,21 +38,49 @@ function ReturnHistoryItem({ item }: { item: any }) {
     if (lines.length > 0) return;
     setLoadingLines(true);
     try {
-      // Only get income account lines (400000 = revenue lines = actual products sold/returned)
+      // Get product lines (income accounts only)
       const data = await searchRead('account.move.line', [
         ['move_id', '=', item.id],
         ['product_id', '!=', false],
         ['account_id.account_type', 'in', ['income', 'income_other']],
       ], ['product_id', 'quantity', 'price_unit', 'price_subtotal']);
       setLines(data || []);
+
+      // Detect return type: check if there's a scrap record linked to this refund
+      const narr = (item.narration || '').toLowerCase();
+      if (narr.includes('ضایعات') || narr.includes('scrap') || narr.includes('waste')) {
+        setReturnType('scrap');
+      } else {
+        // Check if stock.scrap exists for products in this period
+        try {
+          const scraps = await searchRead('stock.scrap', [
+            ['create_date', '>=', item.create_date || item.invoice_date],
+          ], ['id'], 1);
+          // Also check for picking with origin containing this refund
+          const pickings = await searchRead('stock.picking', [
+            ['origin', 'ilike', `Sales Return ${item.id}`],
+          ], ['id', 'origin'], 1);
+          
+          if (pickings && pickings.length > 0) {
+            // Check if origin says "Scrap"
+            const origin = pickings[0].origin || '';
+            if (origin.includes('Scrap')) setReturnType('scrap');
+            else setReturnType('stock');
+          } else {
+            setReturnType('stock');
+          }
+        } catch {
+          setReturnType('stock');
+        }
+      }
     } catch { setLines([]); }
     setLoadingLines(false);
   }
 
   const narration = item.narration ? item.narration.replace(/<[^>]*>/g, '').trim() : '';
-  // Detect scrap: check if narration mentions waste/scrap, or if there's no stock picking for this return
-  const isScrap = narration.includes('ضایعات') || narration.includes('scrap') || narration.includes('waste') || narration.includes('Scrap');
-  const isReturnToStock = !isScrap && narration !== '';
+  // Quick detect from narration without expanding
+  const quickIsScrap = narration.includes('ضایعات') || narration.includes('scrap') || narration.includes('Scrap');
+  const displayType = returnType !== 'unknown' ? returnType : (quickIsScrap ? 'scrap' : 'stock');
 
   return (
     <div>
@@ -62,9 +91,10 @@ function ReturnHistoryItem({ item }: { item: any }) {
           <span>{item.partner_id ? item.partner_id[1] : 'مشتری عمومی'}</span>
           <span className="font-bold">{formatPrice(item.amount_total)}</span>
           <span className="text-xs text-gray-400">{item.invoice_date ? toJalali(item.invoice_date) : ''}</span>
+          {narration && <span className="text-xs text-gray-400">| {narration}</span>}
         </div>
         <div className="flex gap-2">
-          {isScrap ? (
+          {displayType === 'scrap' ? (
             <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-100 text-red-700">🗑️ ضایعات</span>
           ) : (
             <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-green-100 text-green-700">📦 برگشت به انبار</span>
