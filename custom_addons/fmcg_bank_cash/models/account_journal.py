@@ -29,11 +29,10 @@ class AccountJournal(models.Model):
     fmcg_running_balance = fields.Monetary(
         string='Running Balance',
         compute='_compute_running_balance',
-        store=True,
-        help='Current balance = Opening balance + sum of all transactions',
+        store=False,
+        help='Current balance calculated from accounting entries',
     )
 
-    @api.depends('fmcg_opening_balance')
     def _compute_running_balance(self):
         """Calculate running balance from accounting entries.
         
