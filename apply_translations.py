@@ -191,6 +191,23 @@ for code in deactivate_codes:
         except:
             pass
 
+# ============ Fix Account Types (443000 and 643000 swapped) ============
+print("  Fixing account types for discount accounts...")
+try:
+    # 443000 should be income type (سود تخفیف نقدی = درآمد)
+    acc_443 = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '443000']]])
+    if acc_443:
+        models.execute_kw(db, uid, password, 'account.account', 'write', [acc_443, {'account_type': 'income_other'}])
+        print("    443000: type -> income_other (سود تخفیف نقدی)")
+
+    # 643000 should be expense type (زیان تخفیف نقدی = هزینه)
+    acc_643 = models.execute_kw(db, uid, password, 'account.account', 'search', [[['code', '=', '643000']]])
+    if acc_643:
+        models.execute_kw(db, uid, password, 'account.account', 'write', [acc_643, {'account_type': 'expense'}])
+        print("    643000: type -> expense (زیان تخفیف نقدی)")
+except Exception as e:
+    print(f"    Warning: {e}")
+
 # ============ Product Category Renames ============
 print("  Renaming product categories...")
 category_renames = {

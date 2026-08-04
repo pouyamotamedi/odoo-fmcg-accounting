@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getAccounts, createAccount, updateAccount, deleteAccount, searchRead } from '@/lib/odoo-api';
+import { getAccounts, createAccount, updateAccount, deleteAccount, searchRead, write } from '@/lib/odoo-api';
 import { toPersianDigits } from '@/lib/utils';
 
 const ACCOUNT_TYPE_OPTIONS = [
@@ -272,6 +272,20 @@ export default function ChartOfAccountsPage() {
                           className="text-[11px] bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200"
                         >
                           غیرفعال
+                        </button>
+                      )}
+                      {account.deprecated && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await write('account.account', [account.id], { deprecated: false });
+                              showMessage('حساب فعال شد');
+                              await load();
+                            } catch (e: any) { alert(e.message || 'خطا'); }
+                          }}
+                          className="text-[11px] bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200"
+                        >
+                          فعال‌سازی
                         </button>
                       )}
                     </div>
