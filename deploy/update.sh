@@ -72,13 +72,17 @@ sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_N
     --stop-after-init 2>&1 | grep -E "^(INFO|ERROR)" | tail -3
 sudo systemctl start "odoo-${DB_NAME}"
 
-# Rebuild frontend
+# Rebuild frontend (without stopping service - only restart after successful build)
 echo "[4/4] Rebuilding frontend..."
-sudo systemctl stop "fmcg-${DB_NAME}"
 cd "${INSTALL_DIR}/frontend"
 sudo -u odoo npm install --quiet 2>/dev/null
 sudo -u odoo npm run build 2>&1 | tail -2
-sudo systemctl start "fmcg-${DB_NAME}"
+if [ $? -eq 0 ]; then
+  sudo systemctl restart "fmcg-${DB_NAME}" "odoo-${DB_NAME}"
+  echo "  Services restarted."
+else
+  echo "  ERROR: Build failed! Services NOT restarted (old version still running)."
+fi
 
 # Re-apply translations (in case new ones were added)
 echo "[5/5] Applying translations..."
