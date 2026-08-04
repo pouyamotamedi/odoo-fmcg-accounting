@@ -762,11 +762,15 @@ export async function createSalesReturn(values: {
     }
   }
 
+  const refundNarration = values.return_to_stock 
+    ? (values.note || 'برگشت به انبار') 
+    : (values.note ? `ضایعات - ${values.note}` : 'ضایعات');
+
   const refundId = await create('account.move', {
     move_type: 'out_refund',
     partner_id: partner_id,
     invoice_line_ids: refund_lines,
-    narration: values.note || false,
+    narration: refundNarration,
   });
 
   await confirmInvoice(refundId);

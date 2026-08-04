@@ -37,10 +37,11 @@ function ReturnHistoryItem({ item }: { item: any }) {
     if (lines.length > 0) return;
     setLoadingLines(true);
     try {
+      // Only get income account lines (400000 = revenue lines = actual products sold/returned)
       const data = await searchRead('account.move.line', [
         ['move_id', '=', item.id],
         ['product_id', '!=', false],
-        ['price_subtotal', '!=', 0],
+        ['account_id.account_type', 'in', ['income', 'income_other']],
       ], ['product_id', 'quantity', 'price_unit', 'price_subtotal']);
       setLines(data || []);
     } catch { setLines([]); }
@@ -48,7 +49,8 @@ function ReturnHistoryItem({ item }: { item: any }) {
   }
 
   const narration = item.narration ? item.narration.replace(/<[^>]*>/g, '').trim() : '';
-  const isScrap = narration.includes('ضایعات') || narration.includes('scrap') || narration.includes('waste');
+  // Detect scrap: check if narration mentions waste/scrap, or if there's no stock picking for this return
+  const isScrap = narration.includes('ضایعات') || narration.includes('scrap') || narration.includes('waste') || narration.includes('Scrap');
   const isReturnToStock = !isScrap && narration !== '';
 
   return (
@@ -62,10 +64,10 @@ function ReturnHistoryItem({ item }: { item: any }) {
           <span className="text-xs text-gray-400">{item.invoice_date ? toJalali(item.invoice_date) : ''}</span>
         </div>
         <div className="flex gap-2">
-          {narration && (
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isScrap ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-              {isScrap ? '🗑️ ضایعات' : '📦 برگشت به انبار'}
-            </span>
+          {isScrap ? (
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-100 text-red-700">🗑️ ضایعات</span>
+          ) : (
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-green-100 text-green-700">📦 برگشت به انبار</span>
           )}
         </div>
       </div>
