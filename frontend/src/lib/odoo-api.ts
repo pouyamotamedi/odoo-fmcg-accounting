@@ -316,18 +316,17 @@ export async function getBankCashBalances() {
   }
 
   // Calculate real accounting balance for each journal
-  // Sum entries from: 1) journal's default account (e.g. 101401 bank)
-  //   - This captures opening entries posted via Miscellaneous journal
-  // 2) outstanding payment/receipt accounts (asset_current) in this journal
-  //   - This captures payments/receipts not yet reconciled to the main account
-  // We ONLY count liquidity-type accounts (asset_cash + asset_current)
-  // to avoid counting expense/income counterparts that live in the same journal
+  // The Odoo backend now computes fmcg_running_balance correctly
+  // (from account entries + outstanding). This client-side calculation
+  // is a fallback in case the backend module is not updated yet.
   for (const j of (journals || [])) {
+    // If Odoo already computed a non-zero balance, trust it
+    if (j.fmcg_running_balance && j.fmcg_running_balance !== 0) continue;
+    
     try {
       const accountId = j.default_account_id?.[0];
       if (accountId) {
         // Query 1: All posted entries on the journal's default account (from ANY journal)
-        // This gets: opening entries, reconciled payments, direct transfers
         const lines = await searchRead('account.move.line', [
           ['account_id', '=', accountId],
           ['parent_state', '=', 'posted'],
@@ -335,7 +334,6 @@ export async function getBankCashBalances() {
         const accountBalance = (lines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
 
         // Query 2: Outstanding payment/receipt lines in this journal
-        // Only asset_current accounts (101403/101404) - NOT expense/income counterparts
         const outstandingLines = await searchRead('account.move.line', [
           ['journal_id', '=', j.id],
           ['parent_state', '=', 'posted'],
@@ -344,13 +342,12 @@ export async function getBankCashBalances() {
         ], ['debit', 'credit'], 0);
         const outstandingBalance = (outstandingLines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
 
-        // Total = main account balance + outstanding (pending) balance
         j.fmcg_running_balance = accountBalance + outstandingBalance;
       } else {
         j.fmcg_running_balance = j.fmcg_opening_balance || 0;
       }
-    } catch {
-      // Keep existing fmcg_running_balance if calculation fails
+    } catch (e: any) {
+      console.error(`Treasury balance calc error for ${j.name}:`, e?.message || e);
     }
   }
 

@@ -35,17 +35,37 @@ class AccountJournal(models.Model):
 
     @api.depends('fmcg_opening_balance')
     def _compute_running_balance(self):
-        """Calculate running balance as opening balance + sum of transactions."""
+        """Calculate running balance from accounting entries.
+        
+        Uses TWO sources:
+        1. Journal's default account (e.g. 101401 bank) - captures opening entries
+           posted via Miscellaneous journal + reconciled payments
+        2. Outstanding payment/receipt accounts (asset_current type) in this journal -
+           captures payments/receipts not yet reconciled to the main account
+        """
         for journal in self:
             if journal.type in ('bank', 'cash'):
-                # Sum all posted move lines for this journal's default account
-                domain = [
-                    ('journal_id', '=', journal.id),
-                    ('parent_state', '=', 'posted'),
-                ]
-                move_lines = self.env['account.move.line'].search(domain)
-                total = sum(move_lines.mapped('debit')) - sum(move_lines.mapped('credit'))
-                journal.fmcg_running_balance = journal.fmcg_opening_balance + total
+                account_id = journal.default_account_id.id if journal.default_account_id else False
+                if account_id:
+                    # Query 1: All posted entries on the default account (from ANY journal)
+                    lines_1 = self.env['account.move.line'].search([
+                        ('account_id', '=', account_id),
+                        ('parent_state', '=', 'posted'),
+                    ])
+                    account_balance = sum(lines_1.mapped('debit')) - sum(lines_1.mapped('credit'))
+
+                    # Query 2: Outstanding (asset_current) entries in THIS journal
+                    lines_2 = self.env['account.move.line'].search([
+                        ('journal_id', '=', journal.id),
+                        ('parent_state', '=', 'posted'),
+                        ('account_id', '!=', account_id),
+                        ('account_id.account_type', 'in', ['asset_current']),
+                    ])
+                    outstanding_balance = sum(lines_2.mapped('debit')) - sum(lines_2.mapped('credit'))
+
+                    journal.fmcg_running_balance = account_balance + outstanding_balance
+                else:
+                    journal.fmcg_running_balance = journal.fmcg_opening_balance
             else:
                 journal.fmcg_running_balance = 0.0
 
