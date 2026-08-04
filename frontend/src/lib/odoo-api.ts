@@ -315,24 +315,40 @@ export async function getBankCashBalances() {
     ]);
   }
 
-  // Calculate real accounting balance for each journal from account.move.line
-  // In Odoo 18, payments go through "Outstanding Payments" account (asset_current),
-  // NOT directly to the journal's default_account_id (asset_cash).
-  // So we must sum ALL lines in the journal excluding payable/receivable counterparts.
+  // Calculate real accounting balance for each journal
+  // Sum entries from: 1) journal's default account (e.g. 101401 bank)
+  //   - This captures opening entries posted via Miscellaneous journal
+  // 2) outstanding payment/receipt accounts (asset_current) in this journal
+  //   - This captures payments/receipts not yet reconciled to the main account
+  // We ONLY count liquidity-type accounts (asset_cash + asset_current)
+  // to avoid counting expense/income counterparts that live in the same journal
   for (const j of (journals || [])) {
     try {
-      // Get all posted move lines for this journal, excluding the partner-side entries
-      // (payable/receivable). This gives us the liquidity side (cash/bank/outstanding).
-      const lines = await searchRead('account.move.line', [
-        ['journal_id', '=', j.id],
-        ['parent_state', '=', 'posted'],
-        ['account_id.account_type', 'not in', ['asset_receivable', 'liability_payable']],
-      ], ['debit', 'credit'], 0);
-      // Negative balance = money went out (outbound payments)
-      const balance = (lines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
-      j.computed_balance = balance;
-      // Use computed balance, adding opening balance
-      j.fmcg_running_balance = j.computed_balance + (j.fmcg_opening_balance || 0);
+      const accountId = j.default_account_id?.[0];
+      if (accountId) {
+        // Query 1: All posted entries on the journal's default account (from ANY journal)
+        // This gets: opening entries, reconciled payments, direct transfers
+        const lines = await searchRead('account.move.line', [
+          ['account_id', '=', accountId],
+          ['parent_state', '=', 'posted'],
+        ], ['debit', 'credit'], 0);
+        const accountBalance = (lines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
+
+        // Query 2: Outstanding payment/receipt lines in this journal
+        // Only asset_current accounts (101403/101404) - NOT expense/income counterparts
+        const outstandingLines = await searchRead('account.move.line', [
+          ['journal_id', '=', j.id],
+          ['parent_state', '=', 'posted'],
+          ['account_id', '!=', accountId],
+          ['account_id.account_type', 'in', ['asset_current']],
+        ], ['debit', 'credit'], 0);
+        const outstandingBalance = (outstandingLines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
+
+        // Total = main account balance + outstanding (pending) balance
+        j.fmcg_running_balance = accountBalance + outstandingBalance;
+      } else {
+        j.fmcg_running_balance = j.fmcg_opening_balance || 0;
+      }
     } catch {
       // Keep existing fmcg_running_balance if calculation fails
     }
