@@ -69,7 +69,7 @@ export default function ReturnsPage() {
   );
 
   const filteredProducts = products.filter(
-    (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
+    (p) => (p.display_name || p.name).includes(search) || p.name.includes(search) || (p.barcode && p.barcode.includes(search))
   );
 
   const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -80,7 +80,7 @@ export default function ReturnsPage() {
       if (existing) {
         return prev.map((i) => (i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
       }
-      return [...prev, { id: product.id, name: product.name, price: product.list_price, quantity: 1 }];
+      return [...prev, { id: product.id, name: product.display_name || product.name, price: product.list_price, quantity: 1 }];
     });
   }
 
@@ -192,7 +192,7 @@ export default function ReturnsPage() {
                     onClick={() => addItem(p)}
                     className="bg-gray-50 rounded-lg p-3 text-center border-2 border-transparent hover:border-indigo-400 transition"
                   >
-                    <div className="text-xs font-medium text-gray-800">{p.name}</div>
+                    <div className="text-xs font-medium text-gray-800">{p.display_name || p.name}</div>
                     <div className="text-xs text-green-600 font-bold mt-1">{formatPrice(p.list_price)}</div>
                   </button>
                 ))}
