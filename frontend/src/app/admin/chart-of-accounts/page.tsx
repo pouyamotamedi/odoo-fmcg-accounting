@@ -31,6 +31,8 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   asset_fixed: 'دارایی ثابت',
   asset_prepayments: 'پیش‌پرداخت',
   equity_unaffected: 'سود و زیان انباشته',
+  liability_credit_card: 'کارت اعتباری',
+  expense_depreciation: 'هزینه استهلاک',
 };
 
 const RENAME_MAPPINGS: { code: string; persianName: string }[] = [
