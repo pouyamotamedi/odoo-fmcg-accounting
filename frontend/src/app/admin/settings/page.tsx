@@ -288,6 +288,13 @@ export default function SettingsPage() {
           <p className="text-[10px] text-gray-400 mt-2">بکاپ خودکار: هر روز ساعت ۳ صبح (در صورت فعال بودن cron روی سرور)</p>
         </div>
 
+        {/* Seller Menu Access Control */}
+        <div className="bg-white rounded-xl p-6 border border-gray-100">
+          <h3 className="font-bold text-sm mb-4">🔐 دسترسی فروشنده‌ها به منوها</h3>
+          <p className="text-xs text-gray-500 mb-4">مشخص کنید فروشنده‌ها به کدام منوهای پنل مدیریت دسترسی داشته باشند. فروشنده‌ها فقط از طریق صندوق فروش وارد می‌شوند.</p>
+          <SellerMenuAccess />
+        </div>
+
         {/* Actions */}
         <div className="flex gap-3 flex-wrap">
           <button onClick={handleSave} disabled={saving} className="bg-indigo-500 text-white px-6 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition disabled:opacity-50">
@@ -297,6 +304,66 @@ export default function SettingsPage() {
             🔄 اجرای مجدد راه‌اندازی
           </Link>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function SellerMenuAccess() {
+  const allMenus = [
+    { key: 'dashboard', label: 'داشبورد' },
+    { key: 'purchase', label: 'فاکتور خرید' },
+    { key: 'inventory', label: 'انبار و کالاها' },
+    { key: 'people', label: 'اشخاص' },
+    { key: 'accounts', label: 'حساب اشخاص' },
+    { key: 'treasury', label: 'بانک و صندوق' },
+    { key: 'reconciliation', label: 'مغایرت‌گیری' },
+    { key: 'accounting', label: 'اسناد حسابداری' },
+    { key: 'chart-of-accounts', label: 'سرفصل حساب‌ها' },
+    { key: 'reports', label: 'گزارش‌ها' },
+    { key: 'analytics', label: 'تحلیل مدیریتی' },
+    { key: 'returns', label: 'برگشت از فروش' },
+    { key: 'discounts', label: 'تخفیفات' },
+    { key: 'stock-count', label: 'انبارگردانی' },
+    { key: 'fiscal-year', label: 'سال مالی' },
+    { key: 'settings', label: 'تنظیمات' },
+  ];
+
+  const [allowed, setAllowed] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('seller_allowed_menus');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  function toggle(key: string) {
+    setAllowed(prev => {
+      const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
+      localStorage.setItem('seller_allowed_menus', JSON.stringify(next));
+      return next;
+    });
+  }
+
+  const noneSelected = allowed.length === 0;
+
+  return (
+    <div>
+      <p className="text-[11px] text-amber-600 mb-3">
+        {noneSelected ? '⚠️ هیچ منویی انتخاب نشده — فروشنده‌ها فقط به صندوق فروش دسترسی دارند.' : `✅ ${allowed.length} منو فعال برای فروشنده‌ها`}
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {allMenus.map(menu => (
+          <label key={menu.key} className="flex items-center gap-2 text-xs cursor-pointer p-2 rounded-lg border border-gray-100 hover:bg-gray-50">
+            <input
+              type="checkbox"
+              checked={allowed.includes(menu.key)}
+              onChange={() => toggle(menu.key)}
+              className="w-3.5 h-3.5 rounded"
+            />
+            <span>{menu.label}</span>
+          </label>
+        ))}
       </div>
     </div>
   );

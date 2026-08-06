@@ -5,6 +5,8 @@ import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
+import { useAuthStore } from '@/stores/auth-store';
+import { logout as odooLogout } from '@/lib/odoo-api';
 import Link from 'next/link';
 
 interface OdooProduct {
@@ -474,13 +476,20 @@ export default function PosPage() {
             <span className={`text-xs ${isOnline ? 'text-green-400' : 'text-red-400'}`}>
               {isOnline ? '🟢 آنلاین' : '🔴 آفلاین'}
             </span>
-            <Link href="/admin" className="text-xs text-slate-400 hover:text-white">
-              بازگشت به پنل ←
-            </Link>
+            {useAuthStore.getState().isAdmin && (
+              <Link href="/admin" className="text-xs text-slate-400 hover:text-white">
+                بازگشت به پنل ←
+              </Link>
+            )}
             <button onClick={async () => {
               try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','payment_state','narration'], 30, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
               setShowSalesHistory(true);
             }} className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded">📋 سوابق</button>
+            <button onClick={async () => {
+              try { await odooLogout(); } catch {}
+              useAuthStore.getState().logout();
+              window.location.href = '/login';
+            }} className="text-xs bg-red-600/80 hover:bg-red-700 px-2 py-1 rounded">🚪 خروج</button>
           </div>
         </header>
 

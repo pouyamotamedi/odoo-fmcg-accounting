@@ -9,8 +9,11 @@ interface AuthState {
   name: string;
   username: string;
   role: UserRole;
-  login: (uid: number, name: string, username: string, role: UserRole) => void;
+  isAdmin: boolean;
+  allowedMenus: string[]; // empty = all allowed (for admin)
+  login: (uid: number, name: string, username: string, role: UserRole, isAdmin: boolean) => void;
   logout: () => void;
+  setAllowedMenus: (menus: string[]) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -21,10 +24,13 @@ export const useAuthStore = create<AuthState>()(
       name: '',
       username: '',
       role: 'seller',
-      login: (uid, name, username, role) =>
-        set({ isLoggedIn: true, uid, name, username, role }),
+      isAdmin: false,
+      allowedMenus: [],
+      login: (uid, name, username, role, isAdmin) =>
+        set({ isLoggedIn: true, uid, name, username, role, isAdmin }),
       logout: () =>
-        set({ isLoggedIn: false, uid: null, name: '', username: '', role: 'seller' }),
+        set({ isLoggedIn: false, uid: null, name: '', username: '', role: 'seller', isAdmin: false }),
+      setAllowedMenus: (menus) => set({ allowedMenus: menus }),
     }),
     { name: 'fmcg-auth' }
   )

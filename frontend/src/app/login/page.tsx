@@ -31,9 +31,19 @@ export default function LoginPage() {
 
     try {
       const result = await odooLogin(username, password);
-      authLogin(result.uid, result.name, result.username, role);
 
-      if (role === 'seller') {
+      // If user selected admin role but is not an admin in Odoo
+      if (role === 'admin' && !result.isAdmin) {
+        setError('این کاربر دسترسی مدیریت ندارد');
+        setLoading(false);
+        return;
+      }
+
+      // Determine actual role: admin users can login as either role
+      const actualRole: UserRole = role === 'admin' && result.isAdmin ? 'admin' : 'seller';
+      authLogin(result.uid, result.name, result.username, actualRole, result.isAdmin);
+
+      if (actualRole === 'seller') {
         router.push('/pos');
       } else {
         router.push('/admin');

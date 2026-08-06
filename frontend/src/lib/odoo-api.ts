@@ -60,11 +60,42 @@ export async function login(username: string, password: string) {
     throw new Error('نام کاربری یا رمز عبور اشتباه است');
   }
 
+  // Check if user is admin (has accounting/administration access)
+  let isAdmin = false;
+  try {
+    // Check user groups - admin users have base.group_system or account.group_account_manager
+    const user = await jsonRpc('/web/dataset/call_kw', {
+      model: 'res.users',
+      method: 'read',
+      args: [[result.uid]],
+      kwargs: { fields: ['groups_id'] },
+    });
+    if (user && user[0]) {
+      // Check if user has any admin-level group
+      const groups = await jsonRpc('/web/dataset/call_kw', {
+        model: 'res.groups',
+        method: 'search_read',
+        args: [[['id', 'in', user[0].groups_id], ['full_name', 'in', [
+          'Administration / Settings',
+          'Administration / Access Rights',
+          'Accounting / Billing',
+          'Accounting / Accountant',
+        ]]]],
+        kwargs: { fields: ['id'], limit: 1 },
+      });
+      isAdmin = groups && groups.length > 0;
+    }
+  } catch {
+    // If group check fails, check if username is 'admin'
+    isAdmin = username === 'admin';
+  }
+
   return {
     uid: result.uid,
     name: result.name,
     username: result.username,
     sessionId: result.session_id,
+    isAdmin,
   };
 }
 
