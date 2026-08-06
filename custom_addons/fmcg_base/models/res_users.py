@@ -39,15 +39,29 @@ class ResUsers(models.Model):
     def fmcg_create_seller(self, name=False, login=False, password=False, phone=False):
         """Create a seller user with POS-only (limited) access.
 
-        The seller is added to the internal user group but flagged as a
-        seller so the frontend routes them straight to the POS screen.
+        The seller is added to the internal user group plus POS/Inventory/Sales
+        groups so they can read products, stock levels, and process sales.
         Accepts both positional and keyword arguments for JSON-RPC compatibility.
         """
         if not name or not login or not password:
             raise models.ValidationError(
                 "Name, login and password are required to create a seller."
             )
-        group_user = self.env.ref('base.group_user')
+        # Required groups for POS seller
+        group_ids = []
+        group_refs = [
+            'base.group_user',           # Internal User (base access)
+            'point_of_sale.group_pos_user',  # POS User (product/sale access)
+            'stock.group_stock_user',    # Inventory User (stock.move read)
+            'account.group_account_invoice',  # Invoicing (create invoices)
+        ]
+        for ref in group_refs:
+            try:
+                group = self.env.ref(ref)
+                group_ids.append(group.id)
+            except Exception:
+                pass
+
         vals = {
             'name': name,
             'login': login,
@@ -58,7 +72,7 @@ class ResUsers(models.Model):
             'fmcg_can_issue_refunds': False,
             'fmcg_can_modify_inventory': False,
             'fmcg_can_view_reports': False,
-            'groups_id': [(6, 0, [group_user.id])],
+            'groups_id': [(6, 0, group_ids)],
         }
         user = self.sudo().create(vals)
         return {'id': user.id, 'login': user.login, 'name': user.name}

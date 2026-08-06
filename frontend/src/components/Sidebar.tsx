@@ -31,7 +31,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { name: companyName, setCompany } = useCompanyStore();
-  const { name: userName, role, logout: authLogout } = useAuthStore();
+  const { name: userName, role, isAdmin, logout: authLogout } = useAuthStore();
 
   useEffect(() => {
     if (!companyName) {
@@ -49,6 +49,19 @@ export default function Sidebar() {
     router.push('/login');
   }
 
+  // Filter menus for sellers based on allowed list
+  const visibleMenus = (() => {
+    if (isAdmin || role === 'admin') return menuItems;
+    try {
+      const saved = localStorage.getItem('seller_allowed_menus');
+      const allowed: string[] = saved ? JSON.parse(saved) : [];
+      if (allowed.length === 0) return menuItems;
+      return menuItems.filter(m => allowed.includes(m.key));
+    } catch {
+      return menuItems;
+    }
+  })();
+
   return (
     <aside className="w-60 bg-slate-800 text-white h-screen flex flex-col sticky top-0 overflow-y-auto">
       {/* Logo */}
@@ -62,7 +75,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 py-4">
-        {menuItems.map((item) => (
+        {visibleMenus.map((item) => (
           <Link
             key={item.href}
             href={item.href}

@@ -395,3 +395,38 @@ except Exception as e:
     print(f"    Warning: {e}")
 
 print("\nDone! All translations and fixes applied.")
+
+# Fix seller user groups - ensure all sellers have POS/Inventory/Invoicing access
+print("  Fixing seller user groups...")
+try:
+    # Find required group IDs
+    required_groups = []
+    for xml_id in ['base.group_user', 'point_of_sale.group_pos_user', 'stock.group_stock_user', 'account.group_account_invoice']:
+        try:
+            gid = models.execute_kw(db, uid, password, 'ir.model.data', 'search_read',
+                [[['module', '=', xml_id.split('.')[0]], ['name', '=', xml_id.split('.')[1]]]],
+                {'fields': ['res_id'], 'limit': 1})
+            if gid:
+                required_groups.append(gid[0]['res_id'])
+        except:
+            pass
+    
+    if required_groups:
+        # Find all seller users (fmcg_is_seller = True) or non-admin internal users
+        sellers = models.execute_kw(db, uid, password, 'res.users', 'search_read',
+            [[['id', '!=', 2], ['active', '=', True]]],
+            {'fields': ['id', 'login', 'groups_id']})
+        for seller in sellers:
+            existing = set(seller['groups_id'])
+            missing = [g for g in required_groups if g not in existing]
+            if missing:
+                # Add missing groups
+                models.execute_kw(db, uid, password, 'res.users', 'write',
+                    [[seller['id']], {'groups_id': [(4, g) for g in missing]}])
+                print(f"    Fixed groups for user: {seller['login']}")
+        if not sellers:
+            print("    No non-admin users to fix")
+    else:
+        print("    WARNING: Could not find required groups")
+except Exception as e:
+    print(f"    Warning: {e}")

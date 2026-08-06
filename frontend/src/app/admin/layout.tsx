@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { useAuthStore } from '@/stores/auth-store';
@@ -12,17 +12,30 @@ export default function AdminLayout({
 }) {
   const router = useRouter();
   const { isLoggedIn, role, isAdmin } = useAuthStore();
+  const [allowed, setAllowed] = useState(true);
 
   useEffect(() => {
     if (!isLoggedIn) {
       router.replace('/login');
-    } else if (role === 'seller' && !isAdmin) {
-      router.replace('/pos');
+      return;
+    }
+    if (role === 'seller' && !isAdmin) {
+      // Check if seller has allowed menus
+      try {
+        const savedMenus = localStorage.getItem('seller_allowed_menus');
+        const allowedMenus = savedMenus ? JSON.parse(savedMenus) : [];
+        if (allowedMenus.length === 0) {
+          router.replace('/pos');
+          setAllowed(false);
+        }
+      } catch {
+        router.replace('/pos');
+        setAllowed(false);
+      }
     }
   }, [isLoggedIn, role, isAdmin, router]);
 
-  // Don't render admin panel for unauthorized users
-  if (!isLoggedIn || (role === 'seller' && !isAdmin)) {
+  if (!isLoggedIn || !allowed) {
     return null;
   }
 

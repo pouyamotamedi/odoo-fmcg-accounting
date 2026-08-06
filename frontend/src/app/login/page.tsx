@@ -44,7 +44,18 @@ export default function LoginPage() {
       authLogin(result.uid, result.name, result.username, actualRole, result.isAdmin);
 
       if (actualRole === 'seller') {
-        router.push('/pos');
+        // Check if seller has allowed menus - if yes, show admin panel with limited menus
+        try {
+          const savedMenus = localStorage.getItem('seller_allowed_menus');
+          const allowedMenus = savedMenus ? JSON.parse(savedMenus) : [];
+          if (allowedMenus.length > 0) {
+            router.push('/admin');
+          } else {
+            router.push('/pos');
+          }
+        } catch {
+          router.push('/pos');
+        }
       } else {
         router.push('/admin');
       }
