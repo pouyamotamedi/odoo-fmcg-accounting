@@ -482,7 +482,9 @@ export default function FiscalYearPage() {
                 await callMethod('stock.quant', 'action_apply_inventory', [[quantId]]);
               }
             }
-          } catch { /* individual item failure, continue */ }
+          } catch (err: any) {
+            console.error(`Stock adjustment failed for product ${item.product_id}:`, err?.message || err);
+          }
         }
       }
 
