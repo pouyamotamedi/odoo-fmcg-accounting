@@ -373,30 +373,28 @@ export default function FiscalYearPage() {
       }
     }
 
-    // Add inventory value as a debit to stock valuation account if inventory items exist
+    // Add inventory items - we do NOT add inventory value to the opening entry
+    // because action_apply_inventory will create its own accounting entry
+    // (debit 110200 / credit 110100). Instead we'll handle the 110100 counterpart
+    // by adding it to the opening entry as a credit to balance things out.
     let inventoryAccountId: number | undefined;
     if (inventoryItems.length > 0 && inventoryTotalValue > 0) {
-      // Find stock valuation account (code 110200 - ارزشگذاری موجودی)
-      // Priority: exact code match > name match > any asset_current
-      const stockAccounts = balanceSheetAccounts.filter(a => 
-        a.account_type === 'asset_current' && a.code === '110200'
+      // Find stock interim/input account (110100 - موجودی میانی دریافتی)
+      // action_apply_inventory will debit 110200 and credit 110100
+      // So we need to debit 110100 in opening entry to zero it out
+      const interimAccounts = balanceSheetAccounts.filter(a => 
+        a.account_type === 'asset_current' && a.code === '110100'
       );
-      inventoryAccountId = stockAccounts[0]?.id;
+      inventoryAccountId = interimAccounts[0]?.id;
       if (!inventoryAccountId) {
-        // Fallback: search by name containing 'ارزش' (valuation)
         const byName = balanceSheetAccounts.filter(a => 
-          a.account_type === 'asset_current' && (a.name.includes('ارزش') || a.name.includes('valuation'))
+          a.account_type === 'asset_current' && (a.name.includes('میانی') || a.name.includes('interim') || a.name.includes('دریافتی'))
         );
         inventoryAccountId = byName[0]?.id;
       }
-      if (!inventoryAccountId) {
-        // Last resort: any asset_current with 'موجودی' in name but NOT 'میانی' (interim)
-        const byStock = balanceSheetAccounts.filter(a => 
-          a.account_type === 'asset_current' && a.name.includes('موجودی') && !a.name.includes('میانی') && !a.name.includes('مبانی')
-        );
-        inventoryAccountId = byStock[0]?.id;
-      }
       if (inventoryAccountId) {
+        // Debit 110100 in opening entry - Odoo's stock adjustment will credit 110100
+        // Net effect: 110100 = 0, 110200 = inventoryValue (from Odoo), equity = credit
         validItems.push({ account_id: inventoryAccountId, account_name: '', account_type: 'asset_current', partner_id: 0, partner_name: '', debit: String(inventoryTotalValue), credit: '', type: 'asset' });
       }
     }
