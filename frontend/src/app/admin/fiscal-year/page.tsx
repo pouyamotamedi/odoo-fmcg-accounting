@@ -373,15 +373,14 @@ export default function FiscalYearPage() {
       }
     }
 
-    // Add inventory items - we do NOT add inventory value to the opening entry
-    // because action_apply_inventory will create its own accounting entry
-    // (debit 110200 / credit 110100). Instead we'll handle the 110100 counterpart
-    // by adding it to the opening entry as a credit to balance things out.
+    // Add inventory items to opening entry
+    // We debit 110100 (interim/input) in the opening entry.
+    // Then action_apply_inventory creates: debit 110200 / credit 110100
+    // Net result: 110100 = 0, 110200 = inventory value, FIFO cost layer created
+    // This approach ONLY works correctly on fresh installs (no prior transactions)
     let inventoryAccountId: number | undefined;
     if (inventoryItems.length > 0 && inventoryTotalValue > 0) {
       // Find stock interim/input account (110100 - موجودی میانی دریافتی)
-      // action_apply_inventory will debit 110200 and credit 110100
-      // So we need to debit 110100 in opening entry to zero it out
       const interimAccounts = balanceSheetAccounts.filter(a => 
         a.account_type === 'asset_current' && a.code === '110100'
       );
@@ -393,8 +392,6 @@ export default function FiscalYearPage() {
         inventoryAccountId = byName[0]?.id;
       }
       if (inventoryAccountId) {
-        // Debit 110100 in opening entry - Odoo's stock adjustment will credit 110100
-        // Net effect: 110100 = 0, 110200 = inventoryValue (from Odoo), equity = credit
         validItems.push({ account_id: inventoryAccountId, account_name: '', account_type: 'asset_current', partner_id: 0, partner_name: '', debit: String(inventoryTotalValue), credit: '', type: 'asset' });
       }
     }
@@ -447,33 +444,33 @@ export default function FiscalYearPage() {
       const moveId = await create('account.move', moveVals);
       await callMethod('account.move', 'action_post', [[moveId]]);
 
-      // 2. Create stock adjustments for inventory items (sets qty_available)
+      // 2. Create stock adjustments for inventory items
+      // action_apply_inventory sets qty AND creates FIFO cost layer + accounting entry
+      // (debit 110200 / credit 110100) — netting 110100 to zero
       if (inventoryItems.length > 0) {
         for (const item of inventoryItems) {
           if (!item.product_id || !Number(item.qty)) continue;
           try {
-            // Update product standard_price if user entered a different cost
+            // Update product standard_price (used by FIFO as initial cost)
             if (Number(item.unit_cost) > 0) {
               await write('product.product', [item.product_id], {
                 standard_price: Number(item.unit_cost),
               });
             }
 
-            // Use stock.quant to set initial quantity
-            // First check if quant exists
+            // Use stock.quant + action_apply_inventory to create proper FIFO layer
             const existingQuants = await searchRead('stock.quant', [
               ['product_id', '=', item.product_id],
               ['location_id.usage', '=', 'internal'],
             ], ['id', 'quantity', 'location_id'], 1);
 
             if (existingQuants && existingQuants.length > 0) {
-              // Update existing quant
               await write('stock.quant', [existingQuants[0].id], {
                 inventory_quantity: Number(item.qty),
               });
               await callMethod('stock.quant', 'action_apply_inventory', [[existingQuants[0].id]]);
             } else {
-              // Find internal location
+              // Find internal location and create quant
               const locations = await searchRead('stock.location', [['usage', '=', 'internal']], ['id'], 1);
               const locId = locations?.[0]?.id;
               if (locId) {
