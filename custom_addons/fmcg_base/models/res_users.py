@@ -54,6 +54,7 @@ class ResUsers(models.Model):
             'point_of_sale.group_pos_user',  # POS User (product/sale access)
             'stock.group_stock_user',    # Inventory User (stock.move read)
             'account.group_account_invoice',  # Invoicing (create invoices)
+            'sales_team.group_sale_salesman',  # Sales User (partner/customer access)
         ]
         for ref in group_refs:
             try:

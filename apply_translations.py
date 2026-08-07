@@ -401,7 +401,7 @@ print("  Fixing seller user groups...")
 try:
     # Find required group IDs
     required_groups = []
-    for xml_id in ['base.group_user', 'point_of_sale.group_pos_user', 'stock.group_stock_user', 'account.group_account_invoice']:
+    for xml_id in ['base.group_user', 'point_of_sale.group_pos_user', 'stock.group_stock_user', 'account.group_account_invoice', 'sales_team.group_sale_salesman']:
         try:
             gid = models.execute_kw(db, uid, password, 'ir.model.data', 'search_read',
                 [[['module', '=', xml_id.split('.')[0]], ['name', '=', xml_id.split('.')[1]]]],
