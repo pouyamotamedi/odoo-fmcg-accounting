@@ -399,6 +399,19 @@ print("\nDone! All translations and fixes applied.")
 # Fix seller user groups - ensure all sellers have POS/Inventory/Invoicing access
 print("  Fixing seller user groups...")
 try:
+    # Ensure "مشتری عمومی" (walk-in customer) exists
+    existing_partner = models.execute_kw(db, uid, password, 'res.partner', 'search',
+        [[['name', '=', 'مشتری عمومی']]])
+    if not existing_partner:
+        models.execute_kw(db, uid, password, 'res.partner', 'create',
+            [{'name': 'مشتری عمومی', 'customer_rank': 1}])
+        print("    Created default customer: مشتری عمومی")
+    else:
+        print("    Default customer exists: مشتری عمومی")
+except Exception as e:
+    print(f"    Warning creating default customer: {e}")
+
+try:
     # Find required group IDs
     required_groups = []
     for xml_id in ['base.group_user', 'point_of_sale.group_pos_user', 'stock.group_stock_user', 'account.group_account_invoice', 'sales_team.group_sale_salesman']:

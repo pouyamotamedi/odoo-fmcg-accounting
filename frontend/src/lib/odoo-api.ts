@@ -410,16 +410,24 @@ export async function createPosOrder(values: {
   
   // If partner is required, find or create a generic "مشتری عمومی" partner
   if (!partner_id) {
-    try {
-      const existing = await searchRead('res.partner', [['name', '=', 'مشتری عمومی']], ['id'], 1);
-      if (existing && existing.length > 0) {
-        partner_id = existing[0].id;
-      } else {
+    const existing = await searchRead('res.partner', [['name', '=', 'مشتری عمومی']], ['id'], 1);
+    if (existing && existing.length > 0) {
+      partner_id = existing[0].id;
+    } else {
+      // Try to create - may fail if user has no create access, that's ok
+      try {
         partner_id = await create('res.partner', { name: 'مشتری عمومی', customer_rank: 1 });
+      } catch {
+        // Last resort: find ANY partner to use
+        const anyPartner = await searchRead('res.partner', [['customer_rank', '>', 0]], ['id'], 1);
+        if (anyPartner && anyPartner.length > 0) {
+          partner_id = anyPartner[0].id;
+        } else {
+          // Find company partner
+          const companyPartner = await searchRead('res.partner', [['is_company', '=', true]], ['id'], 1);
+          partner_id = companyPartner?.[0]?.id || false;
+        }
       }
-    } catch {
-      // If all else fails, try without partner
-      partner_id = false;
     }
   }
 
