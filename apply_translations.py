@@ -374,6 +374,42 @@ try:
 except Exception as e:
     print(f"    Warning: {e}")
 
+# ============ Configure Inventory Adjustment Location Account ============
+# When stock count shows shortage/surplus, it should hit expense/income accounts
+# NOT the interim accounts (110100/110300) which are for purchase/sale cycles
+print("  Configuring inventory adjustment location accounts...")
+try:
+    # Find inventory adjustment location (usage = 'inventory')
+    inv_adj_locs = models.execute_kw(db, uid, password, 'stock.location', 'search',
+        [[['usage', '=', 'inventory']]])
+    
+    if inv_adj_locs:
+        # Ensure account 600010 exists (shared with scrap)
+        shortage_acc = models.execute_kw(db, uid, password, 'account.account', 'search',
+            [[['code', '=', '600010']]])
+        if not shortage_acc:
+            shortage_acc = [models.execute_kw(db, uid, password, 'account.account', 'create', [{
+                'code': '600010',
+                'name': 'هزینه ضایعات و کسری کالا',
+                'account_type': 'expense',
+            }])]
+            print("    Created account 600010: هزینه ضایعات و کسری کالا")
+        
+        # Set inventory adjustment location accounts:
+        # valuation_in_account_id = when goods ENTER warehouse from adjustment (surplus)
+        #   -> credit this account (reduce expense = gain) 
+        # valuation_out_account_id = when goods LEAVE warehouse from adjustment (shortage)
+        #   -> debit this account (increase expense = loss)
+        models.execute_kw(db, uid, password, 'stock.location', 'write', [inv_adj_locs, {
+            'valuation_in_account_id': shortage_acc[0],
+            'valuation_out_account_id': shortage_acc[0],
+        }])
+        print(f"    Inventory Adjustment location -> 600010 (هزینه ضایعات و کسری)")
+    else:
+        print("    WARNING: No inventory adjustment location found")
+except Exception as e:
+    print(f"    Warning: {e}")
+
 # ============ Set COGS Account on Product Categories ============
 # Standard accounting: COGS (500000) separate from operating expenses (600000)
 print("  Setting COGS account (500000) on product categories...")
