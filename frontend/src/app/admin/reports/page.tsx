@@ -39,22 +39,31 @@ export default function ReportsPage() {
         data = await searchRead('account.move', [['move_type', '=', 'in_invoice'], ['state', '=', 'posted'], ['invoice_date', '>=', dateFrom], ['invoice_date', '<=', dateTo]], ['name', 'partner_id', 'amount_total', 'invoice_date', 'payment_state'], 0, 0, 'invoice_date desc');
       }
       else if (type === 'profitloss') {
-        // Get income and expense totals from account.move.line
+        // Get income, COGS, and operating expense totals from account.move.line
         const incomeLines = await searchRead('account.move.line', [['parent_state', '=', 'posted'], ['account_id.account_type', 'in', ['income', 'income_other']], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['debit', 'credit', 'account_id'], 0);
-        const expenseLines = await searchRead('account.move.line', [['parent_state', '=', 'posted'], ['account_id.account_type', 'in', ['expense', 'expense_direct_cost']], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['debit', 'credit', 'account_id'], 0);
+        const cogsLines = await searchRead('account.move.line', [['parent_state', '=', 'posted'], ['account_id.account_type', '=', 'expense_direct_cost'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['debit', 'credit', 'account_id'], 0);
+        const expenseLines = await searchRead('account.move.line', [['parent_state', '=', 'posted'], ['account_id.account_type', '=', 'expense'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['debit', 'credit', 'account_id'], 0);
         // Group by account
         const incomeMap: Record<string, number> = {};
         for (const l of (incomeLines || [])) { const name = l.account_id?.[1] || 'نامشخص'; incomeMap[name] = (incomeMap[name] || 0) + l.credit - l.debit; }
+        const cogsMap: Record<string, number> = {};
+        for (const l of (cogsLines || [])) { const name = l.account_id?.[1] || 'نامشخص'; cogsMap[name] = (cogsMap[name] || 0) + l.debit - l.credit; }
         const expenseMap: Record<string, number> = {};
         for (const l of (expenseLines || [])) { const name = l.account_id?.[1] || 'نامشخص'; expenseMap[name] = (expenseMap[name] || 0) + l.debit - l.credit; }
         const totalIncome = Object.values(incomeMap).reduce((s, v) => s + v, 0);
+        const totalCogs = Object.values(cogsMap).reduce((s, v) => s + v, 0);
         const totalExpense = Object.values(expenseMap).reduce((s, v) => s + v, 0);
+        const grossProfit = totalIncome - totalCogs;
+        const netProfit = grossProfit - totalExpense;
         data = [
           ...Object.entries(incomeMap).map(([name, amount]) => ({ name, amount, type: 'income' })),
           { name: '--- جمع درآمد ---', amount: totalIncome, type: 'subtotal' },
+          ...Object.entries(cogsMap).map(([name, amount]) => ({ name, amount, type: 'expense' })),
+          { name: '--- جمع بهای تمام شده ---', amount: totalCogs, type: 'subtotal' },
+          { name: '=== سود ناخالص ===', amount: grossProfit, type: 'total' },
           ...Object.entries(expenseMap).map(([name, amount]) => ({ name, amount, type: 'expense' })),
-          { name: '--- جمع هزینه ---', amount: totalExpense, type: 'subtotal' },
-          { name: '=== سود (زیان) خالص ===', amount: totalIncome - totalExpense, type: 'total' },
+          { name: '--- جمع هزینه‌های عملیاتی ---', amount: totalExpense, type: 'subtotal' },
+          { name: '=== سود (زیان) خالص ===', amount: netProfit, type: 'total' },
         ];
       }
       setRows(data || []);
