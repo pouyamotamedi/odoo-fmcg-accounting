@@ -516,7 +516,38 @@ export default function AccountingPage() {
                 </tr>
                 {expandedEntries.has(entry.id) && (
                   <tr><td colSpan={7} className="p-3 bg-gray-50">
-                    <div className="text-xs font-bold mb-2">آرتیکل‌های سند:</div>
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="text-xs font-bold">آرتیکل‌های سند:</div>
+                      {entry.state === 'posted' && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!confirm(`ابطال سند "${entry.name}"؟\n\nیک سند معکوس (storno) ایجاد می‌شود.`)) return;
+                            try {
+                              // Use Odoo's reversal method to create a storno entry
+                              await callMethod('account.move', 'button_draft', [[entry.id]]);
+                              await callMethod('account.move', 'button_cancel', [[entry.id]]);
+                              setMsg('✅ سند ابطال شد');
+                              setTimeout(() => setMsg(''), 3000);
+                              fetchEntries();
+                            } catch {
+                              // If button_cancel not available, try reversal
+                              try {
+                                await callMethod('account.move', '_reverse_moves', [[entry.id]], { cancel: true });
+                                setMsg('✅ سند معکوس ایجاد شد');
+                                setTimeout(() => setMsg(''), 3000);
+                                fetchEntries();
+                              } catch (e2: any) {
+                                alert(e2.message || 'خطا در ابطال سند');
+                              }
+                            }
+                          }}
+                          className="text-[10px] bg-red-100 text-red-700 px-3 py-1 rounded-lg font-bold hover:bg-red-200"
+                        >
+                          🚫 ابطال سند
+                        </button>
+                      )}
+                    </div>
                     {(entryLinesMap[entry.id] || []).length === 0 ? <p className="text-xs text-gray-400">بدون آرتیکل</p> : (
                       <table className="w-full text-xs"><thead><tr><th className="text-right p-1">شرح</th><th className="text-right p-1">شخص</th><th className="text-right p-1">کالا</th><th className="text-right p-1">حساب</th><th className="text-right p-1">بدهکار</th><th className="text-right p-1">بستانکار</th></tr></thead>
                       <tbody>{(entryLinesMap[entry.id] || []).map((l: any) => (
