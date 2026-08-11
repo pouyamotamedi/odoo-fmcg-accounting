@@ -51,6 +51,7 @@ class ResUsers(models.Model):
         group_ids = []
         group_refs = [
             'base.group_user',           # Internal User (base access)
+            'base.group_partner_manager', # Contact Creation (create customers)
             'point_of_sale.group_pos_user',  # POS User (product/sale access)
             'stock.group_stock_user',    # Inventory User (stock.move read)
             'account.group_account_invoice',  # Invoicing (create invoices)

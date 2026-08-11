@@ -476,11 +476,15 @@ export default function PosPage() {
             <span className={`text-xs ${isOnline ? 'text-green-400' : 'text-red-400'}`}>
               {isOnline ? '🟢 آنلاین' : '🔴 آفلاین'}
             </span>
-            {useAuthStore.getState().isAdmin && (
-              <Link href="/admin" className="text-xs text-slate-400 hover:text-white">
-                بازگشت به پنل ←
-              </Link>
-            )}
+            {(() => {
+              const auth = useAuthStore.getState();
+              const hasMenus = (() => { try { const m = localStorage.getItem('seller_allowed_menus'); return m ? JSON.parse(m).length > 0 : false; } catch { return false; } })();
+              return (auth.isAdmin || hasMenus) ? (
+                <Link href="/admin" className="text-xs text-slate-400 hover:text-white">
+                  بازگشت به پنل ←
+                </Link>
+              ) : null;
+            })()}
             <button onClick={async () => {
               try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','payment_state','narration'], 30, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
               setShowSalesHistory(true);
