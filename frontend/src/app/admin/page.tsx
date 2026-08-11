@@ -111,10 +111,14 @@ function SalesChart() {
     try {
       const { from, to } = getDateRange(period, dateFrom || undefined, dateTo || undefined);
 
-      // Fetch all sales and purchases in range
-      const [sales, purchases] = await Promise.all([
+      // Fetch all sales, refunds, and purchases in range
+      const [sales, refunds, purchases] = await Promise.all([
         searchRead('account.move', [
           ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
+          ['invoice_date', '>=', from], ['invoice_date', '<=', to],
+        ], ['amount_total', 'invoice_date']),
+        searchRead('account.move', [
+          ['move_type', '=', 'out_refund'], ['state', '=', 'posted'],
           ['invoice_date', '>=', from], ['invoice_date', '<=', to],
         ], ['amount_total', 'invoice_date']),
         searchRead('account.move', [
@@ -122,6 +126,13 @@ function SalesChart() {
           ['invoice_date', '>=', from], ['invoice_date', '<=', to],
         ], ['amount_total', 'invoice_date']),
       ]);
+
+      // Helper: net sales = sales - refunds for a given filter
+      const netSalesForFilter = (filter: (s: any) => boolean) => {
+        const salesAmt = (sales || []).filter(filter).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
+        const refundsAmt = (refunds || []).filter(filter).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
+        return salesAmt - refundsAmt;
+      };
 
       // Group by period
       const points: ChartPoint[] = [];
@@ -132,7 +143,7 @@ function SalesChart() {
         for (let i = 5; i >= 0; i--) {
           const monthDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
           const monthStr = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
-          const monthSales = (sales || []).filter((s: any) => s.invoice_date?.startsWith(monthStr)).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
+          const monthSales = netSalesForFilter((s: any) => s.invoice_date?.startsWith(monthStr));
           const monthPurchases = (purchases || []).filter((s: any) => s.invoice_date?.startsWith(monthStr)).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
           points.push({ label: toJalaliMonthLabel(monthStr + '-15'), date: monthStr, sales: monthSales, purchases: monthPurchases });
         }
@@ -144,7 +155,7 @@ function SalesChart() {
           const weekEnd = new Date(weekStart.getTime() + 6 * 864e5);
           const wsStr = weekStart.toISOString().split('T')[0];
           const weStr = weekEnd.toISOString().split('T')[0];
-          const weekSales = (sales || []).filter((s: any) => s.invoice_date >= wsStr && s.invoice_date <= weStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
+          const weekSales = netSalesForFilter((s: any) => s.invoice_date >= wsStr && s.invoice_date <= weStr);
           const weekPurchases = (purchases || []).filter((s: any) => s.invoice_date >= wsStr && s.invoice_date <= weStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
           points.push({ label: toJalaliLabel(wsStr), date: wsStr, sales: weekSales, purchases: weekPurchases });
         }
@@ -159,7 +170,7 @@ function SalesChart() {
         for (let i = 0; i < diffDays; i += step) {
           const d = new Date(fromDate.getTime() + i * 864e5);
           const dStr = d.toISOString().split('T')[0];
-          const daySales = (sales || []).filter((s: any) => s.invoice_date === dStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
+          const daySales = netSalesForFilter((s: any) => s.invoice_date === dStr);
           const dayPurchases = (purchases || []).filter((s: any) => s.invoice_date === dStr).reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0);
           const dayLabel = toJalaliLabel(dStr);
           points.push({ label: dayLabel, date: dStr, sales: daySales, purchases: dayPurchases });

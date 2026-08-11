@@ -151,21 +151,30 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
       const prev = getPrevPeriod(dateFrom, dateTo);
       // Current period sales invoices
       const curSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['id', 'amount_total', 'partner_id']);
+      // Current period refunds (credit notes)
+      const curRefunds = await searchRead('account.move', [['move_type', '=', 'out_refund'], ['state', '=', 'posted'], ['date', '>=', dateFrom], ['date', '<=', dateTo]], ['id', 'amount_total', 'partner_id']);
       // Previous period sales
       const prevSales = await searchRead('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted'], ['date', '>=', prev.from], ['date', '<=', prev.to]], ['amount_total']);
+      const prevRefunds = await searchRead('account.move', [['move_type', '=', 'out_refund'], ['state', '=', 'posted'], ['date', '>=', prev.from], ['date', '<=', prev.to]], ['amount_total']);
 
-      const curTotal = (curSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
-      const prevTotal = (prevSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
-      const curCount = (curSales || []).length;
-      const prevCount = (prevSales || []).length;
+      const curSalesTotal = (curSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
+      const curRefundsTotal = (curRefunds || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
+      const curTotal = curSalesTotal - curRefundsTotal;
+      const prevSalesTotal = (prevSales || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
+      const prevRefundsTotal = (prevRefunds || []).reduce((s: number, r: any) => s + Math.abs(r.amount_total || 0), 0);
+      const prevTotal = prevSalesTotal - prevRefundsTotal;
+      const curCount = (curSales || []).length + (curRefunds || []).length;
+      const prevCount = (prevSales || []).length + (prevRefunds || []).length;
       const avgBasket = curCount > 0 ? curTotal / curCount : 0;
       const prevAvgBasket = prevCount > 0 ? prevTotal / prevCount : 0;
 
       // Calculate COGS (Cost of Goods Sold) properly:
       // COGS = sum of (quantity_sold × cost_price) for each product sold
+      // Subtract COGS of refunded items
       let cogs = 0;
       const saleInvoiceIds = (curSales || []).map((inv: any) => inv.id);
-      if (saleInvoiceIds.length > 0) {
+      const refundInvoiceIds = (curRefunds || []).map((inv: any) => inv.id);
+      if (saleInvoiceIds.length > 0 || refundInvoiceIds.length > 0) {
         // Get sale lines — only INCOME lines (not COGS/expense lines that Odoo also creates)
         // In Odoo 18, each sale invoice has both income lines AND COGS lines
         // We identify income lines by: they have the HIGHER price_subtotal for same product
@@ -177,8 +186,19 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
           ['account_id.account_type', 'in', ['income', 'income_other']],
         ], ['product_id', 'quantity', 'price_subtotal']);
 
+        // Also get refund lines to subtract from COGS
+        let refundLines: any[] = [];
+        if (refundInvoiceIds.length > 0) {
+          refundLines = await searchRead('account.move.line', [
+            ['move_id', 'in', refundInvoiceIds],
+            ['product_id', '!=', false],
+            ['account_id.account_type', 'in', ['income', 'income_other']],
+          ], ['product_id', 'quantity', 'price_subtotal']) || [];
+        }
+
         // Get cost prices
-        const productIds = [...new Set((saleLines || []).map((l: any) => l.product_id?.[0]).filter(Boolean))];
+        const allLines = [...(saleLines || []), ...refundLines];
+        const productIds = [...new Set(allLines.map((l: any) => l.product_id?.[0]).filter(Boolean))];
         const costMap = new Map<number, number>();
         if (productIds.length > 0) {
           const products = await searchRead('product.product', [['id', 'in', productIds]], ['id', 'standard_price']);
@@ -191,6 +211,13 @@ function DashboardTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
           if (!pid) continue;
           const cost = costMap.get(pid) || 0;
           cogs += Math.abs(l.quantity || 0) * cost;
+        }
+        // Subtract COGS for refunded items
+        for (const l of refundLines) {
+          const pid = l.product_id?.[0];
+          if (!pid) continue;
+          const cost = costMap.get(pid) || 0;
+          cogs -= Math.abs(l.quantity || 0) * cost;
         }
         // Debug: show top cost items
         const debugItems = (saleLines || []).slice(0, 10).map((l: any) => ({
@@ -892,12 +919,18 @@ function EmployeesTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
     setLoading(true);
     try {
       // In Odoo, invoices have create_uid (the user who created it = the cashier)
-      const invoices = await searchRead('account.move', [
-        ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
-        ['date', '>=', dateFrom], ['date', '<=', dateTo],
-      ], ['amount_total', 'create_uid']);
+      const [invoices, refunds] = await Promise.all([
+        searchRead('account.move', [
+          ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
+          ['date', '>=', dateFrom], ['date', '<=', dateTo],
+        ], ['amount_total', 'create_uid']),
+        searchRead('account.move', [
+          ['move_type', '=', 'out_refund'], ['state', '=', 'posted'],
+          ['date', '>=', dateFrom], ['date', '<=', dateTo],
+        ], ['amount_total', 'create_uid']),
+      ]);
 
-      // Group by user
+      // Group by user (sales positive, refunds negative)
       const userMap = new Map<number, { name: string; count: number; total: number }>();
       for (const inv of (invoices || [])) {
         const uid = inv.create_uid?.[0];
@@ -907,6 +940,15 @@ function EmployeesTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }
         const u = userMap.get(uid)!;
         u.count++;
         u.total += inv.amount_total || 0;
+      }
+      for (const inv of (refunds || [])) {
+        const uid = inv.create_uid?.[0];
+        const uname = inv.create_uid?.[1] || 'نامشخص';
+        if (!uid) continue;
+        if (!userMap.has(uid)) userMap.set(uid, { name: uname, count: 0, total: 0 });
+        const u = userMap.get(uid)!;
+        u.count++;
+        u.total -= inv.amount_total || 0;
       }
 
       const result = [...userMap.values()].map(u => ({

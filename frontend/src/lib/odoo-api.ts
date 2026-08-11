@@ -1194,17 +1194,21 @@ export async function deleteAccount(id: number) {
 
 export async function getTodaySales() {
   const today = getLocalToday();
-  const sales = await searchRead(
-    'account.move',
-    [
+  const [sales, refunds] = await Promise.all([
+    searchRead('account.move', [
       ['move_type', '=', 'out_invoice'],
       ['state', '=', 'posted'],
       ['invoice_date', '=', today],
-    ],
-    ['amount_total'],
-  );
-  const totalAmount = sales?.reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0) || 0;
-  return { totalAmount, count: sales?.length || 0 };
+    ], ['amount_total']),
+    searchRead('account.move', [
+      ['move_type', '=', 'out_refund'],
+      ['state', '=', 'posted'],
+      ['invoice_date', '=', today],
+    ], ['amount_total']),
+  ]);
+  const salesTotal = sales?.reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0) || 0;
+  const refundsTotal = refunds?.reduce((sum: number, s: any) => sum + (s.amount_total || 0), 0) || 0;
+  return { totalAmount: salesTotal - refundsTotal, count: (sales?.length || 0) + (refunds?.length || 0) };
 }
 
 // ============ Product Variants (Attributes) ============
