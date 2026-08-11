@@ -522,24 +522,41 @@ export default function AccountingPage() {
                         <button
                           onClick={async (e) => {
                             e.stopPropagation();
-                            if (!confirm(`ابطال سند "${entry.name}"؟\n\nیک سند معکوس (storno) ایجاد می‌شود.`)) return;
+                            const isStockEntry = entry.name?.startsWith('STJ') || entry.ref?.includes('WH/') || entry.ref?.includes('SP/');
+                            const confirmMsg = isStockEntry 
+                              ? `ابطال سند "${entry.name}"؟\n\n⚠️ این سند مرتبط با انبار است.\nسند حسابداری معکوس ایجاد می‌شود.\nبرای اصلاح موجودی فیزیکی، از صفحه انبارگردانی استفاده کنید.`
+                              : `ابطال سند "${entry.name}"؟\n\nیک سند معکوس (storno) ایجاد و ثبت می‌شود.`;
+                            if (!confirm(confirmMsg)) return;
                             try {
-                              // Use Odoo's reversal method to create a storno entry
-                              await callMethod('account.move', 'button_draft', [[entry.id]]);
-                              await callMethod('account.move', 'button_cancel', [[entry.id]]);
-                              setMsg('✅ سند ابطال شد');
-                              setTimeout(() => setMsg(''), 3000);
-                              fetchEntries();
-                            } catch {
-                              // If button_cancel not available, try reversal
-                              try {
-                                await callMethod('account.move', '_reverse_moves', [[entry.id]], { cancel: true });
-                                setMsg('✅ سند معکوس ایجاد شد');
-                                setTimeout(() => setMsg(''), 3000);
-                                fetchEntries();
-                              } catch (e2: any) {
-                                alert(e2.message || 'خطا در ابطال سند');
+                              // Create a reversal entry (storno) - proper accounting approach
+                              // This creates a mirror entry that cancels out the original
+                              const today = new Date().toISOString().split('T')[0];
+                              const lines = (entryLinesMap[entry.id] || []).map((l: any) => [0, 0, {
+                                account_id: l.account_id?.[0],
+                                debit: l.credit || 0,
+                                credit: l.debit || 0,
+                                name: `ابطال: ${l.name || entry.name}`,
+                                partner_id: l.partner_id?.[0] || false,
+                                product_id: l.product_id?.[0] || false,
+                              }]);
+                              if (lines.length === 0) {
+                                alert('ابتدا آرتیکل‌های سند را بارگذاری کنید (کلیک روی سند)');
+                                return;
                               }
+                              const reversalId = await create('account.move', {
+                                move_type: 'entry',
+                                date: today,
+                                ref: `ابطال ${entry.name}`,
+                                journal_id: entry.journal_id?.[0],
+                                line_ids: lines,
+                                narration: `سند معکوس برای ابطال ${entry.name}`,
+                              });
+                              await callMethod('account.move', 'action_post', [[reversalId]]);
+                              setMsg('✅ سند معکوس ایجاد و ثبت شد');
+                              setTimeout(() => setMsg(''), 4000);
+                              fetchEntries();
+                            } catch (err: any) {
+                              alert(err.message || 'خطا در ایجاد سند معکوس');
                             }
                           }}
                           className="text-[10px] bg-red-100 text-red-700 px-3 py-1 rounded-lg font-bold hover:bg-red-200"
