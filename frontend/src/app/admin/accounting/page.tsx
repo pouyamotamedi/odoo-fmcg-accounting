@@ -522,7 +522,7 @@ export default function AccountingPage() {
                         <button
                           onClick={async (e) => {
                             e.stopPropagation();
-                            const isStockEntry = entry.name?.startsWith('STJ') || entry.ref?.includes('WH/') || entry.ref?.includes('SP/');
+                            const isStockEntry = entry.name?.startsWith('STJ') || (entry.ref && entry.ref.includes('WH/')) || (entry.ref && entry.ref.includes('SP/'));
                             const confirmMsg = isStockEntry 
                               ? `ابطال سند "${entry.name}"؟\n\n⚠️ این سند مرتبط با انبار است.\nسند حسابداری معکوس ایجاد می‌شود.\nبرای اصلاح موجودی فیزیکی، از صفحه انبارگردانی استفاده کنید.`
                               : `ابطال سند "${entry.name}"؟\n\nیک سند معکوس (storno) ایجاد و ثبت می‌شود.`;
