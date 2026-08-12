@@ -547,7 +547,7 @@ export default function AccountingPage() {
                                 move_type: 'entry',
                                 date: today,
                                 ref: `ابطال ${entry.name}`,
-                                journal_id: entry.journal_id?.[0],
+                                journal_id: entry.journal_id ? (entry.journal_id as any)[0] : false,
                                 line_ids: lines,
                                 narration: `سند معکوس برای ابطال ${entry.name}`,
                               });
