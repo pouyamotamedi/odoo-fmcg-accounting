@@ -98,6 +98,7 @@ function getDateRange(period: 'daily' | 'weekly' | 'monthly', customFrom?: strin
 function SalesChart() {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [periodCogs, setPeriodCogs] = useState(0);
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -136,6 +137,7 @@ function SalesChart() {
 
       // Total COGS for the period
       const totalCogs = (cogsLines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
+      setPeriodCogs(totalCogs);
 
       // Helper: net sales = sales - refunds for a given filter
       const netSalesForFilter = (filter: (s: any) => boolean) => {
@@ -242,8 +244,10 @@ function SalesChart() {
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-indigo-400 inline-block"></span> فروش: <b>{formatPrice(totalSales)}</b></span>
         {showPurchases && <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400 inline-block"></span> خرید: <b>{formatPrice(totalPurchases)}</b></span>}
         <span className="text-gray-400">|</span>
-        <span className={totalSales - totalPurchases >= 0 ? 'text-green-600' : 'text-red-600'}>
-          سود فروش: <b>{formatPrice(totalSales - totalPurchases)}</b>
+        <span className="text-gray-600">بهای تمام شده: <b>{formatPrice(periodCogs)}</b></span>
+        <span className="text-gray-400">|</span>
+        <span className={totalSales - periodCogs >= 0 ? 'text-green-600' : 'text-red-600'}>
+          سود ناخالص: <b>{formatPrice(totalSales - periodCogs)}</b>
         </span>
       </div>
 
@@ -410,6 +414,7 @@ function SellerDashboard({ userName }: { userName: string }) {
   const [todayCount, setTodayCount] = useState(0);
   const [weekSales, setWeekSales] = useState(0);
   const [weekCount, setWeekCount] = useState(0);
+  const [cashBalance, setCashBalance] = useState(0);
   const [rank, setRank] = useState('');
   const [streak, setStreak] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -432,7 +437,7 @@ function SellerDashboard({ userName }: { userName: string }) {
 
       // Get today's sales by this user
       const uid = useAuthStore.getState().uid;
-      const [todayInvoices, weekInvoices] = await Promise.all([
+      const [todayInvoices, weekInvoices, balances] = await Promise.all([
         searchRead('account.move', [
           ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
           ['invoice_date', '=', today], ['create_uid', '=', uid],
@@ -441,7 +446,14 @@ function SellerDashboard({ userName }: { userName: string }) {
           ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
           ['invoice_date', '>=', weekAgo], ['create_uid', '=', uid],
         ], ['amount_total', 'invoice_date']),
+        getBankCashBalances(),
       ]);
+
+      // Cash balance (only cash registers, not bank)
+      const cashTotal = (balances || [])
+        .filter((b: any) => b.type === 'cash')
+        .reduce((s: number, b: any) => s + (b.fmcg_running_balance || 0), 0);
+      setCashBalance(cashTotal);
 
       const tSales = (todayInvoices || []).reduce((s: number, i: any) => s + (i.amount_total || 0), 0);
       const wSales = (weekInvoices || []).reduce((s: number, i: any) => s + (i.amount_total || 0), 0);
@@ -513,7 +525,7 @@ function SellerDashboard({ userName }: { userName: string }) {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
           <div className="text-2xl font-bold text-blue-600">{toPersianDigits(todayCount)}</div>
           <div className="text-xs text-gray-500 mt-1">فاکتور امروز</div>
@@ -521,6 +533,10 @@ function SellerDashboard({ userName }: { userName: string }) {
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
           <div className="text-2xl font-bold text-green-600">{formatPrice(weekSales)}</div>
           <div className="text-xs text-gray-500 mt-1">فروش هفته ({toPersianDigits(weekCount)} فاکتور)</div>
+        </div>
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
+          <div className="text-2xl font-bold text-amber-600">{formatPrice(cashBalance)}</div>
+          <div className="text-xs text-gray-500 mt-1">موجودی صندوق</div>
         </div>
       </div>
 
