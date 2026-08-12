@@ -7,6 +7,7 @@ import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 interface Product {
   id: number;
   name: string;
+  display_name?: string;
   barcode: string | false;
   qty_available: number;
 }
@@ -73,7 +74,7 @@ export default function StockCountPage() {
   function addAllProducts() {
     const newLines: CountLine[] = products.map((p) => ({
       product_id: p.id,
-      product_name: p.name,
+      product_name: p.display_name || p.name,
       system_qty: p.qty_available,
       counted_qty: p.qty_available, // Default: same as system
       difference: 0,
@@ -85,7 +86,7 @@ export default function StockCountPage() {
     if (lines.find((l) => l.product_id === product.id)) return;
     setLines([...lines, {
       product_id: product.id,
-      product_name: product.name,
+      product_name: product.display_name || product.name,
       system_qty: product.qty_available,
       counted_qty: product.qty_available,
       difference: 0,
@@ -171,7 +172,7 @@ export default function StockCountPage() {
   }
 
   const filteredProducts = products.filter(
-    (p) => p.name.includes(search) || (p.barcode && p.barcode.includes(search))
+    (p) => (p.display_name || p.name).includes(search) || (p.barcode && p.barcode.includes(search))
   );
 
   const totalDiffs = lines.filter((l) => l.difference !== 0).length;
@@ -225,7 +226,7 @@ export default function StockCountPage() {
                   disabled={!!lines.find((l) => l.product_id === p.id)}
                   className="bg-gray-50 rounded-lg p-2 text-center border hover:border-indigo-400 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <div className="text-xs font-medium text-gray-800 truncate">{p.name}</div>
+                  <div className="text-xs font-medium text-gray-800 truncate">{p.display_name || p.name}</div>
                   <div className="text-[10px] text-gray-500">موجودی: {toPersianDigits(Math.round(p.qty_available))}</div>
                 </button>
               ))}

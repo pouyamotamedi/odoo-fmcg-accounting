@@ -989,14 +989,14 @@ export async function getInventoryReport() {
     return await searchRead(
       'product.product',
       [['active', '=', true], ['type', '=', 'consu']],
-      ['name', 'qty_available', 'standard_price', 'list_price', 'fmcg_is_low_stock', 'fmcg_reorder_threshold'],
+      ['name', 'display_name', 'qty_available', 'standard_price', 'list_price', 'fmcg_is_low_stock', 'fmcg_reorder_threshold'],
       0, 0, 'name asc'
     );
   } catch {
     return await searchRead(
       'product.product',
       [['active', '=', true], ['type', '=', 'consu']],
-      ['name', 'qty_available', 'standard_price', 'list_price'],
+      ['name', 'display_name', 'qty_available', 'standard_price', 'list_price'],
       0, 0, 'name asc'
     );
   }

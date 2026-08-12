@@ -621,7 +621,7 @@ export default function PosPage() {
                     >
                       -
                     </button>
-                    <span className="text-sm">{toPersianDigits(item.quantity)}</span>
+                    <input type="number" value={item.quantity} onChange={(e) => updateQuantity(item.id, Number(e.target.value) || 1)} className="w-12 text-center text-sm border border-gray-200 rounded px-1 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" min="1" />
                     <button
                       onClick={() => updateQuantity(item.id, item.quantity + 1)}
                       className="w-6 h-6 rounded bg-gray-200 text-xs font-bold"

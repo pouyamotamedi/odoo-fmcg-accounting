@@ -194,7 +194,7 @@ function ReportTable({ type, rows }: { type: Exclude<ReportType, null>; rows: an
         <Table
           headers={['کالا', 'موجودی', 'قیمت خرید', 'ارزش', 'وضعیت']}
           data={rows.map((r) => [
-            r.name,
+            r.display_name || r.name,
             toPersianDigits(Math.round(r.qty_available || 0)),
             formatPrice(r.standard_price || 0),
             formatPrice((r.qty_available || 0) * (r.standard_price || 0)),
