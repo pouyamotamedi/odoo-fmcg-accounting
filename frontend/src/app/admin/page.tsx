@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 import { searchRead, getBankCashBalances, getTodaySales, getProducts, getPartnerBalances } from '@/lib/odoo-api';
+import { useAuthStore } from '@/stores/auth-store';
 import * as jalaali from 'jalaali-js';
 
 interface DashData {
@@ -111,8 +112,8 @@ function SalesChart() {
     try {
       const { from, to } = getDateRange(period, dateFrom || undefined, dateTo || undefined);
 
-      // Fetch all sales, refunds, and purchases in range
-      const [sales, refunds, purchases] = await Promise.all([
+      // Fetch all sales, refunds, purchases, and COGS in range
+      const [sales, refunds, purchases, cogsLines] = await Promise.all([
         searchRead('account.move', [
           ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
           ['invoice_date', '>=', from], ['invoice_date', '<=', to],
@@ -125,7 +126,16 @@ function SalesChart() {
           ['move_type', '=', 'in_invoice'], ['state', '=', 'posted'],
           ['invoice_date', '>=', from], ['invoice_date', '<=', to],
         ], ['amount_total', 'invoice_date']),
+        // COGS = expense_direct_cost entries (account 500000)
+        searchRead('account.move.line', [
+          ['parent_state', '=', 'posted'],
+          ['account_id.account_type', '=', 'expense_direct_cost'],
+          ['date', '>=', from], ['date', '<=', to],
+        ], ['debit', 'credit', 'date']),
       ]);
+
+      // Total COGS for the period
+      const totalCogs = (cogsLines || []).reduce((sum: number, l: any) => sum + l.debit - l.credit, 0);
 
       // Helper: net sales = sales - refunds for a given filter
       const netSalesForFilter = (filter: (s: any) => boolean) => {
@@ -228,12 +238,12 @@ function SalesChart() {
       </div>
 
       {/* Summary */}
-      <div className="flex gap-4 mb-3 text-xs">
+      <div className="flex gap-4 mb-3 text-xs flex-wrap">
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-indigo-400 inline-block"></span> فروش: <b>{formatPrice(totalSales)}</b></span>
         {showPurchases && <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400 inline-block"></span> خرید: <b>{formatPrice(totalPurchases)}</b></span>}
         <span className="text-gray-400">|</span>
         <span className={totalSales - totalPurchases >= 0 ? 'text-green-600' : 'text-red-600'}>
-          سود ناخالص: <b>{formatPrice(totalSales - totalPurchases)}</b>
+          سود فروش: <b>{formatPrice(totalSales - totalPurchases)}</b>
         </span>
       </div>
 
@@ -279,6 +289,13 @@ function SalesChart() {
 
 export default function AdminDashboard() {
   const router = useRouter();
+  const { role, isAdmin, name: userName } = useAuthStore();
+
+  // Sellers get a different, motivational dashboard
+  if (role === 'seller' && !isAdmin) {
+    return <SellerDashboard userName={userName} />;
+  }
+
   const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [] });
   const [loading, setLoading] = useState(true);
 
@@ -382,6 +399,149 @@ export default function AdminDashboard() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============ Seller Dashboard (motivational & gamified) ============
+
+function SellerDashboard({ userName }: { userName: string }) {
+  const [todaySales, setTodaySales] = useState(0);
+  const [todayCount, setTodayCount] = useState(0);
+  const [weekSales, setWeekSales] = useState(0);
+  const [weekCount, setWeekCount] = useState(0);
+  const [rank, setRank] = useState('');
+  const [streak, setStreak] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [greeting, setGreeting] = useState('');
+
+  useEffect(() => {
+    // Time-based greeting
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting('صبح بخیر');
+    else if (hour < 17) setGreeting('ظهر بخیر');
+    else setGreeting('عصر بخیر');
+
+    loadSellerData();
+  }, []);
+
+  async function loadSellerData() {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().split('T')[0];
+
+      // Get today's sales by this user
+      const uid = useAuthStore.getState().uid;
+      const [todayInvoices, weekInvoices] = await Promise.all([
+        searchRead('account.move', [
+          ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
+          ['invoice_date', '=', today], ['create_uid', '=', uid],
+        ], ['amount_total']),
+        searchRead('account.move', [
+          ['move_type', '=', 'out_invoice'], ['state', '=', 'posted'],
+          ['invoice_date', '>=', weekAgo], ['create_uid', '=', uid],
+        ], ['amount_total', 'invoice_date']),
+      ]);
+
+      const tSales = (todayInvoices || []).reduce((s: number, i: any) => s + (i.amount_total || 0), 0);
+      const wSales = (weekInvoices || []).reduce((s: number, i: any) => s + (i.amount_total || 0), 0);
+      setTodaySales(tSales);
+      setTodayCount((todayInvoices || []).length);
+      setWeekSales(wSales);
+      setWeekCount((weekInvoices || []).length);
+
+      // Calculate streak (consecutive days with sales)
+      let streakDays = 0;
+      for (let d = 0; d < 30; d++) {
+        const checkDate = new Date(Date.now() - d * 864e5).toISOString().split('T')[0];
+        const hasSale = (weekInvoices || []).some((i: any) => i.invoice_date === checkDate);
+        if (d === 0 && !hasSale) break; // Today no sale yet is ok for streak
+        if (d > 0 && !hasSale) break;
+        streakDays++;
+      }
+      setStreak(streakDays);
+
+      // Rank based on weekly performance
+      if (wSales >= 50000000) setRank('🏆 فروشنده طلایی');
+      else if (wSales >= 20000000) setRank('🥈 فروشنده نقره‌ای');
+      else if (wSales >= 10000000) setRank('🥉 فروشنده برنزی');
+      else if (wSales > 0) setRank('⭐ تازه‌کار');
+      else setRank('🌱 شروع کن!');
+    } catch { /* ignore */ }
+    setLoading(false);
+  }
+
+  // Daily target (configurable, default 10M)
+  const dailyTarget = 10000000;
+  const progress = Math.min((todaySales / dailyTarget) * 100, 100);
+
+  if (loading) return <div className="text-center py-12 text-gray-400">بارگذاری...</div>;
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      {/* Welcome */}
+      <div className="text-center mb-8">
+        <h1 className="text-2xl font-bold text-slate-800">{greeting}، {userName || 'فروشنده'}! 👋</h1>
+        <p className="text-gray-500 text-sm mt-1">{rank}</p>
+      </div>
+
+      {/* Today's Progress - main motivator */}
+      <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 text-white mb-6 shadow-lg">
+        <div className="text-center">
+          <div className="text-sm opacity-80 mb-1">فروش امروز</div>
+          <div className="text-3xl font-bold">{formatPrice(todaySales)}</div>
+          <div className="text-xs opacity-70 mt-1">{toPersianDigits(todayCount)} فاکتور</div>
+        </div>
+        {/* Progress bar */}
+        <div className="mt-4">
+          <div className="flex justify-between text-[10px] opacity-70 mb-1">
+            <span>هدف روزانه: {formatPrice(dailyTarget)}</span>
+            <span>{toPersianDigits(Math.round(progress))}%</span>
+          </div>
+          <div className="w-full h-3 bg-white/20 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-1000 ${progress >= 100 ? 'bg-yellow-300' : 'bg-white/80'}`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {progress >= 100 && (
+            <div className="text-center mt-2 text-yellow-200 text-sm font-bold animate-pulse">
+              🎉 به هدف رسیدی! عالیه!
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
+          <div className="text-2xl font-bold text-blue-600">{toPersianDigits(todayCount)}</div>
+          <div className="text-xs text-gray-500 mt-1">فاکتور امروز</div>
+        </div>
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
+          <div className="text-2xl font-bold text-green-600">{formatPrice(weekSales)}</div>
+          <div className="text-xs text-gray-500 mt-1">فروش هفته ({toPersianDigits(weekCount)} فاکتور)</div>
+        </div>
+      </div>
+
+      {/* Streak & Motivation */}
+      {streak > 0 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-6 text-center">
+          <div className="text-lg">🔥</div>
+          <div className="text-sm font-bold text-orange-700">
+            {toPersianDigits(streak)} روز متوالی فروش!
+          </div>
+          <div className="text-[10px] text-orange-500 mt-1">ادامه بده، داری رکورد میزنی!</div>
+        </div>
+      )}
+
+      {/* Quick Action */}
+      <Link
+        href="/pos"
+        className="block w-full bg-green-600 hover:bg-green-700 text-white rounded-xl py-4 text-center font-bold text-lg transition shadow-lg"
+      >
+        🖥️ شروع فروش
+      </Link>
     </div>
   );
 }
