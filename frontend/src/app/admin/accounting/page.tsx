@@ -496,10 +496,18 @@ export default function AccountingPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((entry) => (
+              {filtered.map((entry) => {
+                // Check if this entry is a reversal OR has been reversed
+                const isReversal = entry.ref && typeof entry.ref === 'string' && entry.ref.startsWith('ابطال ');
+                const hasBeenReversed = filtered.some((e) => e.ref && typeof e.ref === 'string' && e.ref === `ابطال ${entry.name}`);
+                return (
                 <React.Fragment key={entry.id}>
-                <tr className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => handleExpandEntry(entry.id)}>
-                  <td className="p-3 text-gray-500 text-xs">{entry.name}</td>
+                <tr className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${isReversal ? 'bg-red-50/50' : ''} ${hasBeenReversed ? 'opacity-50' : ''}`} onClick={() => handleExpandEntry(entry.id)}>
+                  <td className="p-3 text-gray-500 text-xs">
+                    {entry.name}
+                    {isReversal && <span className="mr-2 text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">سند معکوس</span>}
+                    {hasBeenReversed && <span className="mr-2 text-[9px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">ابطال شده</span>}
+                  </td>
                   <td className="p-3">
                     <div>{entry.date ? toJalali(entry.date) : '\u2014'}</div>
                     {entry.create_date && <div className="text-[9px] text-gray-400">{new Date(entry.create_date).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</div>}
@@ -518,7 +526,7 @@ export default function AccountingPage() {
                   <tr><td colSpan={7} className="p-3 bg-gray-50">
                     <div className="flex justify-between items-center mb-2">
                       <div className="text-xs font-bold">آرتیکل‌های سند:</div>
-                      {entry.state === 'posted' && (
+                      {entry.state === 'posted' && !isReversal && !hasBeenReversed && (
                         <button
                           onClick={async (e) => {
                             e.stopPropagation();
@@ -574,7 +582,7 @@ export default function AccountingPage() {
                   </td></tr>
                 )}
                 </React.Fragment>
-              ))}
+              ); })}
             </tbody>
           </table>
         </div>
