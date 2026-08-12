@@ -510,7 +510,7 @@ export default function AccountingPage() {
                   </td>
                   <td className="p-3">
                     <div>{entry.date ? toJalali(entry.date) : '\u2014'}</div>
-                    {entry.create_date && <div className="text-[9px] text-gray-400">{new Date(entry.create_date).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</div>}
+                    {entry.create_date && <div className="text-[9px] text-gray-400">{new Date(entry.create_date + ' UTC').toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran' })}</div>}
                   </td>
                   <td className="p-3">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getMoveTypeColor(entry)}`}>

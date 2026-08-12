@@ -45,8 +45,13 @@ try:
     admin_partner = models.execute_kw(db, uid, password, 'res.users', 'read', [[2]], {'fields': ['partner_id']})
     if admin_partner:
         partner_id = admin_partner[0]['partner_id'][0]
-        models.execute_kw(db, uid, password, 'res.partner', 'write', [[partner_id], {'lang': 'fa_IR'}])
-        print("    Admin language set to fa_IR")
+        models.execute_kw(db, uid, password, 'res.partner', 'write', [[partner_id], {'lang': 'fa_IR', 'tz': 'Asia/Tehran'}])
+        print("    Admin language set to fa_IR, timezone to Asia/Tehran")
+    # Set timezone for ALL users
+    all_users = models.execute_kw(db, uid, password, 'res.users', 'search', [[['active', '=', True]]])
+    if all_users:
+        models.execute_kw(db, uid, password, 'res.users', 'write', [all_users, {'tz': 'Asia/Tehran'}])
+        print(f"    Set timezone Asia/Tehran for {len(all_users)} users")
 except Exception as e:
     print(f"    Warning: {e}")
 
