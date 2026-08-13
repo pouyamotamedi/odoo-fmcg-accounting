@@ -126,6 +126,9 @@ export default function InventoryPage() {
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [form, setForm] = useState<ProductForm>({ name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10', categ_id: 0 });
+  const [invPriceLinked, setInvPriceLinked] = useState(true);
+  const [invPriceOriginal, setInvPriceOriginal] = useState(0);
+  const [invSellOriginal, setInvSellOriginal] = useState(0);
 
   // Accordion: expanded templates (multiple allowed)
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
@@ -227,6 +230,8 @@ export default function InventoryPage() {
   function openEditForm(t: ProductTemplate) {
     setForm({ name: t.name, barcode: '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold || 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
     setEditingId(t.id); setImageFile(null);
+    setInvPriceOriginal(t.standard_price);
+    setInvSellOriginal(t.list_price);
     // Load existing discount prices for this product
     loadDiscountPricesForTemplate(t.id);
     setShowForm(true);
@@ -611,11 +616,27 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">قیمت خرید *</label>
-                  <PriceInput value={form.standard_price} onChange={(v) => setForm({...form, standard_price: v})} placeholder="۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
+                  <PriceInput value={form.standard_price} onChange={(v) => {
+                    setForm({...form, standard_price: v});
+                    if (invPriceLinked && invPriceOriginal > 0) {
+                      const ratio = (Number(v) || 0) / invPriceOriginal;
+                      setForm(f => ({...f, standard_price: v, list_price: String(Math.round(invSellOriginal * ratio))}));
+                    }
+                  }} placeholder="۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
                 </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">قیمت فروش *</label>
-                  <PriceInput value={form.list_price} onChange={(v) => setForm({...form, list_price: v})} placeholder="۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
+                <div className="flex items-end gap-1">
+                  <div className="flex-1">
+                    <label className="block text-xs text-gray-500 mb-1">قیمت فروش *</label>
+                    <PriceInput value={form.list_price} onChange={(v) => setForm({...form, list_price: v})} placeholder="۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setInvPriceLinked(!invPriceLinked)}
+                    title={invPriceLinked ? 'لینک فعال: قیمت فروش با خرید تغییر می‌کند' : 'لینک غیرفعال'}
+                    className={`mb-0.5 w-8 h-8 rounded-lg flex items-center justify-center text-sm transition ${invPriceLinked ? 'bg-indigo-100 text-indigo-600 border-2 border-indigo-400' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}
+                  >
+                    {invPriceLinked ? '🔗' : '⛓️‍💥'}
+                  </button>
                 </div>
               </div>
               <div>

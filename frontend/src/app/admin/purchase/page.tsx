@@ -56,7 +56,8 @@ export default function PurchasePage() {
   const [editingProduct, setEditingProduct] = useState<OdooProduct | null>(null);
   const [editPrice, setEditPrice] = useState('');
   const [editSellPrice, setEditSellPrice] = useState('');
-  const [editThreshold, setEditThreshold] = useState('10');
+  const [editPriceLinked, setEditPriceLinked] = useState(true);
+  const [editPriceOriginal, setEditPriceOriginal] = useState(0); // original purchase price for ratio calcconst [editThreshold, setEditThreshold] = useState('10');
   const [editImage, setEditImage] = useState<File | null>(null);
   const [journals, setJournals] = useState<{id:number;name:string;type:string}[]>([]);
   const [showPayment, setShowPayment] = useState(false);
@@ -597,7 +598,7 @@ export default function PurchasePage() {
                 </button>
                 <button onClick={async (e) => {
                   e.stopPropagation();
-                  setEditingProduct(product); setEditPrice(String(product.standard_price)); setEditSellPrice(String(product.list_price)); setEditThreshold(String(product.fmcg_reorder_threshold || 10));
+                  setEditingProduct(product); setEditPrice(String(product.standard_price)); setEditSellPrice(String(product.list_price)); setEditThreshold(String(product.fmcg_reorder_threshold || 10)); setEditPriceOriginal(product.standard_price);
                   // Load discount prices
                   const prices: Record<number, string> = {};
                   for (const cat of discountCats) {
@@ -902,11 +903,38 @@ export default function PurchasePage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">قیمت خرید</label>
-                  <PriceInput value={editPrice} onChange={(v) => setEditPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                  <PriceInput value={editPrice} onChange={(v) => {
+                    setEditPrice(v);
+                    // Proportionally adjust sell price + discount prices if linked
+                    if (editPriceLinked && editPriceOriginal > 0) {
+                      const newPrice = Number(v) || 0;
+                      const ratio = newPrice / editPriceOriginal;
+                      const origSell = editingProduct?.list_price || 0;
+                      setEditSellPrice(String(Math.round(origSell * ratio)));
+                      // Also adjust discount prices
+                      const newDiscPrices: Record<number, string> = {};
+                      for (const [catId, val] of Object.entries(editDiscountPrices)) {
+                        const origDisc = Number(val) || 0;
+                        if (origDisc > 0) newDiscPrices[Number(catId)] = String(Math.round(origDisc * ratio));
+                        else newDiscPrices[Number(catId)] = val;
+                      }
+                      if (Object.keys(newDiscPrices).length > 0) setEditDiscountPrices(newDiscPrices);
+                    }
+                  }} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
                 </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">قیمت فروش</label>
-                  <PriceInput value={editSellPrice} onChange={(v) => setEditSellPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                <div className="flex items-end gap-1">
+                  <div className="flex-1">
+                    <label className="block text-xs text-gray-500 mb-1">قیمت فروش</label>
+                    <PriceInput value={editSellPrice} onChange={(v) => setEditSellPrice(v)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditPriceLinked(!editPriceLinked)}
+                    title={editPriceLinked ? 'لینک فعال: قیمت فروش با خرید تغییر می‌کند' : 'لینک غیرفعال: قیمت فروش مستقل است'}
+                    className={`mb-0.5 w-8 h-8 rounded-lg flex items-center justify-center text-sm transition ${editPriceLinked ? 'bg-indigo-100 text-indigo-600 border-2 border-indigo-400' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}
+                  >
+                    {editPriceLinked ? '🔗' : '⛓️‍💥'}
+                  </button>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">حداقل موجودی</label>
