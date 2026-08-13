@@ -57,7 +57,8 @@ export default function PurchasePage() {
   const [editPrice, setEditPrice] = useState('');
   const [editSellPrice, setEditSellPrice] = useState('');
   const [editPriceLinked, setEditPriceLinked] = useState(true);
-  const [editPriceOriginal, setEditPriceOriginal] = useState(0); // original purchase price for ratio calcconst [editThreshold, setEditThreshold] = useState('10');
+  const [editPriceOriginal, setEditPriceOriginal] = useState(0);
+  const [editThreshold, setEditThreshold] = useState('10');
   const [editImage, setEditImage] = useState<File | null>(null);
   const [journals, setJournals] = useState<{id:number;name:string;type:string}[]>([]);
   const [showPayment, setShowPayment] = useState(false);
