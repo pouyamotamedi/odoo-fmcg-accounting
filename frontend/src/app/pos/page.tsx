@@ -49,6 +49,8 @@ export default function PosPage() {
   const [activeDiscount, setActiveDiscount] = useState<number>(0);
   const [discountPrices, setDiscountPrices] = useState<Map<number, number>>(new Map());
   const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
+  // Variant cache for offline mode
+  const [variantCache, setVariantCache] = useState<Map<number, any[]>>(new Map());
   // Pin feature
   const [pinnedIds, setPinnedIds] = useState<Set<number>>(new Set());
   // Multi-card payment
@@ -98,6 +100,15 @@ export default function PosPage() {
   // Sync offline queue when back online
   const syncOfflineQueue = useCallback(async () => {
     try {
+      // Get journals fresh (they may not be in state yet)
+      let journals = posJournals;
+      if (!journals || journals.length === 0) {
+        try {
+          const jrnls = await getBankCashBalances();
+          journals = jrnls?.map((j: any) => ({ id: j.id, name: j.name, type: j.type })) || [];
+          setPosJournals(journals);
+        } catch {}
+      }
       const result = await replayPendingTransactions(async (tx: OfflineTransaction) => {
         const lines = tx.lines;
         const invoiceId = await createPosOrder({
@@ -107,8 +118,8 @@ export default function PosPage() {
         });
         await confirmInvoice(invoiceId);
         if (tx.payment_method !== 'credit') {
-          const cashJ = posJournals.find(j => j.type === 'cash');
-          const bankJ = posJournals.find(j => j.type === 'bank');
+          const cashJ = journals.find(j => j.type === 'cash');
+          const bankJ = journals.find(j => j.type === 'bank');
           const jId = tx.payment_method === 'card' ? bankJ?.id : cashJ?.id;
           if (jId) await registerInvoicePayment(invoiceId, jId, tx.total);
         }
@@ -117,11 +128,17 @@ export default function PosPage() {
         setMsg(`✅ ${toPersianDigits(result.success)} تراکنش آفلاین همگام‌سازی شد`);
         setTimeout(() => setMsg(''), 4000);
       }
-      setPendingCount(0);
+      const remaining = await getPendingCount();
+      setPendingCount(remaining);
+      if (remaining > 0) {
+        // Retry after a delay
+        setTimeout(syncOfflineQueue, 5000);
+      }
     } catch {
-      // Will retry on next online event
+      // Will retry on next online event or after delay
+      setTimeout(syncOfflineQueue, 10000);
     }
-  }, []);
+  }, [posJournals]);
 
   useEffect(() => {
     async function load() {
@@ -130,6 +147,14 @@ export default function PosPage() {
         setProducts(data || []);
         setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
         setDiscountCategories(discCats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
+        // Pre-cache variants by template for offline use
+        const vCache = new Map<number, any[]>();
+        for (const p of (data || [])) {
+          const tmplId = (p as any).product_tmpl_id?.[0] || (p as any).product_tmpl_id || p.id;
+          if (!vCache.has(tmplId)) vCache.set(tmplId, []);
+          vCache.get(tmplId)!.push(p);
+        }
+        setVariantCache(vCache);
         // Check PAX terminal setting
         try {
           const settings = await getCompanySettings();
@@ -242,8 +267,19 @@ export default function PosPage() {
   async function handleProductClick(product: OdooProduct & {variantCount?: number}) {
     const tmplId = (product as any).product_tmpl_id?.[0] || (product as any).product_tmpl_id;
     if (product.variantCount && product.variantCount > 1 && tmplId) {
-      // Has variants - show popup
-      const vars = await getProductVariants(tmplId);
+      // Has variants - show popup (use cache first, API as fallback)
+      let vars = variantCache.get(tmplId);
+      if (!vars || vars.length <= 1) {
+        try {
+          vars = await getProductVariants(tmplId);
+        } catch {
+          // Offline fallback: use cached products for this template
+          vars = products.filter(p => {
+            const pTmpl = (p as any).product_tmpl_id?.[0] || (p as any).product_tmpl_id || p.id;
+            return pTmpl === tmplId;
+          });
+        }
+      }
       if (vars && vars.length > 1) {
         setVariantPopup({ tmplId, name: product.name, variants: vars });
         return;
