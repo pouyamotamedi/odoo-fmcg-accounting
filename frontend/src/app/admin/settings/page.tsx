@@ -453,6 +453,16 @@ function BackupRestore() {
       });
 
       setRestoreProgress(80);
+      
+      // Check if response is JSON or HTML error
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('html')) {
+        const html = await response.text();
+        // Extract error message from HTML if possible
+        const match = html.match(/<(?:p|title|h\d)>([^<]+)<\//);
+        throw new Error(match?.[1] || 'سرور خطای HTML برگرداند — ممکنه فایل خیلی بزرگ باشد یا سرویس در حال ری‌استارت باشد');
+      }
+      
       const data = await response.json();
 
       if (!response.ok || !data.success) {

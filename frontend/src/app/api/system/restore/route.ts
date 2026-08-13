@@ -7,6 +7,10 @@ import { join } from 'path';
 
 const execAsync = promisify(exec);
 
+// Allow large file uploads (up to 500MB)
+export const runtime = 'nodejs';
+export const maxDuration = 300; // 5 minutes timeout
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
