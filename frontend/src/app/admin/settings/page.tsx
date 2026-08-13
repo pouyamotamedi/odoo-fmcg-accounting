@@ -505,7 +505,7 @@ function BackupRestore() {
           <label className="flex-1 cursor-pointer">
             <input
               type="file"
-              accept=".zip"
+              accept=".zip,.tar.gz,.gz"
               onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
               className="hidden"
             />

@@ -27,31 +27,32 @@ export async function POST() {
     const filestorePath = `/var/lib/odoo/.local/share/Odoo/filestore/${dbName}`;
     const hasFilestore = existsSync(filestorePath);
 
-    // Create zip with dump + filestore
+    // Create tar.gz with dump + filestore (tar/gzip are always available, zip may not be)
+    const archivePath = join(tmpdir(), `backup_${dbName}_${timestamp}.tar.gz`);
     if (hasFilestore) {
       await execAsync(
-        `cd /tmp && zip -r "${tmpPath}" "${dumpPath}" -j && cd "${filestorePath}" && zip -r "${tmpPath}" . -x ".*"`,
+        `tar -czf "${archivePath}" -C /tmp "${dbName}_${timestamp}.sql" -C "${filestorePath}" .`,
         { timeout: 120000 }
       );
     } else {
-      // Just zip the SQL dump
-      await execAsync(`zip -j "${tmpPath}" "${dumpPath}"`, { timeout: 60000 });
+      await execAsync(`tar -czf "${archivePath}" -C /tmp "${dbName}_${timestamp}.sql"`, { timeout: 60000 });
     }
 
-    // Read the zip file
-    const zipBuffer = await readFileAsync(tmpPath);
+    // Read the archive
+    const archiveBuffer = await readFileAsync(archivePath);
+    const dlFilename = `backup_${dbName}_${timestamp}.tar.gz`;
 
     // Cleanup
     try { unlink(dumpPath, () => {}); } catch {}
-    try { unlink(tmpPath, () => {}); } catch {}
+    try { unlink(archivePath, () => {}); } catch {}
 
     // Return as downloadable file
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(archiveBuffer, {
       status: 200,
       headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': String(zipBuffer.length),
+        'Content-Type': 'application/gzip',
+        'Content-Disposition': `attachment; filename="${dlFilename}"`,
+        'Content-Length': String(archiveBuffer.length),
       },
     });
   } catch (e: any) {

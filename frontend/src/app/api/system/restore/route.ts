@@ -22,9 +22,14 @@ export async function POST(request: Request) {
     const bytes = await file.arrayBuffer();
     await writeFile(tmpPath, Buffer.from(bytes));
 
-    // Extract and find SQL dump
+    // Extract archive (support both .zip and .tar.gz)
     const extractDir = join(tmpdir(), `restore_${Date.now()}`);
-    await execAsync(`mkdir -p "${extractDir}" && unzip -o "${tmpPath}" -d "${extractDir}"`, { timeout: 60000 });
+    const isZip = file.name.endsWith('.zip');
+    if (isZip) {
+      await execAsync(`mkdir -p "${extractDir}" && unzip -o "${tmpPath}" -d "${extractDir}"`, { timeout: 60000 });
+    } else {
+      await execAsync(`mkdir -p "${extractDir}" && tar -xzf "${tmpPath}" -C "${extractDir}"`, { timeout: 60000 });
+    }
 
     // Find SQL file
     const { stdout: sqlFiles } = await execAsync(`find "${extractDir}" -name "*.sql" -type f | head -1`);
