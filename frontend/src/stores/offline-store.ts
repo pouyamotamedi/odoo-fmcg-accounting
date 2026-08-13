@@ -117,8 +117,15 @@ export async function replayPendingTransactions(
       await submitFn(tx);
       if (tx.id) await removeTransaction(tx.id);
       success++;
-    } catch {
-      failed++;
+    } catch (e: any) {
+      // If error contains "already exists" or "duplicate", remove from queue (already synced before)
+      const msg = e?.message || '';
+      if (msg.includes('already') || msg.includes('duplicate') || msg.includes('UNIQUE')) {
+        if (tx.id) await removeTransaction(tx.id);
+        success++; // Count as success since it was already submitted
+      } else {
+        failed++;
+      }
     }
   }
 

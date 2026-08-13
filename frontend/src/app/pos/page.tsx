@@ -142,13 +142,18 @@ export default function PosPage() {
       if (result.success > 0) {
         setMsg(`✅ ${toPersianDigits(result.success)} تراکنش آفلاین ثبت شد${result.failed > 0 ? ` (${toPersianDigits(result.failed)} خطا)` : ''}`);
         setTimeout(() => setMsg(''), 4000);
+      } else if (result.failed > 0) {
+        setMsg(`❌ ${toPersianDigits(result.failed)} تراکنش خطا خورد — ۱۰ ثانیه بعد مجدد تلاش میشه`);
+        setTimeout(() => setMsg(''), 6000);
       }
       if (remaining > 0) {
         // Retry failed ones after a delay
         setTimeout(syncOfflineQueue, 10000);
       }
-    } catch {
+    } catch (err: any) {
       // Will retry on next online event or after delay
+      setMsg(`❌ خطا: ${err?.message || 'ناشناخته'}`);
+      setTimeout(() => setMsg(''), 5000);
       const remaining = await getPendingCount().catch(() => 0);
       setPendingCount(remaining);
       setTimeout(syncOfflineQueue, 15000);
@@ -520,9 +525,30 @@ export default function PosPage() {
           <div className="flex items-center gap-4">
             {msg && <span className="text-xs bg-green-500 px-2 py-1 rounded">{msg}</span>}
             {pendingCount > 0 && (
-              <span className="text-xs bg-yellow-500 px-2 py-1 rounded">
-                📥 {toPersianDigits(pendingCount)} در صف
-              </span>
+              <div className="flex gap-1">
+                <button onClick={async () => {
+                  setMsg('🔄 همگام‌سازی...');
+                  await syncOfflineQueue();
+                }} className="text-xs bg-yellow-500 hover:bg-yellow-600 px-2 py-1 rounded cursor-pointer">
+                  📥 {toPersianDigits(pendingCount)} در صف — ارسال
+                </button>
+                <button onClick={async () => {
+                  if (!confirm(`${pendingCount} تراکنش در صف هست.\n\nآیا می‌خواهید صف را پاک کنید؟\n⚠️ این تراکنش‌ها بدون ثبت حذف می‌شوند!`)) return;
+                  // Clear IndexedDB
+                  const db = await new Promise<IDBDatabase>((resolve) => {
+                    const req = indexedDB.open('fmcg-offline', 1);
+                    req.onsuccess = () => resolve(req.result);
+                  });
+                  const tx = db.transaction('pending-transactions', 'readwrite');
+                  tx.objectStore('pending-transactions').clear();
+                  db.close();
+                  setPendingCount(0);
+                  setMsg('🗑️ صف پاک شد');
+                  setTimeout(() => setMsg(''), 3000);
+                }} className="text-xs bg-red-500/70 hover:bg-red-600 px-1.5 py-1 rounded cursor-pointer" title="پاک کردن صف">
+                  🗑️
+                </button>
+              </div>
             )}
             <span className={`text-xs ${isOnline ? 'text-green-400' : 'text-red-400'}`}>
               {isOnline ? '🟢 آنلاین' : '🔴 آفلاین'}
