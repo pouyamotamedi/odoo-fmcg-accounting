@@ -375,7 +375,6 @@ function BackupRestore() {
 
   const ODOO_URL = '/api';
   const DB_NAME = process.env.NEXT_PUBLIC_ODOO_DB || 'fmcg_shop';
-  const MASTER_PWD = 'admin'; // Odoo database manager password
 
   async function handleBackup() {
     if (!confirm('پشتیبان‌گیری از دیتابیس؟\n\nیک فایل ZIP شامل کل اطلاعات دانلود می‌شود.')) return;
@@ -388,31 +387,22 @@ function BackupRestore() {
       setBackupProgress(30);
       setBackupMsg('در حال ایجاد بکاپ...');
 
-      // Odoo's database backup endpoint
-      const formData = new FormData();
-      formData.append('master_pwd', MASTER_PWD);
-      formData.append('name', DB_NAME);
-      formData.append('backup_format', 'zip');
-
-      const response = await fetch(`${ODOO_URL}/web/database/backup`, {
+      const response = await fetch('/api/system/backup', {
         method: 'POST',
-        body: formData,
-        credentials: 'include',
       });
 
       setBackupProgress(70);
       setBackupMsg('در حال دانلود...');
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text.includes('Access Denied') ? 'رمز مدیریت دیتابیس اشتباه است' : `خطا: ${response.status}`);
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `خطا: ${response.status}`);
       }
 
-      // Check content type - if HTML, it's an error page
       const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('html')) {
-        const text = await response.text();
-        throw new Error(text.includes('Access Denied') ? 'رمز مدیریت دیتابیس اشتباه است' : 'خطا در ایجاد بکاپ');
+      if (contentType.includes('json')) {
+        const data = await response.json();
+        throw new Error(data.error || 'خطا در پشتیبان‌گیری');
       }
 
       setBackupProgress(90);
@@ -421,10 +411,10 @@ function BackupRestore() {
       // Trigger download
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const now = new Date();
-      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}-${String(now.getMinutes()).padStart(2,'0')}`;
+      const filename = response.headers.get('content-disposition')?.match(/filename="(.+)"/)?.[1] 
+        || `backup_${Date.now()}.zip`;
       a.href = url;
-      a.download = `backup_${DB_NAME}_${dateStr}.zip`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -442,7 +432,7 @@ function BackupRestore() {
 
   async function handleRestore() {
     if (!restoreFile) { alert('فایل بکاپ را انتخاب کنید'); return; }
-    if (!confirm(`بازگردانی دیتابیس "${DB_NAME}" از فایل "${restoreFile.name}"؟\n\n⚠️ تمام اطلاعات فعلی با اطلاعات فایل بکاپ جایگزین می‌شود!\n\nاین عمل غیرقابل بازگشت است.`)) return;
+    if (!confirm(`بازگردانی دیتابیس از فایل "${restoreFile.name}"؟\n\n⚠️ تمام اطلاعات فعلی با اطلاعات فایل بکاپ جایگزین می‌شود!\n\nاین عمل غیرقابل بازگشت است.`)) return;
 
     setRestoreStatus('working');
     setRestoreProgress(10);
@@ -451,34 +441,22 @@ function BackupRestore() {
     try {
       setRestoreProgress(30);
 
-      // First drop existing database, then restore
-      // Odoo restore endpoint needs the DB to not exist, so we use a temp name and swap
       const formData = new FormData();
-      formData.append('master_pwd', MASTER_PWD);
-      formData.append('backup_file', restoreFile);
-      formData.append('name', DB_NAME);
-      formData.append('copy', 'true'); // copy=true means it can overwrite
+      formData.append('file', restoreFile);
 
       setRestoreProgress(50);
       setRestoreMsg('در حال بازگردانی...');
 
-      const response = await fetch(`${ODOO_URL}/web/database/restore`, {
+      const response = await fetch('/api/system/restore', {
         method: 'POST',
         body: formData,
-        credentials: 'include',
       });
 
       setRestoreProgress(80);
+      const data = await response.json();
 
-      const text = await response.text();
-      if (text.includes('error') || text.includes('Error') || text.includes('Access Denied')) {
-        if (text.includes('already exists')) {
-          throw new Error('دیتابیس با این نام وجود دارد. ابتدا باید حذف شود.');
-        }
-        if (text.includes('Access Denied')) {
-          throw new Error('رمز مدیریت دیتابیس اشتباه است');
-        }
-        throw new Error('خطا در بازگردانی — ممکن است فرمت فایل اشتباه باشد');
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'خطا در بازگردانی');
       }
 
       setRestoreProgress(100);
@@ -488,8 +466,8 @@ function BackupRestore() {
     } catch (e: any) {
       setRestoreStatus('error');
       setRestoreMsg(`❌ ${e.message || 'خطا در بازگردانی'}`);
+      setTimeout(() => { setRestoreStatus('idle'); setRestoreProgress(0); setRestoreMsg(''); }, 8000);
     }
-    setTimeout(() => { if (restoreStatus !== 'done') { setRestoreStatus('idle'); setRestoreProgress(0); setRestoreMsg(''); } }, 8000);
   }
 
   return (
