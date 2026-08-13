@@ -109,6 +109,13 @@ export default function PosPage() {
           setPosJournals(journals);
         } catch {}
       }
+      // Load saved journal preferences
+      let savedJournals = { cash: 0, card: 0 };
+      try {
+        const s = localStorage.getItem('pos_journal_settings');
+        if (s) savedJournals = JSON.parse(s);
+      } catch {}
+
       const result = await replayPendingTransactions(async (tx: OfflineTransaction) => {
         const lines = tx.lines;
         const invoiceId = await createPosOrder({
@@ -117,26 +124,34 @@ export default function PosPage() {
           partner_id: tx.partner_id,
         });
         await confirmInvoice(invoiceId);
+        // Payment registration is best-effort (don't fail the whole tx if it fails)
         if (tx.payment_method !== 'credit') {
-          const cashJ = journals.find(j => j.type === 'cash');
-          const bankJ = journals.find(j => j.type === 'bank');
-          const jId = tx.payment_method === 'card' ? bankJ?.id : cashJ?.id;
-          if (jId) await registerInvoicePayment(invoiceId, jId, tx.total);
+          try {
+            const cashJ = savedJournals.cash || journals.find(j => j.type === 'cash')?.id;
+            const bankJ = savedJournals.card || journals.find(j => j.type === 'bank')?.id;
+            const jId = tx.payment_method === 'card' ? bankJ : cashJ;
+            if (jId) await registerInvoicePayment(invoiceId, jId, tx.total);
+          } catch { /* payment registration failed, invoice still created */ }
         }
       });
-      if (result.success > 0) {
-        setMsg(`✅ ${toPersianDigits(result.success)} تراکنش آفلاین همگام‌سازی شد`);
-        setTimeout(() => setMsg(''), 4000);
-      }
+
+      // Update count
       const remaining = await getPendingCount();
       setPendingCount(remaining);
+
+      if (result.success > 0) {
+        setMsg(`✅ ${toPersianDigits(result.success)} تراکنش آفلاین ثبت شد${result.failed > 0 ? ` (${toPersianDigits(result.failed)} خطا)` : ''}`);
+        setTimeout(() => setMsg(''), 4000);
+      }
       if (remaining > 0) {
-        // Retry after a delay
-        setTimeout(syncOfflineQueue, 5000);
+        // Retry failed ones after a delay
+        setTimeout(syncOfflineQueue, 10000);
       }
     } catch {
       // Will retry on next online event or after delay
-      setTimeout(syncOfflineQueue, 10000);
+      const remaining = await getPendingCount().catch(() => 0);
+      setPendingCount(remaining);
+      setTimeout(syncOfflineQueue, 15000);
     }
   }, [posJournals]);
 
