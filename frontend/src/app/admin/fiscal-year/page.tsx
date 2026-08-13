@@ -269,6 +269,36 @@ export default function FiscalYearPage() {
 
   // Opening Balance Wizard
   async function startOpeningWizard() {
+    // Check for saved draft
+    try {
+      const savedDraft = localStorage.getItem('opening_entry_draft');
+      if (savedDraft) {
+        const draft = JSON.parse(savedDraft);
+        if (confirm(`پیش‌نویس ذخیره‌شده (${new Date(draft.savedAt).toLocaleDateString('fa-IR')}) یافت شد.\n\nآیا می‌خواهید ادامه دهید؟`)) {
+          setOpeningStep(draft.openingStep || 1);
+          setOpeningDate(draft.openingDate || new Date().toISOString().split('T')[0]);
+          setOpeningItems(draft.openingItems || []);
+          setInventoryItems(draft.inventoryItems || []);
+          // Still load accounts/products for dropdowns
+          try {
+            const bsAccounts = await searchRead('account.account', [['deprecated', '=', false], ['account_type', 'in', [
+              'asset_receivable', 'asset_cash', 'asset_current', 'asset_non_current', 'asset_prepayments', 'asset_fixed',
+              'liability_payable', 'liability_current', 'liability_non_current', 'equity', 'equity_unaffected',
+            ]]], ['name', 'code', 'account_type'], 0, 0, 'code asc');
+            setBalanceSheetAccounts(bsAccounts || []);
+            const prods = await getProducts();
+            setAllProducts((prods || []).map((p: any) => ({ id: p.id, name: p.display_name || p.name, standard_price: p.standard_price || 0 })));
+            const partners = await getPartners();
+            setAllPartners((partners || []).map((p: any) => ({ id: p.id, name: p.name })));
+          } catch {}
+          setShowOpening(true);
+          return;
+        } else {
+          localStorage.removeItem('opening_entry_draft');
+        }
+      }
+    } catch {}
+
     setOpeningStep(1);
     setOpeningDate(new Date().toISOString().split('T')[0]);
     try {
@@ -489,6 +519,7 @@ export default function FiscalYearPage() {
       }
 
       setShowOpening(false);
+      localStorage.removeItem('opening_entry_draft');
       setMsg('✅ سند افتتاحیه و موجودی انبار ثبت شد');
       setTimeout(() => setMsg(''), 4000);
     } catch (e: any) { alert(e.message || 'خطا'); }
@@ -741,7 +772,17 @@ export default function FiscalYearPage() {
                     ))}
                   </tbody>
                 </table>
-                <button onClick={addInventoryItem} className="text-xs text-blue-600 font-bold mt-2">+ افزودن کالا</button>
+                <div className="flex gap-3 items-center mt-2">
+                  <button onClick={addInventoryItem} className="text-xs text-blue-600 font-bold">+ افزودن کالا</button>
+                  <button onClick={() => {
+                    // Add all products that aren't already in the list
+                    const existingIds = new Set(inventoryItems.map(i => i.product_id));
+                    const newItems = allProducts
+                      .filter(p => !existingIds.has(p.id))
+                      .map(p => ({ product_id: p.id, product_name: p.name, qty: '', unit_cost: String(p.standard_price || '') }));
+                    setInventoryItems([...inventoryItems, ...newItems]);
+                  }} className="text-xs text-green-600 font-bold">📦 افزودن همه کالاها</button>
+                </div>
 
                 {inventoryTotalValue > 0 && (
                   <div className="bg-blue-50 p-3 rounded-lg mt-3 text-xs text-blue-700">
@@ -797,8 +838,22 @@ export default function FiscalYearPage() {
               </div>
             )}
 
-            <div className="flex justify-start mt-4 border-t pt-3">
-              <button onClick={() => setShowOpening(false)} className="text-xs text-gray-500 hover:text-gray-700">انصراف و بستن</button>
+            <div className="flex justify-between items-center mt-4 border-t pt-3">
+              <button onClick={() => {
+                // Save draft to localStorage
+                const draft = { openingDate, openingItems, inventoryItems, openingStep, savedAt: new Date().toISOString() };
+                localStorage.setItem('opening_entry_draft', JSON.stringify(draft));
+                setMsg('✅ پیش‌نویس ذخیره شد');
+                setTimeout(() => setMsg(''), 3000);
+              }} className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg font-bold hover:bg-blue-200">
+                💾 ذخیره پیش‌نویس
+              </button>
+              <button onClick={() => {
+                if (!confirm('آیا مطمئنید؟ تغییرات ذخیره‌نشده از بین می‌رود.\n\n(برای حفظ اطلاعات ابتدا "ذخیره پیش‌نویس" بزنید)')) return;
+                setShowOpening(false);
+              }} className="text-[10px] text-gray-400 hover:text-red-500">
+                ✕ انصراف
+              </button>
             </div>
           </div>
         </div>
