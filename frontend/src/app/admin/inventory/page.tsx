@@ -129,6 +129,7 @@ export default function InventoryPage() {
   const [invPriceLinked, setInvPriceLinked] = useState(true);
   const [invPriceOriginal, setInvPriceOriginal] = useState(0);
   const [invSellOriginal, setInvSellOriginal] = useState(0);
+  const [invDiscountOriginals, setInvDiscountOriginals] = useState<Record<number, number>>({});
 
   // Accordion: expanded templates (multiple allowed)
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
@@ -251,6 +252,10 @@ export default function InventoryPage() {
       }
     }
     setDiscountPrices(prices);
+    // Save originals for proportional calculation
+    const originals: Record<number, number> = {};
+    for (const [k, v] of Object.entries(prices)) originals[Number(k)] = Number(v) || 0;
+    setInvDiscountOriginals(originals);
   }
 
   async function handleSave() {
@@ -617,10 +622,18 @@ export default function InventoryPage() {
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">قیمت خرید *</label>
                   <PriceInput value={form.standard_price} onChange={(v) => {
-                    setForm({...form, standard_price: v});
                     if (invPriceLinked && invPriceOriginal > 0) {
                       const ratio = (Number(v) || 0) / invPriceOriginal;
-                      setForm(f => ({...f, standard_price: v, list_price: String(Math.round(invSellOriginal * ratio))}));
+                      const newSell = String(Math.round(invSellOriginal * ratio));
+                      // Also adjust discount prices proportionally from their originals
+                      const newDisc: Record<number, string> = {};
+                      for (const [catId, origVal] of Object.entries(invDiscountOriginals)) {
+                        if (origVal > 0) newDisc[Number(catId)] = String(Math.round(origVal * ratio));
+                      }
+                      setForm(f => ({...f, standard_price: v, list_price: newSell}));
+                      if (Object.keys(newDisc).length > 0) setDiscountPrices(newDisc);
+                    } else {
+                      setForm(f => ({...f, standard_price: v}));
                     }
                   }} placeholder="۰" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
                 </div>
