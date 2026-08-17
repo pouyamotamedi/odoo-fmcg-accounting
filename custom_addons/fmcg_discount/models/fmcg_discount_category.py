@@ -33,10 +33,13 @@ class FmcgDiscountCategory(models.Model):
             product = self.env['product.product'].browse(product_id)
             return product.list_price * (1 - self.fixed_percent / 100)
         else:
-            # Look for a specific price line
-            line = self.line_ids.filtered(lambda l: l.product_id.id == product_id)
+            product = self.env['product.product'].browse(product_id)
+            # Custom prices belong to the stable product template so recreating
+            # or archiving variants never loses the configured discount.
+            line = self.line_ids.filtered(
+                lambda discount_line: discount_line.product_tmpl_id == product.product_tmpl_id
+            )
             if line:
                 return line[0].discount_price
             # No specific price = no discount (return list_price)
-            product = self.env['product.product'].browse(product_id)
             return product.list_price

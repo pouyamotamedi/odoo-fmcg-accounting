@@ -1337,53 +1337,50 @@ export async function deleteDiscountCategory(id: number) {
 }
 
 /**
- * Get discount lines for a category (per-product prices)
+ * Get template-level discount lines for a category.
  */
 export async function getDiscountLines(categoryId: number) {
-  try {
-    return await searchRead('fmcg.discount.line', [['category_id', '=', categoryId]], [
-      'product_id', 'product_list_price', 'discount_price',
-    ]);
-  } catch {
-    return [];
-  }
+  return searchRead('fmcg.discount.line', [['category_id', '=', categoryId]], [
+    'product_tmpl_id', 'product_list_price', 'discount_price',
+  ]);
 }
 
 /**
- * Set discount price for a product in a category
+ * Synchronize a category price for one stable product template.
+ * A null price removes the custom line so the regular sale price applies.
  */
-export async function setDiscountPrice(categoryId: number, productId: number, discountPrice: number) {
-  // Check if line exists
+export async function syncDiscountPriceForTemplate(
+  categoryId: number,
+  templateId: number,
+  discountPrice: number | null,
+) {
   const existing = await searchRead('fmcg.discount.line', [
     ['category_id', '=', categoryId],
-    ['product_id', '=', productId],
+    ['product_tmpl_id', '=', templateId],
   ], ['id'], 1);
-  if (existing && existing.length > 0) {
-    return write('fmcg.discount.line', [existing[0].id], { discount_price: discountPrice });
+
+  if (discountPrice === null) {
+    if (existing && existing.length > 0) {
+      await unlink('fmcg.discount.line', [existing[0].id]);
+    }
+    return;
   }
-  return create('fmcg.discount.line', {
+
+  if (existing && existing.length > 0) {
+    await write('fmcg.discount.line', [existing[0].id], { discount_price: discountPrice });
+    return;
+  }
+
+  await create('fmcg.discount.line', {
     category_id: categoryId,
-    product_id: productId,
+    product_tmpl_id: templateId,
     discount_price: discountPrice,
   });
 }
 
 /**
- * Remove discount price for a product in a category
- */
-export async function removeDiscountPrice(categoryId: number, productId: number) {
-  const existing = await searchRead('fmcg.discount.line', [
-    ['category_id', '=', categoryId],
-    ['product_id', '=', productId],
-  ], ['id'], 1);
-  if (existing && existing.length > 0) {
-    return unlink('fmcg.discount.line', [existing[0].id]);
-  }
-}
-
-/**
- * Synchronize one category price across a set of product variants.
- * A null price removes existing custom lines so the regular sale price applies.
+ * Compatibility helper for screens that currently hold product.product IDs.
+ * Variant IDs are resolved to unique template IDs before writing.
  */
 export async function syncDiscountPriceForProducts(
   categoryId: number,
@@ -1393,38 +1390,32 @@ export async function syncDiscountPriceForProducts(
   const uniqueProductIds = Array.from(new Set(productIds));
   if (uniqueProductIds.length === 0) return;
 
-  const existing = await searchRead('fmcg.discount.line', [
-    ['category_id', '=', categoryId],
-    ['product_id', 'in', uniqueProductIds],
-  ], ['id', 'product_id']);
-  const existingLines = existing || [];
-  const existingIds = existingLines.map((line: {id: number}) => line.id);
-
-  if (discountPrice === null) {
-    if (existingIds.length > 0) await unlink('fmcg.discount.line', existingIds);
-    return;
-  }
-
-  if (existingIds.length > 0) {
-    await write('fmcg.discount.line', existingIds, { discount_price: discountPrice });
-  }
-
-  const existingProductIds = new Set(
-    existingLines.map((line: {product_id: [number, string] | number}) => Array.isArray(line.product_id) ? line.product_id[0] : line.product_id),
+  const products = await searchRead(
+    'product.product',
+    [['id', 'in', uniqueProductIds]],
+    ['product_tmpl_id'],
   );
-  const missingProductIds = uniqueProductIds.filter((productId) => !existingProductIds.has(productId));
-  for (const productId of missingProductIds) {
-    await create('fmcg.discount.line', {
-      category_id: categoryId,
-      product_id: productId,
-      discount_price: discountPrice,
-    });
+  const templateIds = Array.from(new Set<number>(
+    (products || []).map((product: {product_tmpl_id: [number, string] | number}) => (
+      Array.isArray(product.product_tmpl_id) ? product.product_tmpl_id[0] : product.product_tmpl_id
+    )),
+  ));
+
+  for (const templateId of templateIds) {
+    await syncDiscountPriceForTemplate(categoryId, templateId, discountPrice);
   }
 }
 
+export async function setDiscountPrice(categoryId: number, productId: number, discountPrice: number) {
+  return syncDiscountPriceForProducts(categoryId, [productId], discountPrice);
+}
+
+export async function removeDiscountPrice(categoryId: number, productId: number) {
+  return syncDiscountPriceForProducts(categoryId, [productId], null);
+}
+
 /**
- * Get all products with their discount prices for a specific category
- * Returns products with adjusted prices based on discount category rules
+ * Get all active variants with their template-level discount price.
  */
 export async function getProductsWithDiscount(categoryId: number) {
   const [products, category, lines] = await Promise.all([
@@ -1436,16 +1427,22 @@ export async function getProductsWithDiscount(categoryId: number) {
   if (!products || !category || category.length === 0) return products;
 
   const cat = category[0];
-  const lineMap = new Map((lines || []).map((l: any) => [l.product_id[0] || l.product_id, l.discount_price]));
+  const lineMap = new Map((lines || []).map((line: any) => [
+    Array.isArray(line.product_tmpl_id) ? line.product_tmpl_id[0] : line.product_tmpl_id,
+    line.discount_price,
+  ]));
 
-  return products.map((p: any) => {
-    let discountPrice = p.list_price;
+  return products.map((product: any) => {
+    const templateId = Array.isArray(product.product_tmpl_id)
+      ? product.product_tmpl_id[0]
+      : product.product_tmpl_id;
+    let discountPrice = product.list_price;
     if (cat.is_fixed_percent && cat.fixed_percent > 0) {
-      discountPrice = p.list_price * (1 - cat.fixed_percent / 100);
-    } else if (lineMap.has(p.id)) {
-      discountPrice = lineMap.get(p.id)!;
+      discountPrice = product.list_price * (1 - cat.fixed_percent / 100);
+    } else if (lineMap.has(templateId)) {
+      discountPrice = lineMap.get(templateId)!;
     }
-    return { ...p, discount_price: discountPrice };
+    return { ...product, discount_price: discountPrice };
   });
 }
 

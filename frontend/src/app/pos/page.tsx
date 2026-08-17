@@ -67,7 +67,9 @@ export default function PosPage() {
   useEffect(() => {
     // Register SW
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+        .then((registration) => registration.update())
+        .catch(() => {});
       // Listen for sync messages from SW
       navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data?.type === 'SYNC_QUEUE') {

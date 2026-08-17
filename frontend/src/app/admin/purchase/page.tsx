@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, syncDiscountPriceForProducts, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice, createPartner } from '@/lib/odoo-api';
+import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, syncDiscountPriceForProducts, syncDiscountPriceForTemplate, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice, createPartner } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
 
@@ -70,7 +70,6 @@ export default function PurchasePage() {
   const [discountCats, setDiscountCats] = useState<{id:number;name:string}[]>([]);
   const [editDiscountPrices, setEditDiscountPrices] = useState<Record<number, string>>({});
   const [editDiscountLoading, setEditDiscountLoading] = useState(false);
-  const [editDiscountWarning, setEditDiscountWarning] = useState('');
   const editDiscountLoadRequest = useRef(0);
   // Quick add supplier
   const [showNewSupplier, setShowNewSupplier] = useState(false);
@@ -104,7 +103,6 @@ export default function PurchasePage() {
     setEditPriceLinked(true);
     setEditImage(null);
     setEditDiscountPrices({});
-    setEditDiscountWarning('');
     setEditDiscountLoading(true);
 
     try {
@@ -126,53 +124,21 @@ export default function PurchasePage() {
       const templateId = Array.isArray(product.product_tmpl_id)
         ? product.product_tmpl_id[0]
         : product.product_tmpl_id;
-      const variants = templateId
-        ? await searchRead(
-            'product.product',
-            [['product_tmpl_id', '=', templateId], ['active', '=', true]],
-            ['id'],
-            0,
-            0,
-            'id asc',
-          )
-        : [{ id: product.id }];
-      const productIds = (variants || []).map((variant: {id: number}) => variant.id);
-
       const prices: Record<number, string> = {};
-      const conflictingCategories: string[] = [];
-      if (cats.length > 0 && productIds.length > 0) {
+      if (cats.length > 0 && templateId) {
         const lines = await searchRead(
           'fmcg.discount.line',
-          [['category_id', 'in', cats.map((cat) => cat.id)], ['product_id', 'in', productIds]],
-          ['category_id', 'product_id', 'discount_price'],
-          0,
-          0,
-          'product_id asc',
+          [['category_id', 'in', cats.map((cat) => cat.id)], ['product_tmpl_id', '=', templateId]],
+          ['category_id', 'discount_price'],
         );
-        const linePrices = new Map<string, string>();
         for (const line of (lines || [])) {
           const categoryId = Array.isArray(line.category_id) ? line.category_id[0] : line.category_id;
-          const productId = Array.isArray(line.product_id) ? line.product_id[0] : line.product_id;
-          linePrices.set(`${categoryId}:${productId}`, String(line.discount_price));
-        }
-
-        for (const cat of cats) {
-          const variantPrices = productIds.map((productId: number) => linePrices.get(`${cat.id}:${productId}`) ?? null);
-          const canonicalPrice = variantPrices[0];
-          if (canonicalPrice !== null) prices[cat.id] = canonicalPrice;
-          if (variantPrices.some((price: string | null) => price !== canonicalPrice)) {
-            conflictingCategories.push(cat.name);
-          }
+          prices[categoryId] = String(line.discount_price);
         }
       }
 
       if (requestId === editDiscountLoadRequest.current) {
         setEditDiscountPrices(prices);
-        setEditDiscountWarning(
-          conflictingCategories.length > 0
-            ? `قیمت واریانت‌ها در «${conflictingCategories.join('، ')}» یکسان نبود؛ با ذخیره این فرم همه یکسان می‌شوند.`
-            : '',
-        );
       }
     } catch (error) {
       if (requestId === editDiscountLoadRequest.current) {
@@ -1036,9 +1002,6 @@ export default function PurchasePage() {
               {(editDiscountLoading || discountCats.length > 0) && (
                 <div className="border-t pt-3">
                   <label className="block text-xs text-gray-500 mb-2">قیمت‌های تخفیفی:</label>
-                  {editDiscountWarning && !editDiscountLoading && (
-                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-2">{editDiscountWarning}</div>
-                  )}
                   {editDiscountLoading ? (
                     <div className="text-xs text-indigo-500 bg-indigo-50 rounded-lg p-3">در حال بارگذاری قیمت‌های ذخیره‌شده...</div>
                   ) : (
@@ -1074,7 +1037,7 @@ export default function PurchasePage() {
                         const rawPrice = editDiscountPrices[cat.id] ?? '';
                         const price = Number(rawPrice);
                         const hasCustomPrice = rawPrice.trim() !== '' && Number.isFinite(price) && price !== salePrice;
-                        await syncDiscountPriceForProducts(cat.id, vars.map((variant: {id: number}) => variant.id), hasCustomPrice ? price : null);
+                        await syncDiscountPriceForTemplate(cat.id, tmplId, hasCustomPrice ? price : null);
                       }
                     }
                   } else {

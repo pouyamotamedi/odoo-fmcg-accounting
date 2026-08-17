@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import {
   getDiscountCategories, createDiscountCategory, updateDiscountCategory,
-  deleteDiscountCategory, getDiscountLines, setDiscountPrice, removeDiscountPrice,
+  deleteDiscountCategory, getDiscountLines, setDiscountPrice,
   getProducts,
 } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
@@ -19,7 +19,7 @@ interface DiscountCategory {
 }
 
 interface DiscountLine {
-  product_id: [number, string] | number;
+  product_tmpl_id: [number, string] | number;
   product_list_price: number;
   discount_price: number;
 }
@@ -28,6 +28,7 @@ interface Product {
   id: number;
   name: string;
   list_price: number;
+  product_tmpl_id: [number, string] | number;
 }
 
 export default function DiscountsPage() {
@@ -127,25 +128,43 @@ export default function DiscountsPage() {
     setLineSearch('');
   }
 
-  async function savePrice(productId: number) {
+  const templateIdOf = (product: Product) => Array.isArray(product.product_tmpl_id)
+    ? product.product_tmpl_id[0]
+    : product.product_tmpl_id;
+
+  async function savePrice(product: Product) {
     if (!selectedCategory) return;
-    const priceStr = editingPrices[productId];
+    const templateId = templateIdOf(product);
+    const priceStr = editingPrices[templateId];
     if (!priceStr) return;
     const price = parseFloat(priceStr);
     if (isNaN(price)) return;
     try {
-      await setDiscountPrice(selectedCategory.id, productId, price);
+      // setDiscountPrice accepts the representative variant and persists the
+      // price against its stable product template.
+      await setDiscountPrice(selectedCategory.id, product.id, price);
       await loadLines(selectedCategory.id);
-      setEditingPrices((prev) => { const next = { ...prev }; delete next[productId]; return next; });
+      setEditingPrices((prev) => { const next = { ...prev }; delete next[templateId]; return next; });
     } catch (e: any) { alert(e.message || 'خطا'); }
   }
 
-  const filteredProducts = products.filter(
-    (p) => p.name.includes(lineSearch)
+  const templateProducts = Array.from(
+    products.reduce((templates, product) => {
+      const templateId = templateIdOf(product);
+      if (!templates.has(templateId)) templates.set(templateId, product);
+      return templates;
+    }, new Map<number, Product>()).values(),
+  );
+
+  const filteredProducts = templateProducts.filter(
+    (product) => product.name.includes(lineSearch)
   );
 
   const lineMap = new Map(
-    lines.map((l) => [Array.isArray(l.product_id) ? l.product_id[0] : l.product_id, l.discount_price])
+    lines.map((line) => [
+      Array.isArray(line.product_tmpl_id) ? line.product_tmpl_id[0] : line.product_tmpl_id,
+      line.discount_price,
+    ])
   );
 
   return (
@@ -236,32 +255,33 @@ export default function DiscountsPage() {
                         </thead>
                         <tbody>
                           {filteredProducts.map((p) => {
-                            const currentDiscount = lineMap.get(p.id);
-                            const isEditing = editingPrices[p.id] !== undefined;
+                            const templateId = templateIdOf(p);
+                            const currentDiscount = lineMap.get(templateId);
+                            const isEditing = editingPrices[templateId] !== undefined;
                             return (
-                              <tr key={p.id} className="border-b hover:bg-gray-50">
+                              <tr key={templateId} className="border-b hover:bg-gray-50">
                                 <td className="p-2 text-xs font-medium">{p.name}</td>
                                 <td className="p-2 text-xs text-gray-500">{formatPrice(p.list_price)}</td>
                                 <td className="p-2">
                                   {isEditing ? (
                                     <PriceInput
-                                      value={editingPrices[p.id]}
-                                      onChange={(v) => setEditingPrices({ ...editingPrices, [p.id]: v })}
+                                      value={editingPrices[templateId]}
+                                      onChange={(value) => setEditingPrices((previous) => ({ ...previous, [templateId]: value }))}
                                       placeholder="قیمت"
                                       className="w-24 p-1 border rounded text-xs"
                                     />
                                   ) : (
-                                    <span className={`text-xs font-bold ${currentDiscount ? 'text-green-600' : 'text-gray-400'}`}>
-                                      {currentDiscount ? formatPrice(currentDiscount) : '—'}
+                                    <span className={`text-xs font-bold ${currentDiscount !== undefined ? 'text-green-600' : 'text-gray-400'}`}>
+                                      {currentDiscount !== undefined ? formatPrice(currentDiscount) : '—'}
                                     </span>
                                   )}
                                 </td>
                                 <td className="p-2">
                                   {isEditing ? (
-                                    <button onClick={() => savePrice(p.id)} className="text-xs text-green-600 font-bold">✓ ذخیره</button>
+                                    <button onClick={() => savePrice(p)} className="text-xs text-green-600 font-bold">✓ ذخیره</button>
                                   ) : (
                                     <button
-                                      onClick={() => setEditingPrices({ ...editingPrices, [p.id]: String(currentDiscount || p.list_price) })}
+                                      onClick={() => setEditingPrices((previous) => ({ ...previous, [templateId]: String(currentDiscount ?? p.list_price) }))}
                                       className="text-xs text-blue-500"
                                     >
                                       تنظیم قیمت
