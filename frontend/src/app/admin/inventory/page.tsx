@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   createProduct, updateProduct, deleteProduct, createStockAdjustment,
   getCategories, createCategory, searchRead, getProductAttributes,
   getAttributeValues, createProductAttribute, createAttributeValue,
   getProductVariants, getTemplateAttributeLines, addAttributeToTemplate,
   updateVariantBarcode, deleteProductTemplate, write,
-  getDiscountCategories, getDiscountLines, setDiscountPrice,
+  getDiscountCategories, syncDiscountPriceForProducts,
 } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
@@ -156,6 +156,8 @@ export default function InventoryPage() {
   // Discount prices per category
   const [discountCats, setDiscountCats] = useState<{id:number;name:string;is_fixed_percent:boolean}[]>([]);
   const [discountPrices, setDiscountPrices] = useState<Record<number, string>>({});
+  const [discountLoading, setDiscountLoading] = useState(false);
+  const discountLoadRequest = useRef(0);
 
   // Stock adjustment
   const [showAdjustment, setShowAdjustment] = useState(false);
@@ -221,44 +223,106 @@ export default function InventoryPage() {
   }
 
   function openNewForm() {
+    discountLoadRequest.current += 1;
     setForm({ name: '', barcode: '', list_price: '', standard_price: '', fmcg_reorder_threshold: '10', categ_id: 0 });
     setEditingId(null); setImageFile(null);
+    setInvPriceLinked(true);
+    setInvDiscountOriginals({});
     // Default discount prices = empty (will default to list_price)
     setDiscountPrices({});
+    setDiscountLoading(false);
     setShowForm(true);
   }
 
-  function openEditForm(t: ProductTemplate) {
+  async function openEditForm(t: ProductTemplate) {
+    const requestId = ++discountLoadRequest.current;
     setForm({ name: t.name, barcode: '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold || 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
     setEditingId(t.id); setImageFile(null);
+    setInvPriceLinked(true);
     setInvPriceOriginal(t.standard_price);
     setInvSellOriginal(t.list_price);
-    // Load existing discount prices for this product
-    loadDiscountPricesForTemplate(t.id);
+    setInvDiscountOriginals({});
+    setDiscountPrices({});
+    setDiscountLoading(true);
     setShowForm(true);
+
+    try {
+      let cats = discountCats;
+      if (cats.length === 0) {
+        const loadedCats = await searchRead(
+          'fmcg.discount.category',
+          [['active', '=', true], ['is_fixed_percent', '=', false]],
+          ['name', 'is_fixed_percent'],
+          0,
+          0,
+          'sequence asc',
+        );
+        cats = (loadedCats || []).map((cat: {id: number; name: string}) => ({
+          id: cat.id,
+          name: cat.name,
+          is_fixed_percent: false,
+        }));
+        if (requestId !== discountLoadRequest.current) return;
+        setDiscountCats(cats);
+      }
+
+      const prices = await loadDiscountPricesForTemplate(t.id, cats);
+      if (requestId !== discountLoadRequest.current) return;
+
+      setDiscountPrices(prices);
+      const originals: Record<number, number> = {};
+      for (const [key, value] of Object.entries(prices)) {
+        const numericValue = Number(value);
+        if (Number.isFinite(numericValue)) originals[Number(key)] = numericValue;
+      }
+      setInvDiscountOriginals(originals);
+    } catch (error) {
+      if (requestId === discountLoadRequest.current) {
+        setShowForm(false);
+        alert(error instanceof Error ? error.message : 'خطا در بارگذاری قیمت‌های تخفیفی');
+      }
+    } finally {
+      if (requestId === discountLoadRequest.current) setDiscountLoading(false);
+    }
   }
 
-  async function loadDiscountPricesForTemplate(tmplId: number) {
+  async function loadDiscountPricesForTemplate(
+    tmplId: number,
+    cats: {id:number;name:string;is_fixed_percent:boolean}[],
+  ): Promise<Record<number, string>> {
+    if (cats.length === 0) return {};
+
+    const variants = await searchRead(
+      'product.product',
+      [['product_tmpl_id', '=', tmplId], ['active', '=', true]],
+      ['id'],
+      0,
+      0,
+      'id asc',
+    );
+    const productIds = (variants || []).map((variant: {id: number}) => variant.id);
+    if (productIds.length === 0) return {};
+
+    const categoryIds = cats.map((cat) => cat.id);
+    const lines = await searchRead(
+      'fmcg.discount.line',
+      [['category_id', 'in', categoryIds], ['product_id', 'in', productIds]],
+      ['category_id', 'product_id', 'discount_price'],
+      0,
+      0,
+      'product_id asc',
+    );
+
     const prices: Record<number, string> = {};
-    // Find first variant of this template
-    const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id'], 1);
-    if (vars && vars.length > 0) {
-      const prodId = vars[0].id;
-      for (const cat of discountCats) {
-        const lines = await searchRead('fmcg.discount.line', [['category_id', '=', cat.id], ['product_id', '=', prodId]], ['discount_price'], 1);
-        if (lines && lines.length > 0) {
-          prices[cat.id] = String(lines[0].discount_price);
-        }
-      }
+    for (const line of (lines || [])) {
+      const categoryId = Array.isArray(line.category_id) ? line.category_id[0] : line.category_id;
+      if (prices[categoryId] === undefined) prices[categoryId] = String(line.discount_price);
     }
-    setDiscountPrices(prices);
-    // Save originals for proportional calculation
-    const originals: Record<number, number> = {};
-    for (const [k, v] of Object.entries(prices)) originals[Number(k)] = Number(v) || 0;
-    setInvDiscountOriginals(originals);
+    return prices;
   }
 
   async function handleSave() {
+    if (discountLoading) { alert('لطفاً تا پایان بارگذاری قیمت‌های تخفیفی صبر کنید'); return; }
     if (!form.name || !form.list_price || !form.standard_price) { alert('نام، قیمت خرید و فروش الزامی‌اند'); return; }
     setSaving(true);
     try {
@@ -283,14 +347,14 @@ export default function InventoryPage() {
             standard_price: parseFloat(form.standard_price),
             list_price: parseFloat(form.list_price),
           });
-          // Save discount prices for ALL variants
+          // Keep discount lines synchronized for ALL variants. Empty or sale-price values
+          // mean "use the regular sale price", so remove any stale custom line.
+          const salePrice = parseFloat(form.list_price);
           for (const cat of discountCats) {
-            const price = parseFloat(discountPrices[cat.id] || '');
-            if (price && price !== parseFloat(form.list_price)) {
-              for (const varId of varIds) {
-                await setDiscountPrice(cat.id, varId, price);
-              }
-            }
+            const rawPrice = discountPrices[cat.id] ?? '';
+            const price = Number(rawPrice);
+            const hasCustomPrice = rawPrice.trim() !== '' && Number.isFinite(price) && price !== salePrice;
+            await syncDiscountPriceForProducts(cat.id, varIds, hasCustomPrice ? price : null);
           }
         }
       } else {
@@ -298,13 +362,15 @@ export default function InventoryPage() {
         // Save discount prices for new product
         if (newTmplId) {
           for (const cat of discountCats) {
-            const price = parseFloat(discountPrices[cat.id] || '');
-            if (price && price !== parseFloat(form.list_price)) {
-              await setDiscountPrice(cat.id, newTmplId, price);
+            const rawPrice = discountPrices[cat.id] ?? '';
+            const price = Number(rawPrice);
+            if (rawPrice.trim() !== '' && Number.isFinite(price) && price !== parseFloat(form.list_price)) {
+              await syncDiscountPriceForProducts(cat.id, [newTmplId], price);
             }
           }
         }
       }
+      discountLoadRequest.current += 1;
       setShowForm(false);
       await fetchTemplates();
     } catch (e: any) { alert(e.message || 'خطا'); }
@@ -609,7 +675,7 @@ export default function InventoryPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-auto">
             <h3 className="text-lg font-bold mb-4">{editingId ? '✏️ ویرایش کالا' : '+ کالای جدید'}</h3>
-            <div className="space-y-3">
+            <div className={`space-y-3 ${discountLoading ? 'pointer-events-none opacity-60' : ''}`}>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">نام *</label>
                 <input type="text" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})} placeholder="نام کالا" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
@@ -668,28 +734,32 @@ export default function InventoryPage() {
                 <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="w-full text-sm" />
               </div>
               {/* Discount prices */}
-              {discountCats.length > 0 && (
+              {(discountLoading || discountCats.length > 0) && (
                 <div className="border-t pt-3 mt-3">
                   <label className="block text-xs text-gray-500 mb-2">قیمت‌های تخفیفی (پیش‌فرض = قیمت فروش)</label>
-                  <div className="space-y-2">
-                    {discountCats.map((cat) => (
-                      <div key={cat.id} className="flex items-center gap-2">
-                        <span className="text-xs text-gray-600 w-28 truncate">{cat.name}:</span>
-                        <PriceInput
-                          value={discountPrices[cat.id] || ''}
-                          onChange={(v) => setDiscountPrices({...discountPrices, [cat.id]: v})}
-                          placeholder={form.list_price || '= قیمت فروش'}
-                          className="flex-1 p-2 border border-gray-200 rounded-lg text-xs focus:border-indigo-400 focus:outline-none"
-                        />
-                      </div>
-                    ))}
-                  </div>
+                  {discountLoading ? (
+                    <div className="text-xs text-indigo-500 bg-indigo-50 rounded-lg p-3">در حال بارگذاری قیمت‌های ذخیره‌شده...</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {discountCats.map((cat) => (
+                        <div key={cat.id} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-600 w-28 truncate">{cat.name}:</span>
+                          <PriceInput
+                            value={discountPrices[cat.id] ?? ''}
+                            onChange={(value) => setDiscountPrices((previous) => ({...previous, [cat.id]: value}))}
+                            placeholder={form.list_price || '= قیمت فروش'}
+                            className="flex-1 p-2 border border-gray-200 rounded-lg text-xs focus:border-indigo-400 focus:outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
             <div className="flex gap-3 mt-5">
-              <button onClick={handleSave} disabled={saving} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold hover:bg-indigo-600 disabled:opacity-50">{saving ? 'ذخیره...' : 'ذخیره'}</button>
-              <button onClick={() => setShowForm(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">انصراف</button>
+              <button onClick={handleSave} disabled={saving || discountLoading} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold hover:bg-indigo-600 disabled:opacity-50">{saving ? 'ذخیره...' : discountLoading ? 'بارگذاری...' : 'ذخیره'}</button>
+              <button onClick={() => { discountLoadRequest.current += 1; setShowForm(false); }} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">انصراف</button>
             </div>
           </div>
         </div>

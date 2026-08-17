@@ -1382,6 +1382,47 @@ export async function removeDiscountPrice(categoryId: number, productId: number)
 }
 
 /**
+ * Synchronize one category price across a set of product variants.
+ * A null price removes existing custom lines so the regular sale price applies.
+ */
+export async function syncDiscountPriceForProducts(
+  categoryId: number,
+  productIds: number[],
+  discountPrice: number | null,
+) {
+  const uniqueProductIds = Array.from(new Set(productIds));
+  if (uniqueProductIds.length === 0) return;
+
+  const existing = await searchRead('fmcg.discount.line', [
+    ['category_id', '=', categoryId],
+    ['product_id', 'in', uniqueProductIds],
+  ], ['id', 'product_id']);
+  const existingLines = existing || [];
+  const existingIds = existingLines.map((line: {id: number}) => line.id);
+
+  if (discountPrice === null) {
+    if (existingIds.length > 0) await unlink('fmcg.discount.line', existingIds);
+    return;
+  }
+
+  if (existingIds.length > 0) {
+    await write('fmcg.discount.line', existingIds, { discount_price: discountPrice });
+  }
+
+  const existingProductIds = new Set(
+    existingLines.map((line: {product_id: [number, string] | number}) => Array.isArray(line.product_id) ? line.product_id[0] : line.product_id),
+  );
+  const missingProductIds = uniqueProductIds.filter((productId) => !existingProductIds.has(productId));
+  for (const productId of missingProductIds) {
+    await create('fmcg.discount.line', {
+      category_id: categoryId,
+      product_id: productId,
+      discount_price: discountPrice,
+    });
+  }
+}
+
+/**
  * Get all products with their discount prices for a specific category
  * Returns products with adjusted prices based on discount category rules
  */

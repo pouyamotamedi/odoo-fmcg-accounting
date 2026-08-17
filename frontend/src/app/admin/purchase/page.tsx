@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, setDiscountPrice, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice, createPartner } from '@/lib/odoo-api';
+import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, syncDiscountPriceForProducts, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice, createPartner } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
 
@@ -19,6 +19,7 @@ interface OdooProduct {
   barcode: string | false;
   list_price: number;
   standard_price: number;
+  fmcg_reorder_threshold?: number;
   product_tmpl_id?: [number, string] | number;
   image_128?: string | false;
 }
@@ -68,6 +69,9 @@ export default function PurchasePage() {
   const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
   const [discountCats, setDiscountCats] = useState<{id:number;name:string}[]>([]);
   const [editDiscountPrices, setEditDiscountPrices] = useState<Record<number, string>>({});
+  const [editDiscountLoading, setEditDiscountLoading] = useState(false);
+  const [editDiscountWarning, setEditDiscountWarning] = useState('');
+  const editDiscountLoadRequest = useRef(0);
   // Quick add supplier
   const [showNewSupplier, setShowNewSupplier] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState('');
@@ -88,6 +92,96 @@ export default function PurchasePage() {
       setDiscountCats((discCats||[]).filter((c:any) => !c.is_fixed_percent).map((c:any) => ({id: c.id, name: c.name})));
     } catch { /* ignore */ }
     setLoading(false);
+  }
+
+  async function openProductEditor(product: OdooProduct) {
+    const requestId = ++editDiscountLoadRequest.current;
+    setEditingProduct(product);
+    setEditPrice(String(product.standard_price));
+    setEditSellPrice(String(product.list_price));
+    setEditThreshold(String(product.fmcg_reorder_threshold || 10));
+    setEditPriceOriginal(product.standard_price);
+    setEditPriceLinked(true);
+    setEditImage(null);
+    setEditDiscountPrices({});
+    setEditDiscountWarning('');
+    setEditDiscountLoading(true);
+
+    try {
+      let cats = discountCats;
+      if (cats.length === 0) {
+        const loadedCats = await searchRead(
+          'fmcg.discount.category',
+          [['active', '=', true], ['is_fixed_percent', '=', false]],
+          ['name'],
+          0,
+          0,
+          'sequence asc',
+        );
+        cats = (loadedCats || []).map((cat: {id: number; name: string}) => ({ id: cat.id, name: cat.name }));
+        if (requestId !== editDiscountLoadRequest.current) return;
+        setDiscountCats(cats);
+      }
+
+      const templateId = Array.isArray(product.product_tmpl_id)
+        ? product.product_tmpl_id[0]
+        : product.product_tmpl_id;
+      const variants = templateId
+        ? await searchRead(
+            'product.product',
+            [['product_tmpl_id', '=', templateId], ['active', '=', true]],
+            ['id'],
+            0,
+            0,
+            'id asc',
+          )
+        : [{ id: product.id }];
+      const productIds = (variants || []).map((variant: {id: number}) => variant.id);
+
+      const prices: Record<number, string> = {};
+      const conflictingCategories: string[] = [];
+      if (cats.length > 0 && productIds.length > 0) {
+        const lines = await searchRead(
+          'fmcg.discount.line',
+          [['category_id', 'in', cats.map((cat) => cat.id)], ['product_id', 'in', productIds]],
+          ['category_id', 'product_id', 'discount_price'],
+          0,
+          0,
+          'product_id asc',
+        );
+        const linePrices = new Map<string, string>();
+        for (const line of (lines || [])) {
+          const categoryId = Array.isArray(line.category_id) ? line.category_id[0] : line.category_id;
+          const productId = Array.isArray(line.product_id) ? line.product_id[0] : line.product_id;
+          linePrices.set(`${categoryId}:${productId}`, String(line.discount_price));
+        }
+
+        for (const cat of cats) {
+          const variantPrices = productIds.map((productId: number) => linePrices.get(`${cat.id}:${productId}`) ?? null);
+          const canonicalPrice = variantPrices[0];
+          if (canonicalPrice !== null) prices[cat.id] = canonicalPrice;
+          if (variantPrices.some((price: string | null) => price !== canonicalPrice)) {
+            conflictingCategories.push(cat.name);
+          }
+        }
+      }
+
+      if (requestId === editDiscountLoadRequest.current) {
+        setEditDiscountPrices(prices);
+        setEditDiscountWarning(
+          conflictingCategories.length > 0
+            ? `قیمت واریانت‌ها در «${conflictingCategories.join('، ')}» یکسان نبود؛ با ذخیره این فرم همه یکسان می‌شوند.`
+            : '',
+        );
+      }
+    } catch (error) {
+      if (requestId === editDiscountLoadRequest.current) {
+        setEditingProduct(null);
+        alert(error instanceof Error ? error.message : 'خطا در بارگذاری قیمت‌های تخفیفی');
+      }
+    } finally {
+      if (requestId === editDiscountLoadRequest.current) setEditDiscountLoading(false);
+    }
   }
 
   async function loadHistory(state?: string) {
@@ -597,18 +691,9 @@ export default function PurchasePage() {
                     </div>
                   </div>
                 </button>
-                <button onClick={async (e) => {
+                <button onClick={(e) => {
                   e.stopPropagation();
-                  setEditingProduct(product); setEditPrice(String(product.standard_price)); setEditSellPrice(String(product.list_price)); setEditThreshold(String(product.fmcg_reorder_threshold || 10)); setEditPriceOriginal(product.standard_price);
-                  // Load discount prices
-                  const prices: Record<number, string> = {};
-                  for (const cat of discountCats) {
-                    try {
-                      const lines = await searchRead('fmcg.discount.line', [['category_id', '=', cat.id], ['product_id', '=', product.id]], ['discount_price'], 1);
-                      if (lines && lines.length > 0) prices[cat.id] = String(lines[0].discount_price);
-                    } catch {}
-                  }
-                  setEditDiscountPrices(prices);
+                  void openProductEditor(product);
                 }} className="absolute top-1 left-1 text-[10px] text-white/70 hover:text-white bg-black/30 rounded px-1 z-10">✏️</button>
               </div>
             ))}
@@ -900,7 +985,7 @@ export default function PurchasePage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[85vh] overflow-auto">
             <h3 className="text-lg font-bold mb-4">✏️ ویرایش: {editingProduct.name}</h3>
-            <div className="space-y-3">
+            <div className={`space-y-3 ${editDiscountLoading ? 'pointer-events-none opacity-60' : ''}`}>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">قیمت خرید</label>
@@ -948,17 +1033,24 @@ export default function PurchasePage() {
               </div>
 
               {/* Discount prices */}
-              {discountCats.length > 0 && (
+              {(editDiscountLoading || discountCats.length > 0) && (
                 <div className="border-t pt-3">
                   <label className="block text-xs text-gray-500 mb-2">قیمت‌های تخفیفی:</label>
-                  <div className="space-y-2">
-                    {discountCats.map((cat) => (
-                      <div key={cat.id} className="flex items-center gap-2">
-                        <span className="text-xs text-gray-600 w-28 truncate">{cat.name}:</span>
-                        <PriceInput value={editDiscountPrices[cat.id] || ''} onChange={(v) => setEditDiscountPrices({...editDiscountPrices, [cat.id]: v})} placeholder={editSellPrice || '= فروش'} className="flex-1 p-1.5 border border-gray-200 rounded text-xs" />
-                      </div>
-                    ))}
-                  </div>
+                  {editDiscountWarning && !editDiscountLoading && (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-2">{editDiscountWarning}</div>
+                  )}
+                  {editDiscountLoading ? (
+                    <div className="text-xs text-indigo-500 bg-indigo-50 rounded-lg p-3">در حال بارگذاری قیمت‌های ذخیره‌شده...</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {discountCats.map((cat) => (
+                        <div key={cat.id} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-600 w-28 truncate">{cat.name}:</span>
+                          <PriceInput value={editDiscountPrices[cat.id] ?? ''} onChange={(value) => setEditDiscountPrices((previous) => ({...previous, [cat.id]: value}))} placeholder={editSellPrice || '= فروش'} className="flex-1 p-1.5 border border-gray-200 rounded text-xs" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -967,6 +1059,7 @@ export default function PurchasePage() {
             </div>
             <div className="flex gap-3 mt-4">
               <button onClick={async () => {
+                if (editDiscountLoading) return;
                 try {
                   const tmplId = (editingProduct as any).product_tmpl_id?.[0] || (editingProduct as any).product_tmpl_id;
                   if (tmplId) {
@@ -975,14 +1068,13 @@ export default function PurchasePage() {
                     const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id']);
                     if (vars && vars.length > 0) {
                       await write('product.product', vars.map((v:any)=>v.id), { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
-                      // Save discount prices for ALL variants
+                      // Keep discount lines synchronized for ALL variants.
+                      const salePrice = Number(editSellPrice) || 0;
                       for (const cat of discountCats) {
-                        const price = parseFloat(editDiscountPrices[cat.id] || '');
-                        if (price && price !== (Number(editSellPrice)||0)) {
-                          for (const v of vars) {
-                            await setDiscountPrice(cat.id, v.id, price);
-                          }
-                        }
+                        const rawPrice = editDiscountPrices[cat.id] ?? '';
+                        const price = Number(rawPrice);
+                        const hasCustomPrice = rawPrice.trim() !== '' && Number.isFinite(price) && price !== salePrice;
+                        await syncDiscountPriceForProducts(cat.id, vars.map((variant: {id: number}) => variant.id), hasCustomPrice ? price : null);
                       }
                     }
                   } else {
@@ -993,12 +1085,13 @@ export default function PurchasePage() {
                       updateValues.image_1920 = base64;
                     }
                     await updateProduct(editingProduct.id, updateValues);
-                    // Save discount prices
+                    // Keep the single product's discount lines synchronized too.
+                    const salePrice = Number(editSellPrice) || 0;
                     for (const cat of discountCats) {
-                      const price = parseFloat(editDiscountPrices[cat.id] || '');
-                      if (price && price !== (Number(editSellPrice)||0)) {
-                        await setDiscountPrice(cat.id, editingProduct.id, price);
-                      }
+                      const rawPrice = editDiscountPrices[cat.id] ?? '';
+                      const price = Number(rawPrice);
+                      const hasCustomPrice = rawPrice.trim() !== '' && Number.isFinite(price) && price !== salePrice;
+                      await syncDiscountPriceForProducts(cat.id, [editingProduct.id], hasCustomPrice ? price : null);
                     }
                   }
                   // Update items in cart with new price (all variants of this template)
@@ -1014,10 +1107,11 @@ export default function PurchasePage() {
                     if (tmplVariantIds.has(item.id)) return { ...item, price: newPrice };
                     return item;
                   }));
+                  editDiscountLoadRequest.current += 1;
                   setEditingProduct(null); await loadData(); setMsg('✅ ذخیره شد'); setTimeout(()=>setMsg(''),3000);
                 } catch(e:any){ alert(e.message||'خطا'); }
-              }} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold">ذخیره</button>
-              <button onClick={() => setEditingProduct(null)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">بستن</button>
+              }} disabled={editDiscountLoading} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-50">{editDiscountLoading ? 'بارگذاری...' : 'ذخیره'}</button>
+              <button onClick={() => { editDiscountLoadRequest.current += 1; setEditingProduct(null); }} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">بستن</button>
             </div>
           </div>
         </div>
