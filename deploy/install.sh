@@ -14,6 +14,9 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+# Do not let redirected or quiet commands fail without an explanation.
+trap 'exit_code=$?; echo -e "${RED}ERROR on line ${LINENO}: ${BASH_COMMAND} (exit ${exit_code})${NC}" >&2' ERR
+
 echo -e "${GREEN}============================================================${NC}"
 echo -e "${GREEN}  FMCG Accounting - Server Installation${NC}"
 echo -e "${GREEN}============================================================${NC}"
@@ -50,16 +53,29 @@ echo ""
 # ============ [1/10] System Dependencies ============
 echo -e "${GREEN}[1/10] Installing system dependencies...${NC}"
 export DEBIAN_FRONTEND=noninteractive
-apt update -qq
-apt install -y -qq python3 python3-pip python3-dev postgresql postgresql-client \
-    nginx certbot python3-certbot-nginx git wkhtmltopdf \
-    libldap2-dev libsasl2-dev gcc g++ make libpq-dev libjpeg-dev \
-    zlib1g-dev libfreetype6-dev libxml2-dev libxslt1-dev curl >/dev/null 2>&1
+apt-get update -qq
 
-# Node.js 20
+echo "  Installing required packages..."
+apt-get install -y -qq python3 python3-pip python3-dev postgresql postgresql-client \
+    nginx certbot python3-certbot-nginx git \
+    libldap2-dev libsasl2-dev gcc g++ make libpq-dev libjpeg-dev \
+    zlib1g-dev libfreetype6-dev libxml2-dev libxslt1-dev curl \
+    ca-certificates gnupg sudo
+
+# wkhtmltopdf is not available from every supported Ubuntu repository.
+# Odoo can run without it, but PDF report rendering will remain unavailable.
+if apt-cache show wkhtmltopdf >/dev/null 2>&1; then
+    apt-get install -y -qq wkhtmltopdf || \
+        echo -e "${YELLOW}  WARNING: wkhtmltopdf could not be installed; continuing without PDF rendering.${NC}"
+else
+    echo -e "${YELLOW}  WARNING: wkhtmltopdf is unavailable in this Ubuntu repository; continuing without PDF rendering.${NC}"
+fi
+
+# Node.js 20+
 if ! node -v 2>/dev/null | grep -q "v2[0-9]"; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
-    apt install -y -qq nodejs >/dev/null 2>&1
+    echo "  Installing Node.js 20..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y -qq nodejs
 fi
 
 echo -e "  Python: $(python3 --version), Node: $(node -v), npm: $(npm -v)"
