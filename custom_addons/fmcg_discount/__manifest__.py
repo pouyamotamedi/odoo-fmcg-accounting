@@ -1,6 +1,6 @@
 {
     'name': 'FMCG Discount Categories',
-    'version': '18.0.1.1.0',
+    'version': '18.0.1.0.1',
     'category': 'Sales',
     'summary': 'Discount categories with per-product pricing (wholesale, loyalty, etc.)',
     'depends': ['product', 'sale'],

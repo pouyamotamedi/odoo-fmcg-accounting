@@ -7,7 +7,8 @@ import {
   getAttributeValues, createProductAttribute, createAttributeValue,
   getProductVariants, getTemplateAttributeLines, addAttributeToTemplate,
   updateVariantBarcode, deleteProductTemplate, write,
-  getDiscountCategories, syncDiscountPriceForProducts, syncDiscountPriceForTemplate,
+  getDiscountCategories, syncDiscountPriceForProducts,
+  getTemplateDiscountPrices,
 } from '@/lib/odoo-api';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
@@ -290,21 +291,7 @@ export default function InventoryPage() {
     tmplId: number,
     cats: {id:number;name:string;is_fixed_percent:boolean}[],
   ): Promise<Record<number, string>> {
-    if (cats.length === 0) return {};
-
-    const categoryIds = cats.map((cat) => cat.id);
-    const lines = await searchRead(
-      'fmcg.discount.line',
-      [['category_id', 'in', categoryIds], ['product_tmpl_id', '=', tmplId]],
-      ['category_id', 'discount_price'],
-    );
-
-    const prices: Record<number, string> = {};
-    for (const line of (lines || [])) {
-      const categoryId = Array.isArray(line.category_id) ? line.category_id[0] : line.category_id;
-      prices[categoryId] = String(line.discount_price);
-    }
-    return prices;
+    return getTemplateDiscountPrices(tmplId, cats.map((cat) => cat.id));
   }
 
   async function handleSave() {
@@ -340,7 +327,7 @@ export default function InventoryPage() {
             const rawPrice = discountPrices[cat.id] ?? '';
             const price = Number(rawPrice);
             const hasCustomPrice = rawPrice.trim() !== '' && Number.isFinite(price) && price !== salePrice;
-            await syncDiscountPriceForTemplate(cat.id, editingId, hasCustomPrice ? price : null);
+            await syncDiscountPriceForProducts(cat.id, varIds, hasCustomPrice ? price : null);
           }
         }
       } else {

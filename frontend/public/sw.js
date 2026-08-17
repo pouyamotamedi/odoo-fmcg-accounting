@@ -3,7 +3,7 @@
  * Caches product data and queues POS transactions when offline.
  */
 
-const CACHE_NAME = 'fmcg-v2';
+const CACHE_NAME = 'fmcg-v1';
 const STATIC_ASSETS = ['/', '/pos'];
 
 // Install: cache static assets
@@ -27,13 +27,12 @@ self.addEventListener('activate', (event) => {
 // Fetch: serve from cache if offline, otherwise network-first
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  const url = new URL(request.url);
 
-  // Only cache same-origin GET requests needed by the offline POS.
-  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Only cache GET requests for pages/assets
+  if (request.method !== 'GET') return;
 
-  // Admin pages and API calls must always use the current online version.
-  if (url.pathname.startsWith('/admin') || url.pathname.startsWith('/api/')) return;
+  // Skip API calls (those go through the offline queue in the app)
+  if (request.url.includes('/api/')) return;
 
   event.respondWith(
     fetch(request)
