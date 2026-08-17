@@ -21,6 +21,7 @@ interface ProductTemplate {
   standard_price: number;
   categ_id: [number, string] | false;
   product_variant_count: number;
+  barcode: string | false;
   image_512: string | false;
   total_qty: number;
   fmcg_reorder_threshold?: number;
@@ -173,7 +174,7 @@ export default function InventoryPage() {
     try {
       // Read product.product and group by template for accurate prices
       const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'display_name', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512', 'fmcg_reorder_threshold',
+        'name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512', 'fmcg_reorder_threshold',
       ], 0, 0, 'name asc');
       
       const tmplMap = new Map<number, ProductTemplate>();
@@ -187,6 +188,7 @@ export default function InventoryPage() {
             standard_price: p.standard_price,
             categ_id: p.categ_id || false,
             product_variant_count: 0,
+            barcode: p.barcode || false,
             image_512: p.image_512 || false,
             total_qty: 0,
             fmcg_reorder_threshold: p.fmcg_reorder_threshold || 10,
@@ -237,7 +239,7 @@ export default function InventoryPage() {
 
   async function openEditForm(t: ProductTemplate) {
     const requestId = ++discountLoadRequest.current;
-    setForm({ name: t.name, barcode: '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold || 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
+    setForm({ name: t.name, barcode: t.product_variant_count === 1 ? (t.barcode || '') : '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold || 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
     setEditingId(t.id); setImageFile(null);
     setInvPriceLinked(true);
     setInvPriceOriginal(t.standard_price);
@@ -480,6 +482,11 @@ export default function InventoryPage() {
     } catch (e: any) { alert(e.message || 'خطا'); }
   }
 
+  const editingTemplate = editingId
+    ? templates.find((template) => template.id === editingId)
+    : null;
+  const hasMultipleVariants = (editingTemplate?.product_variant_count || 0) > 1;
+
   const filtered = templates.filter((t) => {
     const matchSearch = t.name.includes(search);
     const matchCat = !filterCategory || (t.categ_id && t.categ_id[0] === filterCategory);
@@ -654,8 +661,18 @@ export default function InventoryPage() {
                 <input type="text" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})} placeholder="نام کالا" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">بارکد</label>
-                <input type="text" value={form.barcode} onChange={(e) => setForm({...form, barcode: e.target.value})} placeholder="اختیاری" className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none" />
+                <label className="block text-xs text-gray-500 mb-1">
+                  بارکد
+                  {hasMultipleVariants && <span className="mr-1 text-amber-600">(برای هر واریانت جداگانه تنظیم می‌شود)</span>}
+                </label>
+                <input
+                  type="text"
+                  value={form.barcode}
+                  onChange={(e) => setForm({...form, barcode: e.target.value})}
+                  placeholder={hasMultipleVariants ? 'از جدول واریانت‌ها تنظیم کنید' : 'اختیاری'}
+                  disabled={hasMultipleVariants}
+                  className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
