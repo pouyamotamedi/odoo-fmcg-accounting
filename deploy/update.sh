@@ -21,6 +21,11 @@ if [ -z "$DB_NAME" ]; then
     exit 1
 fi
 
+if [[ ! "${DB_NAME}" =~ ^[a-z][a-z0-9_-]{0,62}$ ]]; then
+    echo "ERROR: Invalid database name: ${DB_NAME}"
+    exit 1
+fi
+
 INSTALL_DIR="/opt/fmcg-${DB_NAME}"
 ODOO_CONF="/etc/odoo-${DB_NAME}.conf"
 
@@ -41,6 +46,7 @@ cd "${INSTALL_DIR}"
 sudo -u odoo git fetch origin ${BRANCH} --quiet
 sudo -u odoo git checkout -- . 2>/dev/null
 sudo -u odoo git pull origin ${BRANCH} --quiet
+bash "${INSTALL_DIR}/deploy/configure_restore_permissions.sh" "${DB_NAME}"
 
 # Re-apply security patch
 echo "[2/4] Applying patches..."

@@ -43,6 +43,11 @@ if [ -z "$DOMAIN" ]; then
     exit 1
 fi
 
+if [[ ! "${DB_NAME}" =~ ^[a-z][a-z0-9_-]{0,62}$ ]]; then
+    echo -e "${RED}Invalid database name: ${DB_NAME}${NC}"
+    exit 1
+fi
+
 echo -e "${YELLOW}  Domain:     ${DOMAIN}${NC}"
 echo -e "${YELLOW}  Database:   ${DB_NAME}${NC}"
 echo -e "${YELLOW}  Install:    ${INSTALL_DIR}${NC}"
@@ -292,6 +297,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+bash "${INSTALL_DIR}/deploy/configure_restore_permissions.sh" "${DB_NAME}"
 systemctl daemon-reload
 systemctl enable "odoo-${DB_NAME}" "fmcg-${DB_NAME}" >/dev/null 2>&1
 systemctl start "odoo-${DB_NAME}" "fmcg-${DB_NAME}"
