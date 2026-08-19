@@ -16,6 +16,7 @@ interface PurchaseItem {
 interface OdooProduct {
   id: number;
   name: string;
+  display_name?: string;
   barcode: string | false;
   list_price: number;
   standard_price: number;
@@ -99,7 +100,7 @@ export default function PurchasePage() {
     setEditingProduct(product);
     setEditPrice(String(product.standard_price));
     setEditSellPrice(String(product.list_price));
-    setEditThreshold(String(product.fmcg_reorder_threshold || 10));
+    setEditThreshold(String(product.fmcg_reorder_threshold ?? 10));
     setEditPriceOriginal(product.standard_price);
     setEditPriceLinked(true);
     setEditImage(null);
@@ -215,7 +216,7 @@ export default function PurchasePage() {
         return barcodes.includes(search.trim());
       });
       if (match) {
-        addItem({ id: match.id, name: match.name, price: match.standard_price });
+        addItem({ id: match.id, name: match.display_name || match.name, price: match.standard_price });
         setSearch('');
       }
     }
@@ -452,12 +453,14 @@ export default function PurchasePage() {
     }
     setSubmitting(true);
     try {
+      const parsedThreshold = Number.parseInt(newProductThreshold, 10);
+      const threshold = Number.isNaN(parsedThreshold) ? 10 : parsedThreshold;
       const productValues: any = {
         name: newProductName,
         barcode: newProductBarcode || undefined,
         standard_price: parseFloat(newProductPrice.replace(/[^\d.]/g, '')) || 0,
         list_price: parseFloat(newProductSellPrice.replace(/[^\d.]/g, '')) || 0,
-        fmcg_reorder_threshold: parseInt(newProductThreshold) || 10,
+        fmcg_reorder_threshold: threshold,
       };
       if (newProductCategory) productValues.categ_id = newProductCategory;
       if (newProductImage) {
@@ -1021,9 +1024,15 @@ export default function PurchasePage() {
               <button onClick={async () => {
                 if (editDiscountLoading) return;
                 try {
+                  const parsedThreshold = Number.parseInt(editThreshold, 10);
+                  const threshold = Number.isNaN(parsedThreshold) ? 10 : parsedThreshold;
                   const tmplId = (editingProduct as any).product_tmpl_id?.[0] || (editingProduct as any).product_tmpl_id;
                   if (tmplId) {
-                    await write('product.template', [tmplId], { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0 });
+                    await write('product.template', [tmplId], {
+                      standard_price: Number(editPrice) || 0,
+                      list_price: Number(editSellPrice) || 0,
+                      fmcg_reorder_threshold: threshold,
+                    });
                     // Update all variants too
                     const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id']);
                     if (vars && vars.length > 0) {
@@ -1038,7 +1047,7 @@ export default function PurchasePage() {
                       }
                     }
                   } else {
-                    const updateValues: any = { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0, fmcg_reorder_threshold: parseInt(editThreshold)||10 };
+                    const updateValues: any = { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0, fmcg_reorder_threshold: threshold };
                     if (editImage) {
                       const reader = new FileReader();
                       const base64 = await new Promise<string>((resolve) => { reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.readAsDataURL(editImage); });
@@ -1089,6 +1098,7 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
   const [selectedAttr, setSelectedAttr] = useState(0);
   const [attrValues, setAttrValues] = useState<any[]>([]);
   const [selectedValues, setSelectedValues] = useState<number[]>([]);
+  const [existingAttrLine, setExistingAttrLine] = useState<{id: number; value_ids: number[]} | null>(null);
   const [newValueName, setNewValueName] = useState('');
 
   const [editingBarcodeId, setEditingBarcodeId] = useState<number|null>(null);
@@ -1109,29 +1119,30 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
 
   async function openAddAttr() {
     try { const attrs = await getProductAttributes(); setAttributes(attrs || []); } catch {}
-    setSelectedAttr(0); setSelectedValues([]); setNewValueName('');
+    setSelectedAttr(0); setSelectedValues([]); setExistingAttrLine(null); setNewValueName('');
     setShowAddAttr(true);
   }
 
   async function handleAttrChange(attrId: number) {
-    setSelectedAttr(attrId); setSelectedValues([]);
+    setSelectedAttr(attrId); setSelectedValues([]); setExistingAttrLine(null);
     if (attrId) {
       try {
-        const v = await getAttributeValues(attrId);
-        // Filter out values that have active variants for this product
-        const activeVars = await searchRead('product.product', [
-          ['product_tmpl_id', '=', tmplId], ['active', '=', true]
-        ], ['product_template_variant_value_ids']);
-        const activeValueIds = new Set<number>();
-        for (const av of (activeVars || [])) {
-          for (const vid of (av.product_template_variant_value_ids || [])) {
-            activeValueIds.add(vid);
-          }
-        }
-        // Get the PTAV -> attribute.value mapping
-        // For simplicity: show all values, user can re-add deleted ones
-        setAttrValues(v || []);
-      } catch { setAttrValues([]); }
+        const [values, lines] = await Promise.all([
+          getAttributeValues(attrId),
+          searchRead('product.template.attribute.line', [
+            ['product_tmpl_id', '=', tmplId],
+            ['attribute_id', '=', attrId],
+          ], ['id', 'value_ids'], 1),
+        ]);
+        setAttrValues(values || []);
+        const line = lines?.[0];
+        setExistingAttrLine(line ? { id: line.id, value_ids: line.value_ids || [] } : null);
+      } catch {
+        setAttrValues([]);
+        setExistingAttrLine(null);
+      }
+    } else {
+      setAttrValues([]);
     }
   }
 
@@ -1146,23 +1157,43 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
   }
 
   async function handleSaveAttr() {
-    if (!selectedAttr || selectedValues.length === 0) return;
+    if (!selectedAttr || selectedValues.length === 0) { alert('ویژگی و مقدار جدید را انتخاب کنید'); return; }
     try {
-      // Check if attr line already exists
+      // Re-read the line so validation and merge use the latest server state.
       const existing = await searchRead('product.template.attribute.line', [
         ['product_tmpl_id', '=', tmplId], ['attribute_id', '=', selectedAttr]
       ], ['id', 'value_ids'], 1);
+      const selectedValueIds = [...new Set(selectedValues)];
+
       if (existing && existing.length > 0) {
-        const merged = [...new Set([...existing[0].value_ids, ...selectedValues])];
+        // One new value is enough when this attribute already has variants.
+        const existingValueIds = existing[0].value_ids || [];
+        const merged = [...new Set([...existingValueIds, ...selectedValueIds])];
+        if (merged.length === existingValueIds.length) {
+          alert('حداقل یک مقدار جدید انتخاب کنید');
+          return;
+        }
+        if (merged.length < 2) {
+          alert('برای ساخت واریانت، مجموع مقادیر باید حداقل ۲ باشد');
+          return;
+        }
         await write('product.template.attribute.line', [existing[0].id], { value_ids: [[6, 0, merged]] });
       } else {
-        await addAttributeToTemplate(tmplId, selectedAttr, selectedValues);
+        // A brand-new attribute needs two values to create distinct variants.
+        if (selectedValueIds.length < 2) {
+          alert('برای ویژگی جدید حداقل ۲ مقدار انتخاب کنید');
+          return;
+        }
+        await addAttributeToTemplate(tmplId, selectedAttr, selectedValueIds);
       }
       setShowAddAttr(false);
       await loadVariants();
       await onDone();
     } catch (e: any) { alert(e.message || 'خطا'); }
   }
+
+  const canSaveAttribute = selectedAttr > 0 && selectedValues.length > 0
+    && (existingAttrLine !== null || new Set(selectedValues).size >= 2);
 
   if (!tmplId) return null;
 
@@ -1214,16 +1245,27 @@ function EditVariantsSection({ product, onDone }: { product: any; onDone: () => 
           {selectedAttr > 0 && (
             <>
               <div className="flex flex-wrap gap-1">
-                {attrValues.map((v: any) => (
-                  <button key={v.id} onClick={() => setSelectedValues(p => p.includes(v.id) ? p.filter(x=>x!==v.id) : [...p, v.id])}
-                    className={`px-2 py-1 rounded-full text-[10px] font-bold ${selectedValues.includes(v.id) ? 'bg-indigo-500 text-white' : 'bg-gray-100'}`}>{v.name}</button>
-                ))}
+                {attrValues.map((v: any) => {
+                  const isExisting = existingAttrLine?.value_ids.includes(v.id) || false;
+                  const isSelected = isExisting || selectedValues.includes(v.id);
+                  return (
+                    <button
+                      key={v.id}
+                      disabled={isExisting}
+                      onClick={() => setSelectedValues(p => p.includes(v.id) ? p.filter(x=>x!==v.id) : [...p, v.id])}
+                      title={isExisting ? 'این مقدار از قبل روی محصول وجود دارد' : undefined}
+                      className={`px-2 py-1 rounded-full text-[10px] font-bold ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-100'} disabled:cursor-not-allowed disabled:opacity-70`}
+                    >
+                      {v.name}{isExisting ? ' ✓' : ''}
+                    </button>
+                  );
+                })}
               </div>
               <div className="flex gap-1">
                 <input type="text" value={newValueName} onChange={(e) => setNewValueName(e.target.value)} placeholder="مقدار جدید" className="flex-1 p-1.5 border rounded text-xs" onKeyDown={(e) => { if(e.key==='Enter') handleAddValue(); }} />
                 <button onClick={handleAddValue} disabled={!newValueName} className="px-2 py-1 bg-green-500 text-white rounded text-xs disabled:opacity-40">+</button>
               </div>
-              <button onClick={handleSaveAttr} disabled={selectedValues.length===0} className="w-full py-1.5 bg-indigo-500 text-white rounded text-xs font-bold disabled:opacity-40">ثبت ویژگی</button>
+              <button onClick={handleSaveAttr} disabled={!canSaveAttribute} className="w-full py-1.5 bg-indigo-500 text-white rounded text-xs font-bold disabled:opacity-40">{existingAttrLine ? 'افزودن واریانت' : 'ثبت ویژگی'}</button>
             </>
           )}
         </div>

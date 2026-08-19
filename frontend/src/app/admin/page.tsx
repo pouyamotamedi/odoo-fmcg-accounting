@@ -329,7 +329,7 @@ export default function AdminDashboard() {
         // Low stock alerts — only variants that have SOME stock but below threshold
         const lowStock = (allProducts || [])
           .filter((p: any) => {
-            const threshold = p.fmcg_reorder_threshold || 5;
+            const threshold = p.fmcg_reorder_threshold ?? 5;
             return p.qty_available > 0 && p.qty_available <= threshold;
           })
           .map((p: any) => `${p.display_name || p.name} (${toPersianDigits(Math.round(p.qty_available))} عدد)`);

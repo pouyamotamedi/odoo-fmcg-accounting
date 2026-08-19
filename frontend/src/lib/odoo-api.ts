@@ -208,7 +208,8 @@ export async function createProduct(values: {
   if (values.image_1920) {
     data.image_1920 = values.image_1920;
   }
-  try { data.fmcg_reorder_threshold = values.fmcg_reorder_threshold || 10; } catch {}
+  const threshold = values.fmcg_reorder_threshold;
+  data.fmcg_reorder_threshold = threshold == null || !Number.isFinite(threshold) ? 10 : threshold;
   return create('product.product', data);
 }
 

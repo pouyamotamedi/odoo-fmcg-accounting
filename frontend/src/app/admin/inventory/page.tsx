@@ -68,11 +68,11 @@ function LowStockList() {
         }
         const lowItems = (prods || [])
           .filter((p: any) => {
-            const threshold = p.fmcg_reorder_threshold || 5;
+            const threshold = p.fmcg_reorder_threshold ?? 5;
             const qty = p.qty_available ?? 0;
             return qty <= threshold;
           })
-          .map((p: any) => ({ name: p.display_name || p.name, qty: p.qty_available ?? 0, threshold: p.fmcg_reorder_threshold || 5 }))
+          .map((p: any) => ({ name: p.display_name || p.name, qty: p.qty_available ?? 0, threshold: p.fmcg_reorder_threshold ?? 5 }))
           .sort((a, b) => a.qty - b.qty);
         setItems(lowItems);
       } catch (e) { console.error('[LowStock] error:', e); setItems([]); }
@@ -145,6 +145,7 @@ export default function InventoryPage() {
   const [selectedAttr, setSelectedAttr] = useState<number>(0);
   const [attrValues, setAttrValues] = useState<AttrValue[]>([]);
   const [selectedValues, setSelectedValues] = useState<number[]>([]);
+  const [existingAttrLine, setExistingAttrLine] = useState<{id: number; value_ids: number[]} | null>(null);
   const [newAttrName, setNewAttrName] = useState('');
   const [newValueName, setNewValueName] = useState('');
   const [currentAttrLines, setCurrentAttrLines] = useState<any[]>([]);
@@ -191,7 +192,7 @@ export default function InventoryPage() {
             barcode: p.barcode || false,
             image_512: p.image_512 || false,
             total_qty: 0,
-            fmcg_reorder_threshold: p.fmcg_reorder_threshold || 10,
+            fmcg_reorder_threshold: p.fmcg_reorder_threshold ?? 10,
           });
         }
         const t = tmplMap.get(tmplId)!;
@@ -239,7 +240,7 @@ export default function InventoryPage() {
 
   async function openEditForm(t: ProductTemplate) {
     const requestId = ++discountLoadRequest.current;
-    setForm({ name: t.name, barcode: t.product_variant_count === 1 ? (t.barcode || '') : '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold || 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
+    setForm({ name: t.name, barcode: t.product_variant_count === 1 ? (t.barcode || '') : '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold ?? 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
     setEditingId(t.id); setImageFile(null);
     setInvPriceLinked(true);
     setInvPriceOriginal(t.standard_price);
@@ -301,10 +302,12 @@ export default function InventoryPage() {
     if (!form.name || !form.list_price || !form.standard_price) { alert('نام، قیمت خرید و فروش الزامی‌اند'); return; }
     setSaving(true);
     try {
+      const parsedThreshold = Number.parseInt(form.fmcg_reorder_threshold, 10);
+      const threshold = Number.isNaN(parsedThreshold) ? 10 : parsedThreshold;
       const values: any = {
         name: form.name, barcode: form.barcode || undefined,
         list_price: parseFloat(form.list_price), standard_price: parseFloat(form.standard_price),
-        fmcg_reorder_threshold: parseInt(form.fmcg_reorder_threshold) || 10,
+        fmcg_reorder_threshold: threshold,
       };
       if (form.categ_id) values.categ_id = form.categ_id;
       // Image
@@ -381,7 +384,7 @@ export default function InventoryPage() {
 
   // Attribute functions
   async function openAttrForm(tmplId: number) {
-    setAttrTemplateId(tmplId); setSelectedAttr(0); setSelectedValues([]); setNewAttrName(''); setNewValueName('');
+    setAttrTemplateId(tmplId); setSelectedAttr(0); setSelectedValues([]); setExistingAttrLine(null); setNewAttrName(''); setNewValueName('');
     try { const attrs = await getProductAttributes(); setAttributes(attrs || []); } catch {}
     // Load current attribute lines for this template
     try {
@@ -398,13 +401,23 @@ export default function InventoryPage() {
   }
 
   async function handleAttrSelect(attrId: number) {
-    setSelectedAttr(attrId); setSelectedValues([]);
+    setSelectedAttr(attrId); setSelectedValues([]); setExistingAttrLine(null);
     if (attrId) {
       try {
-        const v = await getAttributeValues(attrId);
-        // Show all values - user picks which ones to add
-        setAttrValues(v || []);
-      } catch { setAttrValues([]); }
+        const [values, lines] = await Promise.all([
+          getAttributeValues(attrId),
+          searchRead('product.template.attribute.line', [
+            ['product_tmpl_id', '=', attrTemplateId],
+            ['attribute_id', '=', attrId],
+          ], ['id', 'value_ids'], 1),
+        ]);
+        setAttrValues(values || []);
+        const line = lines?.[0];
+        setExistingAttrLine(line ? { id: line.id, value_ids: line.value_ids || [] } : null);
+      } catch {
+        setAttrValues([]);
+        setExistingAttrLine(null);
+      }
     }
     else setAttrValues([]);
   }
@@ -428,26 +441,38 @@ export default function InventoryPage() {
   }
 
   async function handleAddAttr() {
-    if (!selectedAttr || selectedValues.length === 0) { alert('ویژگی و مقادیر را انتخاب کنید'); return; }
-    if (selectedValues.length < 2) { alert('حداقل ۲ مقدار برای ویژگی انتخاب کنید.\n\nمثلاً: لیمو نعناع + سیب یخ\n\nبا ۱ مقدار، Odoo واریانت جدید نمیسازد.'); return; }
+    if (!selectedAttr || selectedValues.length === 0) { alert('ویژگی و مقدار جدید را انتخاب کنید'); return; }
     setSaving(true);
     try {
-      // Check if this attribute already exists on the template - if so, add values to existing line
+      // Re-read the line so validation and merge use the latest server state.
       const existingLines = await searchRead('product.template.attribute.line', [
         ['product_tmpl_id', '=', attrTemplateId],
         ['attribute_id', '=', selectedAttr],
       ], ['id', 'value_ids'], 1);
+      const selectedValueIds = [...new Set(selectedValues)];
 
       if (existingLines && existingLines.length > 0) {
-        // Merge new values with existing
+        // One new value is enough when this attribute already has variants.
         const existingValueIds = existingLines[0].value_ids || [];
-        const mergedValues = [...new Set([...existingValueIds, ...selectedValues])];
+        const mergedValues = [...new Set([...existingValueIds, ...selectedValueIds])];
+        if (mergedValues.length === existingValueIds.length) {
+          alert('حداقل یک مقدار جدید انتخاب کنید');
+          return;
+        }
+        if (mergedValues.length < 2) {
+          alert('برای ساخت واریانت، مجموع مقادیر باید حداقل ۲ باشد');
+          return;
+        }
         await write('product.template.attribute.line', [existingLines[0].id], {
           value_ids: [[6, 0, mergedValues]],
         });
       } else {
-        // Create new attribute line
-        await addAttributeToTemplate(attrTemplateId, selectedAttr, selectedValues);
+        // A brand-new attribute needs two values to create distinct variants.
+        if (selectedValueIds.length < 2) {
+          alert('برای ویژگی جدید حداقل ۲ مقدار انتخاب کنید');
+          return;
+        }
+        await addAttributeToTemplate(attrTemplateId, selectedAttr, selectedValueIds);
       }
 
       setShowAttrForm(false);
@@ -469,7 +494,7 @@ export default function InventoryPage() {
         setVariantsMap(prev => ({ ...prev, [attrTemplateId]: vars || [] }));
       }
     } catch (e: any) { alert(e.message || 'خطا'); }
-    setSaving(false);
+    finally { setSaving(false); }
   }
 
   async function saveBarcode(variantId: number) {
@@ -486,6 +511,8 @@ export default function InventoryPage() {
     ? templates.find((template) => template.id === editingId)
     : null;
   const hasMultipleVariants = (editingTemplate?.product_variant_count || 0) > 1;
+  const canSaveAttribute = selectedAttr > 0 && selectedValues.length > 0
+    && (existingAttrLine !== null || new Set(selectedValues).size >= 2);
 
   const filtered = templates.filter((t) => {
     const matchSearch = t.name.includes(search);
@@ -822,12 +849,21 @@ export default function InventoryPage() {
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">مقادیر (انتخاب کنید):</label>
                   <div className="flex flex-wrap gap-2 mb-2 max-h-32 overflow-auto">
-                    {attrValues.map((v) => (
-                      <button key={v.id} onClick={() => setSelectedValues((p) => p.includes(v.id) ? p.filter(x=>x!==v.id) : [...p, v.id])}
-                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${selectedValues.includes(v.id) ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                        {v.name}
-                      </button>
-                    ))}
+                    {attrValues.map((v) => {
+                      const isExisting = existingAttrLine?.value_ids.includes(v.id) || false;
+                      const isSelected = isExisting || selectedValues.includes(v.id);
+                      return (
+                        <button
+                          key={v.id}
+                          disabled={isExisting}
+                          onClick={() => setSelectedValues((p) => p.includes(v.id) ? p.filter(x=>x!==v.id) : [...p, v.id])}
+                          title={isExisting ? 'این مقدار از قبل روی محصول وجود دارد' : undefined}
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600'} disabled:cursor-not-allowed disabled:opacity-70`}
+                        >
+                          {v.name}{isExisting ? ' ✓' : ''}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="flex gap-2">
                     <input type="text" value={newValueName} onChange={(e) => setNewValueName(e.target.value)} placeholder="مقدار جدید (مثلاً: هلو)" className="flex-1 p-2 border border-gray-200 rounded-lg text-xs" onKeyDown={(e) => { if (e.key==='Enter') handleCreateValue(); }} />
@@ -838,7 +874,7 @@ export default function InventoryPage() {
             </div>
 
             <div className="flex gap-3 mt-5">
-              <button onClick={handleAddAttr} disabled={saving||!selectedAttr||selectedValues.length===0} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-40">{saving?'ذخیره...':'ثبت ویژگی جدید'}</button>
+              <button onClick={handleAddAttr} disabled={saving || !canSaveAttribute} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-40">{saving ? 'ذخیره...' : existingAttrLine ? 'افزودن واریانت' : 'ثبت ویژگی جدید'}</button>
               <button onClick={() => setShowAttrForm(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">بستن</button>
             </div>
           </div>
