@@ -625,35 +625,35 @@ export default function PosPage() {
           ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {sortedDisplayProducts.map((product) => (
-              <div key={product.id} className="relative">
+              <div key={product.id} className="group relative">
                 <button
                   onClick={() => handleProductClick(product)}
-                  className={`group relative rounded-xl overflow-hidden border-2 ${pinnedIds.has(product.id) ? 'border-yellow-400' : 'border-transparent'} hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square w-full`}
+                  className={`relative rounded-xl overflow-hidden border-2 ${pinnedIds.has(product.id) ? 'border-yellow-400' : 'border-transparent'} hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square w-full`}
                 >
                   {product.image_128 ? (
-                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 z-0 w-full h-full object-cover" />
                   ) : (
-                    <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                    <div className="absolute inset-0 z-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
                       <span className="text-3xl opacity-30">📦</span>
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/10 transition-all flex flex-col items-center justify-center p-2">
-                    <div className="text-white text-xs font-bold text-center group-hover:opacity-0 transition-opacity leading-tight">{product.name}</div>
+                  <div className="absolute inset-0 z-10 bg-black/40 opacity-100 transition-opacity duration-200 ease-out group-hover:opacity-0 pointer-events-none flex flex-col items-center justify-center p-2">
+                    <div className="text-white text-xs font-bold text-center leading-tight">{product.name}</div>
                     {(product as any).variantCount > 1 && (
-                      <div className="text-purple-200 text-[10px] mt-1 group-hover:opacity-0 transition-opacity">{toPersianDigits((product as any).variantCount)} نوع</div>
+                      <div className="text-purple-200 text-[10px] mt-1">{toPersianDigits((product as any).variantCount)} نوع</div>
                     )}
-                    <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded group-hover:opacity-0 transition-opacity">
+                    <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded">
                       {formatPrice(getEffectivePrice(product))}
                     </div>
                     {activeDiscount && discountPrices.has(product.id) && (
-                      <span className="text-[10px] text-gray-300 line-through group-hover:opacity-0 transition-opacity">{formatPrice(product.list_price)}</span>
+                      <span className="text-[10px] text-gray-300 line-through">{formatPrice(product.list_price)}</span>
                     )}
                   </div>
                 </button>
                 {/* Pin button */}
                 <button
                   onClick={(e) => { e.stopPropagation(); togglePin(product.id); }}
-                  className={`absolute top-1 right-1 text-xs z-10 w-5 h-5 rounded-full flex items-center justify-center ${pinnedIds.has(product.id) ? 'bg-yellow-400 text-yellow-900' : 'bg-black/30 text-white/60 hover:text-white'}`}
+                  className={`absolute top-1 right-1 text-xs z-20 w-5 h-5 rounded-full flex items-center justify-center ${pinnedIds.has(product.id) ? 'bg-yellow-400 text-yellow-900' : 'bg-black/30 text-white/60 hover:text-white'}`}
                 >📌</button>
               </div>
             ))}

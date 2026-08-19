@@ -638,18 +638,18 @@ export default function PurchasePage() {
                   className="w-full h-full"
                 >
                   {product.image_128 ? (
-                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 z-0 w-full h-full object-cover" />
                   ) : (
-                    <div className="absolute inset-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+                    <div className="absolute inset-0 z-0 bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
                       <span className="text-3xl opacity-30">📦</span>
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/10 transition-all flex flex-col items-center justify-center p-2">
-                    <div className="text-white text-xs font-bold text-center group-hover:opacity-0 transition-opacity leading-tight">{product.name}</div>
+                  <div className="absolute inset-0 z-10 bg-black/40 opacity-100 transition-opacity duration-200 ease-out group-hover:opacity-0 pointer-events-none flex flex-col items-center justify-center p-2">
+                    <div className="text-white text-xs font-bold text-center leading-tight">{product.name}</div>
                     {product.variantCount > 1 && (
-                      <div className="text-purple-200 text-[10px] mt-1 group-hover:opacity-0 transition-opacity">{toPersianDigits(product.variantCount)} نوع</div>
+                      <div className="text-purple-200 text-[10px] mt-1">{toPersianDigits(product.variantCount)} نوع</div>
                     )}
-                    <div className="text-white text-xs font-bold mt-1 bg-orange-600/80 px-2 py-0.5 rounded group-hover:opacity-0 transition-opacity">
+                    <div className="text-white text-xs font-bold mt-1 bg-orange-600/80 px-2 py-0.5 rounded">
                       {formatPrice(product.standard_price)}
                     </div>
                   </div>
@@ -657,7 +657,7 @@ export default function PurchasePage() {
                 <button onClick={(e) => {
                   e.stopPropagation();
                   void openProductEditor(product);
-                }} className="absolute top-1 left-1 text-[10px] text-white/70 hover:text-white bg-black/30 rounded px-1 z-10">✏️</button>
+                }} className="absolute top-1 left-1 text-[10px] text-white/70 hover:text-white bg-black/30 rounded px-1 z-20">✏️</button>
               </div>
             ))}
           </div>
