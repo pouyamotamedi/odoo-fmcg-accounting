@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, syncDiscountPriceForProducts, getTemplateDiscountPrices, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice, createPartner } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
@@ -30,6 +30,8 @@ export default function PurchasePage() {
   const [suppliers, setSuppliers] = useState<{id:number;name:string}[]>([]);
   const [items, setItems] = useState<PurchaseItem[]>([]);
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [hoveredProductId, setHoveredProductId] = useState<number | null>(null);
   const [supplier, setSupplier] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -79,6 +81,25 @@ export default function PurchasePage() {
   const [newSupplierPhone, setNewSupplierPhone] = useState('');
   // Track which invoices already have stock pickings
   const [invoicesWithPicking, setInvoicesWithPicking] = useState<Set<number>>(new Set());
+
+  const searchBlocked = showHistory || showNewProduct || showSplit || showNewSupplier ||
+    showPayment || Boolean(editingProduct) || Boolean(variantPopup);
+
+  const focusSearchIfSafe = useCallback(() => {
+    if (searchBlocked) return;
+
+    const input = searchInputRef.current;
+    if (!input) return;
+
+    const active = document.activeElement;
+    const activeIsEditable = active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLSelectElement ||
+      (active instanceof HTMLElement && active.isContentEditable);
+
+    if (active && active !== document.body && active !== input && activeIsEditable) return;
+    input.focus({ preventScroll: true });
+  }, [searchBlocked]);
 
   async function loadData() {
     try {
@@ -176,6 +197,16 @@ export default function PurchasePage() {
 
   useEffect(() => { loadData(); }, []);
   useEffect(() => { if (showHistory) loadHistory(histFilter); }, [showHistory, histFilter]);
+  useEffect(() => {
+    if (searchBlocked) {
+      if (document.activeElement === searchInputRef.current) searchInputRef.current?.blur();
+      return;
+    }
+    if (loading || submitting) return;
+
+    const frame = window.requestAnimationFrame(focusSearchIfSafe);
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, submitting, searchBlocked, focusSearchIfSafe]);
 
   // Normalize Persian digits to Latin for barcode comparison
   function normalizePersian(str: string): string {
@@ -251,6 +282,7 @@ export default function PurchasePage() {
       }
       return [...prev, { ...product, quantity: 1 }];
     });
+    window.requestAnimationFrame(focusSearchIfSafe);
   }
 
   function updateQuantity(id: number, qty: number) {
@@ -617,6 +649,7 @@ export default function PurchasePage() {
         {/* Search */}
         <div className="p-3 border-b border-gray-200 bg-white">
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="🔍 جستجوی کالا یا بارکد..."
             value={search}
@@ -632,7 +665,15 @@ export default function PurchasePage() {
           ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {displayProducts.map((product: any) => (
-              <div key={product.id} className="group relative rounded-xl overflow-hidden border-2 border-transparent hover:border-orange-400 transition-all shadow-sm aspect-square">
+              <div
+                key={product.id}
+                className="relative rounded-xl overflow-hidden border-2 border-transparent hover:border-orange-400 transition-all shadow-sm aspect-square"
+                onPointerEnter={(event) => {
+                  if (event.pointerType !== 'touch') setHoveredProductId(product.id);
+                }}
+                onPointerLeave={() => setHoveredProductId((current) => current === product.id ? null : current)}
+                onPointerCancel={() => setHoveredProductId((current) => current === product.id ? null : current)}
+              >
                 <button
                   onClick={() => handleProductClick(product)}
                   className="w-full h-full"
@@ -644,7 +685,10 @@ export default function PurchasePage() {
                       <span className="text-3xl opacity-30">📦</span>
                     </div>
                   )}
-                  <div className="absolute inset-0 z-10 bg-black/40 opacity-100 transition-opacity duration-200 ease-out group-hover:opacity-0 pointer-events-none flex flex-col items-center justify-center p-2">
+                  <div
+                    style={{ opacity: hoveredProductId === product.id ? 0 : 1 }}
+                    className="absolute inset-0 z-10 bg-black/40 transition-opacity duration-200 ease-out pointer-events-none flex flex-col items-center justify-center p-2"
+                  >
                     <div className="text-white text-xs font-bold text-center leading-tight">{product.name}</div>
                     {product.variantCount > 1 && (
                       <div className="text-purple-200 text-[10px] mt-1">{toPersianDigits(product.variantCount)} نوع</div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
 import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings } from '@/lib/odoo-api';
@@ -24,6 +24,8 @@ export default function PosPage() {
   const { items, addItem, updateQuantity, clearCart, total, updateAllPrices } = useCartStore();
   const [products, setProducts] = useState<OdooProduct[]>([]);
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [hoveredProductId, setHoveredProductId] = useState<number | null>(null);
   const [showAllProducts, setShowAllProducts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -62,6 +64,25 @@ export default function PosPage() {
   const [newCustPhone, setNewCustPhone] = useState('');
   // PAX terminal setting
   const [paxTerminalEnabled, setPaxTerminalEnabled] = useState(false);
+
+  const searchBlocked = showCredit || showSplit || showSalesHistory || showMultiCard ||
+    showNewCustomer || Boolean(variantPopup);
+
+  const focusSearchIfSafe = useCallback(() => {
+    if (searchBlocked) return;
+
+    const input = searchInputRef.current;
+    if (!input) return;
+
+    const active = document.activeElement;
+    const activeIsEditable = active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLSelectElement ||
+      (active instanceof HTMLElement && active.isContentEditable);
+
+    if (active && active !== document.body && active !== input && activeIsEditable) return;
+    input.focus({ preventScroll: true });
+  }, [searchBlocked]);
 
   // Register Service Worker & online/offline listeners
   useEffect(() => {
@@ -191,6 +212,17 @@ export default function PosPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    if (searchBlocked) {
+      if (document.activeElement === searchInputRef.current) searchInputRef.current?.blur();
+      return;
+    }
+    if (loading || submitting) return;
+
+    const frame = window.requestAnimationFrame(focusSearchIfSafe);
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, submitting, searchBlocked, focusSearchIfSafe]);
+
   // Load discount prices when discount category changes
   async function handleDiscountChange(catId: number) {
     setActiveDiscount(catId);
@@ -280,6 +312,7 @@ export default function PosPage() {
       if (match) {
         addItem({ id: match.id, name: match.display_name || match.name, price: getEffectivePrice(match) });
         setSearch('');
+        window.requestAnimationFrame(focusSearchIfSafe);
       }
     }
   }, [search]);
@@ -307,6 +340,7 @@ export default function PosPage() {
     }
     // Single variant or no variants - add directly
     addItem({ id: product.id, name: product.name, price: getEffectivePrice(product) });
+    window.requestAnimationFrame(focusSearchIfSafe);
   }
 
   function selectVariant(variant: any) {
@@ -584,12 +618,12 @@ export default function PosPage() {
         {/* Search */}
         <div className="p-3 border-b border-gray-200 bg-white">
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="🔍 جستجو یا اسکن بارکد..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
-            autoFocus
           />
           {/* Show all products toggle */}
           <label className="flex items-center gap-2 mt-2 cursor-pointer">
@@ -625,7 +659,15 @@ export default function PosPage() {
           ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {sortedDisplayProducts.map((product) => (
-              <div key={product.id} className="group relative">
+              <div
+                key={product.id}
+                className="relative"
+                onPointerEnter={(event) => {
+                  if (event.pointerType !== 'touch') setHoveredProductId(product.id);
+                }}
+                onPointerLeave={() => setHoveredProductId((current) => current === product.id ? null : current)}
+                onPointerCancel={() => setHoveredProductId((current) => current === product.id ? null : current)}
+              >
                 <button
                   onClick={() => handleProductClick(product)}
                   className={`relative rounded-xl overflow-hidden border-2 ${pinnedIds.has(product.id) ? 'border-yellow-400' : 'border-transparent'} hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square w-full`}
@@ -637,7 +679,10 @@ export default function PosPage() {
                       <span className="text-3xl opacity-30">📦</span>
                     </div>
                   )}
-                  <div className="absolute inset-0 z-10 bg-black/40 opacity-100 transition-opacity duration-200 ease-out group-hover:opacity-0 pointer-events-none flex flex-col items-center justify-center p-2">
+                  <div
+                    style={{ opacity: hoveredProductId === product.id ? 0 : 1 }}
+                    className="absolute inset-0 z-10 bg-black/40 transition-opacity duration-200 ease-out pointer-events-none flex flex-col items-center justify-center p-2"
+                  >
                     <div className="text-white text-xs font-bold text-center leading-tight">{product.name}</div>
                     {(product as any).variantCount > 1 && (
                       <div className="text-purple-200 text-[10px] mt-1">{toPersianDigits((product as any).variantCount)} نوع</div>
