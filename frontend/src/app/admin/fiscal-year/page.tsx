@@ -421,9 +421,11 @@ export default function FiscalYearPage() {
         );
         inventoryAccountId = byName[0]?.id;
       }
-      if (inventoryAccountId) {
-        validItems.push({ account_id: inventoryAccountId, account_name: '', account_type: 'asset_current', partner_id: 0, partner_name: '', debit: String(inventoryTotalValue), credit: '', type: 'asset' });
+      if (!inventoryAccountId) {
+        alert('حساب موجودی میانی با کد ۱۱۰۱۰۰ یافت نشد. ابتدا تنظیمات حساب‌های انبار را اصلاح کنید.');
+        return;
       }
+      validItems.push({ account_id: inventoryAccountId, account_name: '', account_type: 'asset_current', partner_id: 0, partner_name: '', debit: String(inventoryTotalValue), credit: '', type: 'asset' });
     }
 
     // Check balance
@@ -437,86 +439,28 @@ export default function FiscalYearPage() {
 
     setSaving(true);
     try {
-      // Find or use the miscellaneous journal for opening entries
-      let openingJournalId: number | undefined;
-      try {
-        const miscJournals = await searchRead('account.journal', [['type', '=', 'general']], ['id', 'name'], 1);
-        openingJournalId = miscJournals?.[0]?.id;
-      } catch {}
+      const journalLines = validItems.map(item => ({
+        account_id: item.account_id,
+        debit: Number(item.debit) || 0,
+        credit: Number(item.credit) || 0,
+        name: item.partner_name ? `سند افتتاحیه - ${item.partner_name}` : 'سند افتتاحیه',
+        partner_id: item.partner_id || false,
+      }));
+      const stockLines = inventoryItems
+        .filter(item => item.product_id && Number(item.qty) > 0)
+        .map(item => ({
+          product_id: item.product_id,
+          quantity: Number(item.qty),
+          unit_cost: Number(item.unit_cost) || 0,
+        }));
 
-      // 1. Create opening journal entry with proper journal_id and partner_id on lines
-      const lines = validItems.map(item => {
-        // Build descriptive name: include partner name for receivable/payable
-        let lineName = 'سند افتتاحیه';
-        if (item.partner_name) {
-          lineName = `سند افتتاحیه - ${item.partner_name}`;
-        }
-        return [0, 0, {
-          account_id: item.account_id,
-          debit: Number(item.debit) || 0,
-          credit: Number(item.credit) || 0,
-          name: lineName,
-          partner_id: item.partner_id || false,
-        }];
-      });
-
-      const moveVals: Record<string, any> = {
-        move_type: 'entry',
+      // Journal posting, stock quantities, FIFO layers, and valuation entries all run
+      // in one Odoo transaction. Any failure rolls the complete opening operation back.
+      await callMethod('fmcg.opening.inventory', 'create_opening', [{
         date: openingDate,
-        ref: 'سند افتتاحیه',
-        line_ids: lines,
-        narration: 'سند افتتاحیه سال مالی',
-      };
-      if (openingJournalId) {
-        moveVals.journal_id = openingJournalId;
-      }
-
-      const moveId = await create('account.move', moveVals);
-      await callMethod('account.move', 'action_post', [[moveId]]);
-
-      // 2. Create stock adjustments for inventory items
-      // action_apply_inventory sets qty AND creates FIFO cost layer + accounting entry
-      // (debit 110200 / credit 110100) — netting 110100 to zero
-      if (inventoryItems.length > 0) {
-        for (const item of inventoryItems) {
-          if (!item.product_id || !Number(item.qty)) continue;
-          try {
-            // Update product standard_price (used by FIFO as initial cost)
-            if (Number(item.unit_cost) > 0) {
-              await write('product.product', [item.product_id], {
-                standard_price: Number(item.unit_cost),
-              });
-            }
-
-            // Use stock.quant + action_apply_inventory to create proper FIFO layer
-            const existingQuants = await searchRead('stock.quant', [
-              ['product_id', '=', item.product_id],
-              ['location_id.usage', '=', 'internal'],
-            ], ['id', 'quantity', 'location_id'], 1);
-
-            if (existingQuants && existingQuants.length > 0) {
-              await write('stock.quant', [existingQuants[0].id], {
-                inventory_quantity: Number(item.qty),
-              });
-              await callMethod('stock.quant', 'action_apply_inventory', [[existingQuants[0].id]]);
-            } else {
-              // Find internal location and create quant
-              const locations = await searchRead('stock.location', [['usage', '=', 'internal']], ['id'], 1);
-              const locId = locations?.[0]?.id;
-              if (locId) {
-                const quantId = await create('stock.quant', {
-                  product_id: item.product_id,
-                  location_id: locId,
-                  inventory_quantity: Number(item.qty),
-                });
-                await callMethod('stock.quant', 'action_apply_inventory', [[quantId]]);
-              }
-            }
-          } catch (err: any) {
-            console.error(`Stock adjustment failed for product ${item.product_id}:`, err?.message || err);
-          }
-        }
-      }
+        journal_lines: journalLines,
+        inventory_lines: stockLines,
+      }]);
 
       setShowOpening(false);
       localStorage.removeItem('opening_entry_draft');
