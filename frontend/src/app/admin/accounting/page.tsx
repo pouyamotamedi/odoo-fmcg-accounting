@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { searchRead, create, getBankCashBalances, callMethod, getPartners, getExpenseIncomeAccounts } from '@/lib/odoo-api';
 import { formatPrice, toJalali, toPersianDigits } from '@/lib/utils';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
@@ -9,6 +9,8 @@ import ExcelButtons from '@/components/ExcelButtons';
 import * as jalaali from 'jalaali-js';
 
 type DocType = 'payment' | 'receipt';
+
+const PAGE_SIZE = 100;
 
 interface Journal {
   id: number;
@@ -60,8 +62,6 @@ function getCurrentJalaliMonthRange(): { dateFrom: string; dateTo: string } {
 }
 
 export default function AccountingPage() {
-  const [initialRange] = useState(() => getCurrentJalaliMonthRange());
-
   const [entries, setEntries] = useState<AccountEntry[]>([]);
   const [journals, setJournals] = useState<Journal[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -75,10 +75,14 @@ export default function AccountingPage() {
   const [entryLinesMap, setEntryLinesMap] = useState<Record<number, any[]>>({});
   const [filterType, setFilterType] = useState<'all' | 'in' | 'out' | 'invoice' | 'out_invoice' | 'in_invoice' | 'out_refund' | 'in_refund'>('all');
   const [searchText, setSearchText] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [totalEntries, setTotalEntries] = useState(0);
+  const fetchRequestId = useRef(0);
 
-  // Date range filter state
-  const [dateFrom, setDateFrom] = useState(initialRange.dateFrom);
-  const [dateTo, setDateTo] = useState(initialRange.dateTo);
+  // Empty dates mean all accounting dates; users can quickly switch back to the current month.
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   // Partner filter state (0 = all)
   const [filterPartnerId, setFilterPartnerId] = useState(0);
@@ -104,21 +108,14 @@ export default function AccountingPage() {
   const [allAccounts, setAllAccounts] = useState<{id: number; name: string; code: string}[]>([]);
 
   async function fetchEntries() {
+    const requestId = ++fetchRequestId.current;
     try {
       setLoading(true);
       const domain: any[] = [['state', '=', 'posted']];
-      // Date range filter
-      if (dateFrom) {
-        domain.push(['date', '>=', dateFrom]);
-      }
-      if (dateTo) {
-        domain.push(['date', '<=', dateTo]);
-      }
-      // Partner filter
-      if (filterPartnerId > 0) {
-        domain.push(['partner_id', '=', filterPartnerId]);
-      }
-      // Move type filter (server-side)
+      if (dateFrom) domain.push(['date', '>=', dateFrom]);
+      if (dateTo) domain.push(['date', '<=', dateTo]);
+      if (filterPartnerId > 0) domain.push(['partner_id', '=', filterPartnerId]);
+
       if (filterType === 'out_invoice') domain.push(['move_type', '=', 'out_invoice']);
       else if (filterType === 'in_invoice') domain.push(['move_type', '=', 'in_invoice']);
       else if (filterType === 'out_refund') domain.push(['move_type', '=', 'out_refund']);
@@ -127,15 +124,39 @@ export default function AccountingPage() {
       else if (filterType === 'in') domain.push(['move_type', '=', 'entry']);
       else if (filterType === 'out') domain.push(['move_type', '=', 'entry']);
 
-      const data = await searchRead(
-        'account.move',
-        domain,
-        ['name', 'date', 'move_type', 'amount_total', 'journal_id', 'partner_id', 'narration', 'state', 'payment_state', 'ref', 'create_date'],
-        100, 0, 'date desc, id desc'
-      );
+      if (appliedSearch) {
+        domain.push(
+          '|', '|', '|', '|',
+          ['name', 'ilike', appliedSearch],
+          ['ref', 'ilike', appliedSearch],
+          ['narration', 'ilike', appliedSearch],
+          ['partner_id.name', 'ilike', appliedSearch],
+          ['journal_id.name', 'ilike', appliedSearch],
+        );
+      }
+
+      const [data, count] = await Promise.all([
+        searchRead(
+          'account.move',
+          domain,
+          ['name', 'date', 'move_type', 'amount_total', 'journal_id', 'partner_id', 'narration', 'state', 'payment_state', 'ref', 'create_date'],
+          PAGE_SIZE,
+          page * PAGE_SIZE,
+          'date desc, id desc',
+        ),
+        callMethod('account.move', 'search_count', [domain]),
+      ]);
+
+      if (requestId !== fetchRequestId.current) return;
       setEntries(data || []);
-    } catch { setEntries([]); }
-    setLoading(false);
+      setTotalEntries(Number(count) || 0);
+    } catch {
+      if (requestId !== fetchRequestId.current) return;
+      setEntries([]);
+      setTotalEntries(0);
+    } finally {
+      if (requestId === fetchRequestId.current) setLoading(false);
+    }
   }
 
   async function fetchJournals() {
@@ -168,8 +189,16 @@ export default function AccountingPage() {
 
   useEffect(() => { fetchJournals(); fetchPartners(); fetchAccounts(); loadAllAccounts(); }, []);
 
-  // Fetch entries on mount and re-fetch when filters change
-  useEffect(() => { fetchEntries(); }, [dateFrom, dateTo, filterPartnerId, filterType]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(0);
+      setAppliedSearch(searchText.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchText]);
+
+  // Fetch one server-side page and the real total whenever filters or page change.
+  useEffect(() => { fetchEntries(); }, [dateFrom, dateTo, filterPartnerId, filterType, appliedSearch, page]);
 
   function getMoveTypeLabel(entry: AccountEntry): string {
     if (entry.move_type === 'out_invoice') return 'فاکتور فروش';
@@ -348,13 +377,23 @@ export default function AccountingPage() {
   const freeFormTotalCredit = freeFormLines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
 
   // Client-side filter: only search text (type/date/partner are server-side now)
-  const filtered = entries.filter((e) => {
-    if (searchText) {
-      const text = `${e.name} ${e.narration || ''} ${e.partner_id ? e.partner_id[1] : ''} ${e.ref || ''} ${e.journal_id ? e.journal_id[1] : ''}`.toLowerCase();
-      if (!text.includes(searchText.toLowerCase()) && !text.includes(searchText)) return false;
-    }
-    return true;
-  });
+  const filtered = entries;
+  const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
+  const firstVisibleEntry = totalEntries === 0 ? 0 : page * PAGE_SIZE + 1;
+  const lastVisibleEntry = Math.min((page + 1) * PAGE_SIZE, totalEntries);
+
+  function showAllDates() {
+    setDateFrom('');
+    setDateTo('');
+    setPage(0);
+  }
+
+  function showCurrentMonth() {
+    const range = getCurrentJalaliMonthRange();
+    setDateFrom(range.dateFrom);
+    setDateTo(range.dateTo);
+    setPage(0);
+  }
 
   // Find specific accounts for quick actions
   function findAccountByKeyword(keyword: string): number {
@@ -412,22 +451,38 @@ export default function AccountingPage() {
         <div className="flex flex-wrap gap-4 items-end">
           <div className="flex-1 min-w-[140px]">
             <label className="block text-xs text-gray-500 mb-1">از تاریخ</label>
-            <JalaliDatePicker value={dateFrom} onChange={setDateFrom} placeholder="از تاریخ" />
+            <JalaliDatePicker value={dateFrom} onChange={(value) => { setDateFrom(value); setPage(0); }} placeholder="از تاریخ" />
           </div>
           <div className="flex-1 min-w-[140px]">
             <label className="block text-xs text-gray-500 mb-1">تا تاریخ</label>
-            <JalaliDatePicker value={dateTo} onChange={setDateTo} placeholder="تا تاریخ" />
+            <JalaliDatePicker value={dateTo} onChange={(value) => { setDateTo(value); setPage(0); }} placeholder="تا تاریخ" />
           </div>
           <div className="flex-1 min-w-[180px]">
             <label className="block text-xs text-gray-500 mb-1">فیلتر شخص</label>
             <select
               value={filterPartnerId}
-              onChange={e => setFilterPartnerId(Number(e.target.value))}
+              onChange={e => { setFilterPartnerId(Number(e.target.value)); setPage(0); }}
               className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
             >
               <option value={0}>همه اشخاص</option>
               {partners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={showAllDates}
+              className={`px-3 py-2 rounded-lg text-xs font-bold transition ${!dateFrom && !dateTo ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              همه تاریخ‌ها
+            </button>
+            <button
+              type="button"
+              onClick={showCurrentMonth}
+              className="px-3 py-2 rounded-lg text-xs font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+            >
+              ماه جاری
+            </button>
           </div>
         </div>
       </div>
@@ -443,7 +498,7 @@ export default function AccountingPage() {
           ['in', 'دریافت‌ها'],
           ['out', 'پرداخت‌ها'],
         ] as const).map(([key, label]) => (
-          <button key={key} onClick={() => setFilterType(key as any)}
+          <button key={key} onClick={() => { setFilterType(key as any); setPage(0); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold ${filterType === key ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             {label}
           </button>
@@ -585,6 +640,32 @@ export default function AccountingPage() {
               ); })}
             </tbody>
           </table>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 bg-gray-50">
+            <span className="text-xs text-gray-500">
+              نمایش {toPersianDigits(firstVisibleEntry)} تا {toPersianDigits(lastVisibleEntry)} از {toPersianDigits(totalEntries)} سند
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(0, current - 1))}
+                disabled={page === 0 || loading}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                قبلی
+              </button>
+              <span className="text-xs text-gray-500">
+                صفحه {toPersianDigits(page + 1)} از {toPersianDigits(totalPages)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
+                disabled={page + 1 >= totalPages || loading}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                بعدی
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
