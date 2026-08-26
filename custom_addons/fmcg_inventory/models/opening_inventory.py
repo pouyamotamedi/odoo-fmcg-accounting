@@ -110,7 +110,6 @@ class FmcgOpeningInventory(models.AbstractModel):
                     'product_id': product.id,
                     'location_id': warehouse.lot_stock_id.id,
                     'inventory_quantity': quantity,
-                    'company_id': self.env.company.id,
                 })
             else:
                 quant.with_context(inventory_mode=True).inventory_quantity = quantity
