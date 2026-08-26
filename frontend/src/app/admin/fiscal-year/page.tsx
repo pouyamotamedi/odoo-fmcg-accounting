@@ -390,6 +390,7 @@ export default function FiscalYearPage() {
   const inventoryTotalValue = inventoryItems.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.unit_cost) || 0), 0);
 
   async function handleSaveOpening() {
+    if (saving) return;
     if (!openingDate) { alert('تاریخ افتتاحیه الزامی'); return; }
 
     // Validate: only balance sheet accounts
@@ -454,9 +455,16 @@ export default function FiscalYearPage() {
           unit_cost: Number(item.unit_cost) || 0,
         }));
 
+      let openingRequestId = localStorage.getItem('opening_entry_request_id');
+      if (!openingRequestId) {
+        openingRequestId = crypto.randomUUID();
+        localStorage.setItem('opening_entry_request_id', openingRequestId);
+      }
+
       // Journal posting, stock quantities, FIFO layers, and valuation entries all run
       // in one Odoo transaction. Any failure rolls the complete opening operation back.
       await callMethod('fmcg.opening.inventory', 'create_opening', [{
+        request_id: openingRequestId,
         date: openingDate,
         journal_lines: journalLines,
         inventory_lines: stockLines,
@@ -464,6 +472,7 @@ export default function FiscalYearPage() {
 
       setShowOpening(false);
       localStorage.removeItem('opening_entry_draft');
+      localStorage.removeItem('opening_entry_request_id');
       setMsg('✅ سند افتتاحیه و موجودی انبار ثبت شد');
       setTimeout(() => setMsg(''), 4000);
     } catch (e: any) { alert(e.message || 'خطا'); }

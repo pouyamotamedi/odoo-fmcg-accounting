@@ -13,13 +13,29 @@ class FmcgOpeningInventory(models.AbstractModel):
         self.env['stock.quant'].check_access('write')
 
         opening_date = values.get('date')
+        request_id = (values.get('request_id') or '').strip()
         journal_lines = values.get('journal_lines') or []
         inventory_lines = values.get('inventory_lines') or []
 
         if not opening_date:
             raise ValidationError(_('Opening date is required.'))
+        if not request_id or len(request_id) > 64:
+            raise ValidationError(_('A valid opening request identifier is required.'))
         if not journal_lines:
             raise ValidationError(_('At least one opening journal line is required.'))
+
+        request_ref = 'FMCG-OPENING:%s' % request_id
+        existing_move = self.env['account.move'].search([
+            ('company_id', '=', self.env.company.id),
+            ('ref', '=', request_ref),
+            ('state', '=', 'posted'),
+        ], limit=1)
+        if existing_move:
+            return {
+                'move_id': existing_move.id,
+                'processed_products': 0,
+                'already_processed': True,
+            }
 
         account_ids = {line.get('account_id') for line in journal_lines if line.get('account_id')}
         accounts = self.env['account.account'].browse(account_ids).exists()
@@ -62,7 +78,7 @@ class FmcgOpeningInventory(models.AbstractModel):
             'move_type': 'entry',
             'date': opening_date,
             'journal_id': journal.id,
-            'ref': _('Opening Entry'),
+            'ref': request_ref,
             'narration': _('Fiscal Year Opening Entry'),
             'line_ids': move_lines,
         })
@@ -80,6 +96,7 @@ class FmcgOpeningInventory(models.AbstractModel):
             'force_period_date': opening_date,
         }
         processed_products = self.env['product.product']
+        quants_to_apply = self.env['stock.quant']
 
         for line in inventory_lines:
             product = self.env['product.product'].browse(line.get('product_id')).exists()
@@ -119,8 +136,11 @@ class FmcgOpeningInventory(models.AbstractModel):
                 0.0,
                 precision_rounding=product.uom_id.rounding,
             ):
-                quant.with_context(**opening_context).action_apply_inventory()
+                quants_to_apply |= quant
             else:
                 quant.action_clear_inventory_quantity()
+
+        if quants_to_apply:
+            quants_to_apply.with_context(**opening_context).action_apply_inventory()
 
         return {'move_id': move.id, 'processed_products': len(processed_products)}
