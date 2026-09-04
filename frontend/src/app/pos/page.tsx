@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { logout as odooLogout } from '@/lib/odoo-api';
@@ -18,6 +18,22 @@ interface OdooProduct {
   image_128?: string | false;
   display_name?: string;
   product_tmpl_id?: [number, string] | number;
+}
+
+const SALES_HISTORY_LIMIT = 100;
+
+function formatSaleDateTime(value: string | false | undefined): string {
+  if (!value) return '—';
+  const date = new Date(`${value.replace(' ', 'T')}Z`);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('fa-IR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Tehran',
+  });
 }
 
 export default function PosPage() {
@@ -354,6 +370,13 @@ export default function PosPage() {
 
   const cartTotal = total();
 
+  // Reset all per-sale state only after the sale is registered or safely queued.
+  function completeSale() {
+    clearCart();
+    setActiveDiscount(0);
+    setDiscountPrices(new Map());
+  }
+
   async function handlePayment(method: 'cash' | 'card' | 'credit') {
     if (method === 'credit') {
       try {
@@ -372,7 +395,7 @@ export default function PosPage() {
         await queueTransaction({ lines, payment_method: method, total: cartTotal });
         const count = await getPendingCount();
         setPendingCount(count);
-        clearCart();
+        completeSale();
         setMsg('📥 تراکنش ذخیره شد (آفلاین) - پس از اتصال همگام‌سازی می‌شود');
         setTimeout(() => setMsg(''), 4000);
         setSubmitting(false);
@@ -414,7 +437,7 @@ export default function PosPage() {
       try {
         await createStockDelivery(lines);
       } catch { /* best effort */ }
-      clearCart();
+      completeSale();
       setMsg('✅ فاکتور ثبت شد');
       setTimeout(() => setMsg(''), 3000);
     } catch (e:any) {
@@ -424,7 +447,7 @@ export default function PosPage() {
         await queueTransaction({ lines, payment_method: method, total: cartTotal });
         const count = await getPendingCount();
         setPendingCount(count);
-        clearCart();
+        completeSale();
         setMsg('📥 تراکنش ذخیره شد (آفلاین)');
         setTimeout(() => setMsg(''), 4000);
       } else {
@@ -450,7 +473,7 @@ export default function PosPage() {
         });
         const count = await getPendingCount();
         setPendingCount(count);
-        clearCart();
+        completeSale();
         setShowCredit(false);
         setMsg('📥 فروش اعتباری ذخیره شد (آفلاین)');
         setTimeout(() => setMsg(''), 4000);
@@ -466,7 +489,7 @@ export default function PosPage() {
       try {
         await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
       } catch { /* best effort */ }
-      clearCart();
+      completeSale();
       setShowCredit(false);
       setMsg('✅ فروش اعتباری ثبت شد');
       setTimeout(() => setMsg(''), 3000);
@@ -519,7 +542,7 @@ export default function PosPage() {
         }
       }
 
-      const invoiceId = await createPosOrder({ lines, payment_method: 'cash', partner_id: partnerId });
+      const invoiceId = await createPosOrder({ lines, payment_method: 'split', partner_id: partnerId });
       await confirmInvoice(invoiceId);
 
       // Only register payment for cash/card portions
@@ -538,7 +561,7 @@ export default function PosPage() {
         await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
       } catch { /* best effort */ }
 
-      clearCart();
+      completeSale();
       setShowSplit(false);
       setSplitCash(''); setSplitCard(''); setSplitCredit(''); setSplitCustomer(0);
       setMsg('✅ پرداخت ترکیبی ثبت شد');
@@ -597,7 +620,7 @@ export default function PosPage() {
               ) : null;
             })()}
             <button onClick={async () => {
-              try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','payment_state','narration'], 30, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
+              try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','create_date','payment_state','narration'], SALES_HISTORY_LIMIT, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
               setShowSalesHistory(true);
             }} className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded">📋 سوابق</button>
             <button onClick={async () => {
@@ -953,7 +976,7 @@ export default function PosPage() {
       {/* Sales History Modal */}
       {showSalesHistory && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[80vh] overflow-auto">
+          <div className="bg-white rounded-2xl p-6 w-[96vw] max-w-6xl shadow-2xl max-h-[80vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">📋 سوابق فاکتورهای فروش</h3>
               <button onClick={() => setShowSalesHistory(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
@@ -961,12 +984,14 @@ export default function PosPage() {
             {salesHistory.length === 0 ? <p className="text-center text-gray-400 py-8">فاکتوری یافت نشد</p> : (
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b"><tr>
-                  <th className="text-right p-2">شماره</th><th className="text-right p-2">مشتری</th><th className="text-right p-2">مبلغ</th><th className="text-right p-2">وضعیت</th><th className="text-right p-2">عملیات</th>
+                  <th className="text-right p-2">شماره</th><th className="text-right p-2">تاریخ و ساعت</th><th className="text-right p-2">مشتری</th><th className="text-right p-2">روش پرداخت</th><th className="text-right p-2">مبلغ</th><th className="text-right p-2">وضعیت</th><th className="text-right p-2">عملیات</th>
                 </tr></thead>
                 <tbody>{salesHistory.map((inv:any) => (<React.Fragment key={inv.id}>
                   <tr className="border-b hover:bg-gray-50">
                     <td className="p-2">{inv.name}</td>
+                    <td className="p-2 text-xs whitespace-nowrap">{formatSaleDateTime(inv.create_date)}</td>
                     <td className="p-2">{inv.partner_id?inv.partner_id[1]:'—'}</td>
+                    <td className="p-2 text-xs whitespace-nowrap">{getPosPaymentLabel(inv.narration, inv.payment_state)}</td>
                     <td className="p-2 font-bold">{formatPrice(inv.amount_total)}</td>
                     <td className="p-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${(String(inv.narration||'')).includes('ابطال') ? 'bg-red-100 text-red-700' : inv.payment_state==='paid'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{(String(inv.narration||'')).includes('ابطال') ? '⛔ ابطال شده' : inv.payment_state==='paid'?'پرداخت شده':'تأیید شده'}</span></td>
                     <td className="p-2 flex gap-1">
@@ -982,7 +1007,7 @@ export default function PosPage() {
                             await voidInvoice(inv.id, jId);
                             setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
                             setTimeout(()=>setMsg(''),4000);
-                            try { const h = await searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','payment_state','narration'],50,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
+                            try { const h = await searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','invoice_date','create_date','payment_state','narration'],SALES_HISTORY_LIMIT,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
                           } catch(e:any){alert(e.message||'خطا در ابطال');}
                         }} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
                       ) : (
@@ -990,7 +1015,7 @@ export default function PosPage() {
                       )}
                     </td>
                   </tr>
-                  {expandedSale===inv.id&&(<tr key={`d-${inv.id}`}><td colSpan={5} className="p-2 bg-gray-50">
+                  {expandedSale===inv.id&&(<tr key={`d-${inv.id}`}><td colSpan={7} className="p-2 bg-gray-50">
                     {saleLines.length===0?<p className="text-xs text-gray-400">بدون آیتم</p>:(
                       <table className="w-full text-xs"><thead><tr><th className="text-right p-1">کالا</th><th className="text-right p-1">تعداد</th><th className="text-right p-1">قیمت</th><th className="text-right p-1">جمع</th></tr></thead>
                       <tbody>{saleLines.map((l:any)=>(<tr key={l.id}><td className="p-1">{l.product_id?.[1]||l.name}</td><td className="p-1">{l.quantity}</td><td className="p-1">{formatPrice(l.price_unit)}</td><td className="p-1">{formatPrice(l.price_subtotal)}</td></tr>))}</tbody></table>
@@ -1088,12 +1113,12 @@ export default function PosPage() {
                 setSubmitting(true);
                 try {
                   const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
-                  const invoiceId = await createPosOrder({ lines, payment_method: 'card' });
+                  const invoiceId = await createPosOrder({ lines, payment_method: 'multi_card' });
                   await confirmInvoice(invoiceId);
                   const bankJournal = posJournals.find(j => j.type === 'bank');
                   if (bankJournal) await registerInvoicePayment(invoiceId, bankJournal.id, cartTotal);
                   try { await createStockDelivery(lines); } catch {}
-                  clearCart(); setShowMultiCard(false); setMsg('✅ فاکتور ثبت شد');
+                  completeSale(); setShowMultiCard(false); setMsg('✅ فاکتور ثبت شد');
                   setTimeout(() => setMsg(''), 3000);
                 } catch (e: any) { alert(e.message || 'خطا'); }
                 setSubmitting(false);

@@ -13,13 +13,13 @@ function getLocalToday(): string {
 }
 
 interface JsonRpcResponse {
-  jsonrpc: string;
-  id: number;
+  jsonrpc?: string;
+  id?: number;
   result?: any;
   error?: {
-    code: number;
-    message: string;
-    data: { message: string; debug: string };
+    code?: number;
+    message?: string;
+    data?: { message?: string; debug?: string };
   };
 }
 
@@ -38,10 +38,25 @@ async function jsonRpc(url: string, params: any): Promise<any> {
     }),
   });
 
-  const data: JsonRpcResponse = await response.json();
+  const responseText = await response.text();
+  let data: JsonRpcResponse | undefined;
 
-  if (data.error) {
+  if (responseText) {
+    try {
+      data = JSON.parse(responseText) as JsonRpcResponse;
+    } catch {
+      // A proxy or upstream failure can return plain text or HTML instead of JSON.
+    }
+  }
+
+  if (data?.error) {
     throw new Error(data.error.data?.message || data.error.message || 'خطای سرور');
+  }
+
+  if (!response.ok || !data) {
+    const responseSummary = responseText.trim().replace(/\s+/g, ' ').slice(0, 300);
+    const status = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+    throw new Error(responseSummary ? `${status}: ${responseSummary}` : status);
   }
 
   return data.result;
@@ -388,9 +403,31 @@ export async function getBankCashBalances() {
 
 // ============ POS Orders ============
 
+export type PosPaymentMethod = 'cash' | 'card' | 'credit' | 'split' | 'multi_card';
+
+const POS_PAYMENT_LABELS: Record<PosPaymentMethod, string> = {
+  cash: '💵 نقدی',
+  card: '💳 کارت',
+  credit: '🤝 اعتباری',
+  split: '🔀 ترکیبی',
+  multi_card: '💳💳 چند کارتی',
+};
+
+const POS_PAYMENT_PREFIX = '[FMCG-POS-PAYMENT:';
+
+export function buildPosPaymentNote(method: PosPaymentMethod, note?: string): string {
+  return `${POS_PAYMENT_PREFIX}${method}]${note ? `\n${note}` : ''}`;
+}
+
+export function getPosPaymentLabel(narration: string | false | undefined, paymentState?: string): string {
+  const match = String(narration || '').match(/\[FMCG-POS-PAYMENT:(cash|card|credit|split|multi_card)\]/);
+  if (match) return POS_PAYMENT_LABELS[match[1] as PosPaymentMethod];
+  return paymentState === 'not_paid' ? '🤝 اعتباری' : '—';
+}
+
 export async function createPosOrder(values: {
   lines: Array<{ product_id: number; qty: number; price_unit: number }>;
-  payment_method: 'cash' | 'card' | 'credit';
+  payment_method: PosPaymentMethod;
   partner_id?: number;
   note?: string;
 }) {
@@ -438,7 +475,7 @@ export async function createPosOrder(values: {
     invoice_date: today,
     date: today,
     invoice_line_ids: invoice_lines,
-    narration: values.note || false,
+    narration: buildPosPaymentNote(values.payment_method, values.note),
   });
 }
 
