@@ -751,7 +751,10 @@ export default function PosPage() {
                     className="absolute inset-0 z-10 bg-black/40 transition-opacity duration-200 ease-out pointer-events-none flex flex-col items-center justify-center p-2"
                   >
                     <div className="text-white text-xs font-bold text-center leading-tight">{product.name}</div>
-                    {(product as any).variantCount > 1 && (
+                    <div className="text-[10px] text-slate-200 mt-1">
+                      موجودی: {toPersianDigits(Math.max(0, Math.round(product.qty_available ?? 0)))}
+                    </div>
+                    {Boolean((product as any).variantCount > 1) && (
                       <div className="text-purple-200 text-[10px] mt-1">{toPersianDigits((product as any).variantCount)} نوع</div>
                     )}
                     <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded">
