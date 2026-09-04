@@ -757,7 +757,7 @@ export default function PosPage() {
                     <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded">
                       {formatPrice(getEffectivePrice(product))}
                     </div>
-                    {activeDiscount && discountPrices.has(product.id) && (
+                    {activeDiscount !== 0 && discountPrices.has(product.id) && (
                       <span className="text-[10px] text-gray-300 line-through">{formatPrice(product.list_price)}</span>
                     )}
                   </div>
