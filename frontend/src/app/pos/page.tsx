@@ -100,6 +100,52 @@ export default function PosPage() {
     input.focus({ preventScroll: true });
   }, [searchBlocked]);
 
+  const rebuildVariantCache = useCallback((data: OdooProduct[]) => {
+    const cache = new Map<number, any[]>();
+    for (const product of data) {
+      const templateId = (product as any).product_tmpl_id?.[0] || (product as any).product_tmpl_id || product.id;
+      if (!cache.has(templateId)) cache.set(templateId, []);
+      cache.get(templateId)!.push(product);
+    }
+    setVariantCache(cache);
+  }, []);
+
+  const refreshProducts = useCallback(async () => {
+    try {
+      const data = (await getProducts()) || [];
+      setProducts(data);
+      rebuildVariantCache(data);
+    } catch {
+      // Keep the current POS product cache available if refresh fails.
+    }
+  }, [rebuildVariantCache]);
+
+  const applyLocalStockDelta = useCallback((lines: Array<{ product_id: number; qty: number }>) => {
+    const soldByProduct = new Map<number, number>();
+    for (const line of lines) {
+      soldByProduct.set(line.product_id, (soldByProduct.get(line.product_id) || 0) + line.qty);
+    }
+
+    const reduceStock = (product: OdooProduct) => {
+      const sold = soldByProduct.get(product.id) || 0;
+      return sold ? { ...product, qty_available: Math.max(0, product.qty_available - sold) } : product;
+    };
+
+    setProducts(previous => previous.map(reduceStock));
+    setVariantCache(previous => {
+      const next = new Map<number, any[]>();
+      previous.forEach((variants, templateId) => next.set(templateId, variants.map(reduceStock)));
+      return next;
+    });
+  }, []);
+
+  const finishSale = useCallback((lines: Array<{ product_id: number; qty: number }>, refreshStock = false) => {
+    applyLocalStockDelta(lines);
+    completeSale();
+    if (refreshStock) void refreshProducts();
+    window.requestAnimationFrame(focusSearchIfSafe);
+  }, [applyLocalStockDelta, focusSearchIfSafe, refreshProducts]);
+
   // Register Service Worker & online/offline listeners
   useEffect(() => {
     // Register SW
@@ -161,6 +207,9 @@ export default function PosPage() {
           partner_id: tx.partner_id,
         });
         await confirmInvoice(invoiceId);
+        try {
+          await createStockDelivery(lines);
+        } catch { /* best effort */ }
         // Payment registration is best-effort (don't fail the whole tx if it fails)
         if (tx.payment_method !== 'credit') {
           try {
@@ -177,6 +226,7 @@ export default function PosPage() {
       setPendingCount(remaining);
 
       if (result.success > 0) {
+        void refreshProducts();
         setMsg(`✅ ${toPersianDigits(result.success)} تراکنش آفلاین ثبت شد${result.failed > 0 ? ` (${toPersianDigits(result.failed)} خطا)` : ''}`);
         setTimeout(() => setMsg(''), 4000);
       } else if (result.failed > 0) {
@@ -195,23 +245,16 @@ export default function PosPage() {
       setPendingCount(remaining);
       setTimeout(syncOfflineQueue, 15000);
     }
-  }, [posJournals]);
+  }, [posJournals, refreshProducts]);
 
   useEffect(() => {
     async function load() {
       try {
         const [data, jrnls, discCats] = await Promise.all([getProducts(), getBankCashBalances(), getDiscountCategories()]);
         setProducts(data || []);
-        setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
+        rebuildVariantCache(data || []);
         setDiscountCategories(discCats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
-        // Pre-cache variants by template for offline use
-        const vCache = new Map<number, any[]>();
-        for (const p of (data || [])) {
-          const tmplId = (p as any).product_tmpl_id?.[0] || (p as any).product_tmpl_id || p.id;
-          if (!vCache.has(tmplId)) vCache.set(tmplId, []);
-          vCache.get(tmplId)!.push(p);
-        }
-        setVariantCache(vCache);
+        setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
         // Check PAX terminal setting
         try {
           const settings = await getCompanySettings();
@@ -355,7 +398,7 @@ export default function PosPage() {
       }
     }
     // Single variant or no variants - add directly
-    addItem({ id: product.id, name: product.name, price: getEffectivePrice(product) });
+    addItem({ id: product.id, name: product.display_name || product.name, price: getEffectivePrice(product) });
     window.requestAnimationFrame(focusSearchIfSafe);
   }
 
@@ -373,6 +416,7 @@ export default function PosPage() {
   // Reset all per-sale state only after the sale is registered or safely queued.
   function completeSale() {
     clearCart();
+    setSearch('');
     setActiveDiscount(0);
     setDiscountPrices(new Map());
   }
@@ -395,7 +439,7 @@ export default function PosPage() {
         await queueTransaction({ lines, payment_method: method, total: cartTotal });
         const count = await getPendingCount();
         setPendingCount(count);
-        completeSale();
+        finishSale(lines, false);
         setMsg('📥 تراکنش ذخیره شد (آفلاین) - پس از اتصال همگام‌سازی می‌شود');
         setTimeout(() => setMsg(''), 4000);
         setSubmitting(false);
@@ -437,7 +481,7 @@ export default function PosPage() {
       try {
         await createStockDelivery(lines);
       } catch { /* best effort */ }
-      completeSale();
+      finishSale(lines, true);
       setMsg('✅ فاکتور ثبت شد');
       setTimeout(() => setMsg(''), 3000);
     } catch (e:any) {
@@ -447,7 +491,7 @@ export default function PosPage() {
         await queueTransaction({ lines, payment_method: method, total: cartTotal });
         const count = await getPendingCount();
         setPendingCount(count);
-        completeSale();
+        finishSale(lines, false);
         setMsg('📥 تراکنش ذخیره شد (آفلاین)');
         setTimeout(() => setMsg(''), 4000);
       } else {
@@ -473,7 +517,7 @@ export default function PosPage() {
         });
         const count = await getPendingCount();
         setPendingCount(count);
-        completeSale();
+        finishSale(lines, false);
         setShowCredit(false);
         setMsg('📥 فروش اعتباری ذخیره شد (آفلاین)');
         setTimeout(() => setMsg(''), 4000);
@@ -489,7 +533,7 @@ export default function PosPage() {
       try {
         await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
       } catch { /* best effort */ }
-      completeSale();
+      finishSale(lines.map(line => ({ product_id: line.product_id, qty: line.qty })), true);
       setShowCredit(false);
       setMsg('✅ فروش اعتباری ثبت شد');
       setTimeout(() => setMsg(''), 3000);
@@ -561,7 +605,7 @@ export default function PosPage() {
         await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
       } catch { /* best effort */ }
 
-      completeSale();
+      finishSale(lines.map(line => ({ product_id: line.product_id, qty: line.qty })), true);
       setShowSplit(false);
       setSplitCash(''); setSplitCard(''); setSplitCredit(''); setSplitCustomer(0);
       setMsg('✅ پرداخت ترکیبی ثبت شد');
@@ -710,6 +754,9 @@ export default function PosPage() {
                     {(product as any).variantCount > 1 && (
                       <div className="text-purple-200 text-[10px] mt-1">{toPersianDigits((product as any).variantCount)} نوع</div>
                     )}
+                    <div className="text-[10px] text-slate-200 mt-1">
+                      موجودی: {toPersianDigits(Math.max(0, Math.round(product.qty_available || 0)))}
+                    </div>
                     <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded">
                       {formatPrice(getEffectivePrice(product))}
                     </div>
@@ -975,7 +1022,12 @@ export default function PosPage() {
       )}
       {/* Sales History Modal */}
       {showSalesHistory && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowSalesHistory(false);
+          }}
+        >
           <div className="bg-white rounded-2xl p-6 w-[96vw] max-w-6xl shadow-2xl max-h-[80vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">📋 سوابق فاکتورهای فروش</h3>
@@ -1118,7 +1170,7 @@ export default function PosPage() {
                   const bankJournal = posJournals.find(j => j.type === 'bank');
                   if (bankJournal) await registerInvoicePayment(invoiceId, bankJournal.id, cartTotal);
                   try { await createStockDelivery(lines); } catch {}
-                  completeSale(); setShowMultiCard(false); setMsg('✅ فاکتور ثبت شد');
+                  finishSale(lines, true); setShowMultiCard(false); setMsg('✅ فاکتور ثبت شد');
                   setTimeout(() => setMsg(''), 3000);
                 } catch (e: any) { alert(e.message || 'خطا'); }
                 setSubmitting(false);
@@ -1155,8 +1207,8 @@ export default function PosPage() {
                     className="w-full text-right p-3 bg-gray-50 rounded-lg hover:bg-indigo-50 hover:border-indigo-300 border border-gray-200 transition"
                   >
                     <div className="font-medium text-sm">{shortLabel || displayLabel}</div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      موجودی: {toPersianDigits(Math.round(v.qty_available))} | {v.barcode || 'بدون بارکد'}
+                    <div className="text-xs text-slate-400 mt-1">
+                      موجودی: {toPersianDigits(Math.max(0, Math.round(v.qty_available || 0)))} | {v.barcode || 'بدون بارکد'}
                     </div>
                   </button>
                 );
