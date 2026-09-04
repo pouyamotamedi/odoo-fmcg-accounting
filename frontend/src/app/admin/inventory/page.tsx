@@ -51,6 +51,7 @@ interface ProductForm {
 function LowStockList() {
   const [items, setItems] = useState<{name: string; qty: number; threshold: number}[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showZeroMinimums, setShowZeroMinimums] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -83,14 +84,25 @@ function LowStockList() {
 
   if (loading) return <div className="text-center py-12 text-gray-400">بارگذاری...</div>;
 
+  const visibleItems = items.filter((item) => showZeroMinimums || item.threshold > 0);
+
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
       <div className="p-4 border-b bg-orange-50">
-        <h3 className="text-sm font-bold text-orange-700">⚠️ کالاهای با موجودی کم ({toPersianDigits(items.length)} مورد)</h3>
+        <h3 className="text-sm font-bold text-orange-700">⚠️ کالاهای با موجودی کم ({toPersianDigits(visibleItems.length)} مورد)</h3>
         <p className="text-[10px] text-orange-600">واریانت‌هایی که موجودی آنها کمتر یا مساوی حد نصاب است</p>
+        <label className="flex items-center gap-2 mt-3 cursor-pointer w-fit text-xs text-orange-700">
+          <input
+            type="checkbox"
+            checked={showZeroMinimums}
+            onChange={(event) => setShowZeroMinimums(event.target.checked)}
+            className="w-3.5 h-3.5 rounded"
+          />
+          نمایش کالاهای با حداقل موجودی صفر
+        </label>
       </div>
-      {items.length === 0 ? (
-        <div className="p-8 text-center text-gray-400 text-sm">همه کالاها موجودی کافی دارند ✓</div>
+      {visibleItems.length === 0 ? (
+        <div className="p-8 text-center text-gray-400 text-sm">همه کالاهای دارای حد نصاب، موجودی کافی دارند ✓</div>
       ) : (
         <table className="w-full text-sm">
           <thead className="bg-gray-50"><tr>
@@ -100,7 +112,7 @@ function LowStockList() {
             <th className="text-right p-3">وضعیت</th>
           </tr></thead>
           <tbody>
-            {items.map((item, i) => (
+            {visibleItems.map((item, i) => (
               <tr key={i} className="border-t hover:bg-orange-50">
                 <td className="p-3 font-medium">{item.name}</td>
                 <td className="p-3 text-red-600 font-bold">{toPersianDigits(Math.round(item.qty))}</td>
