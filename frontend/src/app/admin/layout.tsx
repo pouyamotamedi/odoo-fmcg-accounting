@@ -12,30 +12,42 @@ export default function AdminLayout({
 }) {
   const router = useRouter();
   const { isLoggedIn, role, isAdmin } = useAuthStore();
-  const [allowed, setAllowed] = useState(true);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
   useEffect(() => {
+    const persist = useAuthStore.persist;
+    if (!persist) return;
+    const unsubscribe = persist.onFinishHydration(() => setHasHydrated(true));
+    if (persist.hasHydrated()) {
+      const timer = window.setTimeout(() => setHasHydrated(true), 0);
+      return () => {
+        window.clearTimeout(timer);
+        unsubscribe();
+      };
+    }
+    return unsubscribe;
+  }, []);
+
+  const sellerHasNoMenus = (() => {
+    if (!hasHydrated || role !== 'seller' || isAdmin) return false;
+    try {
+      const savedMenus = localStorage.getItem('seller_allowed_menus');
+      return !savedMenus || JSON.parse(savedMenus).length === 0;
+    } catch {
+      return true;
+    }
+  })();
+
+  useEffect(() => {
+    if (!hasHydrated) return;
     if (!isLoggedIn) {
       router.replace('/login');
-      return;
+    } else if (sellerHasNoMenus) {
+      router.replace('/pos');
     }
-    if (role === 'seller' && !isAdmin) {
-      // Check if seller has allowed menus
-      try {
-        const savedMenus = localStorage.getItem('seller_allowed_menus');
-        const allowedMenus = savedMenus ? JSON.parse(savedMenus) : [];
-        if (allowedMenus.length === 0) {
-          router.replace('/pos');
-          setAllowed(false);
-        }
-      } catch {
-        router.replace('/pos');
-        setAllowed(false);
-      }
-    }
-  }, [isLoggedIn, role, isAdmin, router]);
+  }, [hasHydrated, isLoggedIn, sellerHasNoMenus, router]);
 
-  if (!isLoggedIn || !allowed) {
+  if (!hasHydrated || !isLoggedIn || sellerHasNoMenus) {
     return null;
   }
 
