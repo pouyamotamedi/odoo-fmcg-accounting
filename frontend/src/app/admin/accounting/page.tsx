@@ -131,20 +131,13 @@ export default function AccountingPage() {
           ...(showCashEntries ? ['cash'] : []),
         ];
 
+        domain.push(
+          '|',
+          ['origin_payment_id.payment_type', '=', paymentType],
+          ['line_ids', 'any', [['account_id.code', '=', pendingAccountCode]]],
+        );
         if (selectedJournalTypes.length > 0) {
-          domain.push(
-            '|',
-            '&',
-            ['origin_payment_id.payment_type', '=', paymentType],
-            ['journal_id.type', 'in', selectedJournalTypes],
-            ['line_ids', 'any', [['account_id.code', '=', pendingAccountCode]]],
-          );
-        } else {
-          domain.push(
-            '|',
-            ['origin_payment_id.payment_type', '=', paymentType],
-            ['line_ids', 'any', [['account_id.code', '=', pendingAccountCode]]],
-          );
+          domain.push(['journal_id.type', 'in', selectedJournalTypes]);
         }
       }
 
