@@ -122,20 +122,7 @@ export default function AccountingPage() {
       else if (filterType === 'in_refund') domain.push(['move_type', '=', 'in_refund']);
       else if (filterType === 'invoice') domain.push(['move_type', 'in', ['out_invoice', 'in_invoice', 'out_refund', 'in_refund']]);
       else if (filterType === 'in' || filterType === 'out') {
-        const paymentDomain: any[] = [
-          ['state', '=', 'posted'],
-          ['payment_type', '=', filterType === 'in' ? 'inbound' : 'outbound'],
-        ];
-        if (dateFrom) paymentDomain.push(['date', '>=', dateFrom]);
-        if (dateTo) paymentDomain.push(['date', '<=', dateTo]);
-        if (filterPartnerId > 0) paymentDomain.push(['partner_id', '=', filterPartnerId]);
-
-        const payments = await searchRead('account.payment', paymentDomain, ['move_id'], 0, 0, 'date desc, id desc');
-        const moveIds = (payments || []).flatMap((payment: { move_id?: [number, string] | false }) => {
-          const moveId = payment.move_id;
-          return Array.isArray(moveId) && typeof moveId[0] === 'number' ? [moveId[0]] : [];
-        });
-        domain.push(['id', 'in', moveIds]);
+        domain.push(['origin_payment_id.payment_type', '=', filterType === 'in' ? 'inbound' : 'outbound']);
       }
 
       if (appliedSearch) {
