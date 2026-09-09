@@ -74,6 +74,8 @@ export default function AccountingPage() {
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set());
   const [entryLinesMap, setEntryLinesMap] = useState<Record<number, any[]>>({});
   const [filterType, setFilterType] = useState<'all' | 'in' | 'out' | 'invoice' | 'out_invoice' | 'in_invoice' | 'out_refund' | 'in_refund'>('all');
+  const [showBankEntries, setShowBankEntries] = useState(false);
+  const [showCashEntries, setShowCashEntries] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [page, setPage] = useState(0);
@@ -122,7 +124,28 @@ export default function AccountingPage() {
       else if (filterType === 'in_refund') domain.push(['move_type', '=', 'in_refund']);
       else if (filterType === 'invoice') domain.push(['move_type', 'in', ['out_invoice', 'in_invoice', 'out_refund', 'in_refund']]);
       else if (filterType === 'in' || filterType === 'out') {
-        domain.push(['origin_payment_id.payment_type', '=', filterType === 'in' ? 'inbound' : 'outbound']);
+        const paymentType = filterType === 'in' ? 'inbound' : 'outbound';
+        const pendingAccountCode = filterType === 'in' ? '101403' : '101404';
+        const selectedJournalTypes = [
+          ...(showBankEntries ? ['bank'] : []),
+          ...(showCashEntries ? ['cash'] : []),
+        ];
+
+        if (selectedJournalTypes.length > 0) {
+          domain.push(
+            '|',
+            '&',
+            ['origin_payment_id.payment_type', '=', paymentType],
+            ['journal_id.type', 'in', selectedJournalTypes],
+            ['line_ids', 'any', [['account_id.code', '=', pendingAccountCode]]],
+          );
+        } else {
+          domain.push(
+            '|',
+            ['origin_payment_id.payment_type', '=', paymentType],
+            ['line_ids', 'any', [['account_id.code', '=', pendingAccountCode]]],
+          );
+        }
       }
 
       if (appliedSearch) {
@@ -199,7 +222,7 @@ export default function AccountingPage() {
   }, [searchText]);
 
   // Fetch one server-side page and the real total whenever filters or page change.
-  useEffect(() => { fetchEntries(); }, [dateFrom, dateTo, filterPartnerId, filterType, appliedSearch, page]);
+  useEffect(() => { fetchEntries(); }, [dateFrom, dateTo, filterPartnerId, filterType, showBankEntries, showCashEntries, appliedSearch, page]);
 
   function getMoveTypeLabel(entry: AccountEntry): string {
     if (entry.move_type === 'out_invoice') return 'فاکتور فروش';
@@ -513,6 +536,31 @@ export default function AccountingPage() {
           onChange={e => setSearchText(e.target.value)}
           className="mr-auto p-1.5 px-3 border rounded-lg text-sm w-64" />
       </div>
+
+      {(filterType === 'in' || filterType === 'out') && (
+        <div className="flex flex-wrap items-center gap-4 -mt-2 mb-4 px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg">
+          <span className="text-xs text-gray-500">محدودکردن بر اساس حساب:</span>
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showBankEntries}
+              onChange={(event) => { setShowBankEntries(event.target.checked); setPage(0); }}
+              className="accent-indigo-600"
+            />
+            بانک
+          </label>
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showCashEntries}
+              onChange={(event) => { setShowCashEntries(event.target.checked); setPage(0); }}
+              className="accent-indigo-600"
+            />
+            صندوق نقدی
+          </label>
+          {!showBankEntries && !showCashEntries && <span className="text-[10px] text-gray-400">همه حساب‌ها نمایش داده می‌شوند</span>}
+        </div>
+      )}
 
       {/* Quick Action Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
