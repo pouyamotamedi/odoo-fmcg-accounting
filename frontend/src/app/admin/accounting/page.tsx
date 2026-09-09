@@ -349,6 +349,10 @@ export default function AccountingPage() {
     }
     setSaving(true);
     try {
+      const partnerIds = new Set(validLines.map((line) => line.partner_id).filter(Boolean));
+      const headerPartnerId = partnerIds.size === 1 && validLines.every((line) => line.partner_id)
+        ? [...partnerIds][0]
+        : false;
       const lines = validLines.map(l => [0, 0, {
         account_id: l.account_id,
         debit: Number(l.debit) || 0,
@@ -359,6 +363,7 @@ export default function AccountingPage() {
       const moveId = await create('account.move', {
         move_type: 'entry',
         date: freeFormDate,
+        partner_id: headerPartnerId,
         line_ids: lines,
         narration: freeFormNote || 'سند آزاد',
       });
