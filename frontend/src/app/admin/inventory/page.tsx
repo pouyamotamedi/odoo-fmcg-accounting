@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   createProduct, updateProduct, deleteProduct, createStockAdjustment,
   getCategories, createCategory, searchRead, getProductAttributes,
@@ -16,6 +17,7 @@ import ExcelButtons from '@/components/ExcelButtons';
 
 interface ProductTemplate {
   id: number;
+  default_variant_id: number;
   name: string;
   list_price: number;
   standard_price: number;
@@ -196,6 +198,7 @@ export default function InventoryPage() {
         if (!tmplMap.has(tmplId)) {
           tmplMap.set(tmplId, {
             id: tmplId,
+            default_variant_id: p.id,
             name: p.product_tmpl_id?.[1] || p.name,
             list_price: p.list_price,
             standard_price: p.standard_price,
@@ -618,6 +621,23 @@ export default function InventoryPage() {
                 <div className="text-xs text-green-600 font-bold px-3">فروش: {formatPrice(t.list_price)}</div>
                 <div className="text-xs text-blue-600 font-bold px-2">موجودی: {toPersianDigits(Math.round(t.total_qty))}</div>
                 <div className="flex gap-1 px-2">
+                  {t.product_variant_count === 1 ? (
+                    <Link
+                      href={`/admin/inventory/${t.default_variant_id}`}
+                      onClick={(event) => event.stopPropagation()}
+                      className="text-xs text-emerald-600 hover:text-emerald-800 px-1"
+                      title="تحلیل کالا"
+                    >📊</Link>
+                  ) : (
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!expandedIds.has(t.id)) toggleExpand(t.id);
+                      }}
+                      className="text-xs text-emerald-600 hover:text-emerald-800 px-1"
+                      title="برای تحلیل، واریانت موردنظر را انتخاب کنید"
+                    >📊</button>
+                  )}
                   <button onClick={(e) => { e.stopPropagation(); openEditForm(t); }} className="text-xs text-blue-500 hover:text-blue-700 px-1">✏️</button>
                   <button onClick={(e) => { e.stopPropagation(); openAttrForm(t.id); }} className="text-xs text-purple-500 hover:text-purple-700 px-1" title="افزودن ویژگی">🏷️</button>
                   <button onClick={(e) => { e.stopPropagation(); handleDelete(t.id); }} className="text-xs text-red-400 hover:text-red-600 px-1">🗑️</button>
@@ -667,6 +687,7 @@ export default function InventoryPage() {
                             </td>
                             <td className="p-2 font-bold">{toPersianDigits(Math.round(v.qty_available))}</td>
                             <td className="p-2 flex gap-2">
+                              <Link href={`/admin/inventory/${v.id}`} className="text-emerald-600 hover:text-emerald-800" title="تحلیل واریانت">📊 تحلیل</Link>
                               <button onClick={() => { setAdjProductId(v.id); setAdjQty(''); setAdjNote(''); setShowAdjustment(true); }} className="text-orange-600 hover:text-orange-800">تعدیل</button>
                               <button onClick={async () => { if(!confirm('حذف این واریانت؟')) return; try { await write('product.product', [v.id], {active: false}); await toggleExpand(t.id); await fetchTemplates(); } catch(e:any){alert(e.message||'خطا');} }} className="text-red-500 hover:text-red-700">حذف</button>
                             </td>

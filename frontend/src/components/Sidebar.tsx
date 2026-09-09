@@ -81,7 +81,7 @@ export default function Sidebar() {
             href={item.href}
             className={cn(
               'flex items-center gap-3 px-5 py-3 text-sm transition-colors',
-              pathname === item.href
+              (item.href === '/admin' ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`))
                 ? 'bg-slate-700 text-white'
                 : 'text-slate-300 hover:bg-slate-700/50 hover:text-white'
             )}
