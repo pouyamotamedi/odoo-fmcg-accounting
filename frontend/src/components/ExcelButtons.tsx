@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 interface Column {
   key: string;
@@ -13,39 +13,53 @@ interface ExcelButtonsProps {
   columns: Column[];
   filename: string;
   onImport?: (rows: Record<string, string>[]) => void;
+  getExportData?: () => Promise<any[]>;
+  onExportError?: (error: unknown) => void;
 }
 
 /**
  * Reusable CSV/Excel export and import buttons
  */
-export default function ExcelButtons({ data, columns, filename, onImport }: ExcelButtonsProps) {
+export default function ExcelButtons({ data, columns, filename, onImport, getExportData, onExportError }: ExcelButtonsProps) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [exporting, setExporting] = useState(false);
 
-  function exportCSV() {
-    // BOM for Excel to recognize UTF-8
-    const BOM = '\uFEFF';
-    const header = columns.map(c => c.label).join(',');
-    const rows = data.map(row =>
-      columns.map(col => {
-        let val = row[col.key];
-        if (col.transform) val = col.transform(val);
-        if (val === null || val === undefined) val = '';
-        // Escape commas and quotes
-        val = String(val).replace(/"/g, '""');
-        if (String(val).includes(',') || String(val).includes('"') || String(val).includes('\n')) {
-          val = `"${val}"`;
-        }
-        return val;
-      }).join(',')
-    );
-    const csv = BOM + header + '\n' + rows.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filename}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function exportCSV() {
+    if (exporting) return;
+
+    try {
+      setExporting(true);
+      const exportData = getExportData ? await getExportData() : data;
+      // BOM for Excel to recognize UTF-8
+      const BOM = '\uFEFF';
+      const header = columns.map(c => c.label).join(',');
+      const rows = exportData.map(row =>
+        columns.map(col => {
+          let val = row[col.key];
+          if (col.transform) val = col.transform(val);
+          if (val === null || val === undefined) val = '';
+          // Escape commas and quotes
+          val = String(val).replace(/"/g, '""');
+          if (String(val).includes(',') || String(val).includes('"') || String(val).includes('\n')) {
+            val = `"${val}"`;
+          }
+          return val;
+        }).join(',')
+      );
+      const csv = BOM + header + '\n' + rows.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      if (onExportError) onExportError(error);
+      else window.alert('خطا در آماده‌سازی خروجی Excel.');
+    } finally {
+      setExporting(false);
+    }
   }
 
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -72,8 +86,12 @@ export default function ExcelButtons({ data, columns, filename, onImport }: Exce
 
   return (
     <div className="flex gap-2 items-center">
-      <button onClick={exportCSV} className="text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-lg font-bold hover:bg-green-200 transition">
-        📥 خروجی Excel
+      <button
+        onClick={exportCSV}
+        disabled={exporting || (!getExportData && data.length === 0)}
+        className="text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-lg font-bold hover:bg-green-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {exporting ? 'در حال آماده‌سازی...' : '📥 خروجی Excel'}
       </button>
       {onImport && (
         <>

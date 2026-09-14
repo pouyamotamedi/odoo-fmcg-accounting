@@ -11,6 +11,85 @@ import * as jalaali from 'jalaali-js';
 type DocType = 'payment' | 'receipt';
 
 const PAGE_SIZE = 100;
+const EXPORT_BATCH_SIZE = 500;
+const MAX_EXPORT_BATCHES = 10000;
+const ACCOUNT_MOVE_FIELDS = [
+  'name',
+  'date',
+  'move_type',
+  'amount_total',
+  'journal_id',
+  'partner_id',
+  'narration',
+  'state',
+  'payment_state',
+  'ref',
+  'create_date',
+];
+const ACCOUNT_MOVE_ORDER = 'date desc, id desc';
+
+type AccountingFilterType = 'all' | 'in' | 'out' | 'invoice' | 'out_invoice' | 'in_invoice' | 'out_refund' | 'in_refund';
+
+interface AccountingDomainFilters {
+  dateFrom: string;
+  dateTo: string;
+  filterPartnerId: number;
+  filterType: AccountingFilterType;
+  showBankEntries: boolean;
+  showCashEntries: boolean;
+  appliedSearch: string;
+}
+
+function buildAccountingDomain({
+  dateFrom,
+  dateTo,
+  filterPartnerId,
+  filterType,
+  showBankEntries,
+  showCashEntries,
+  appliedSearch,
+}: AccountingDomainFilters): unknown[] {
+  const domain: unknown[] = [['state', '=', 'posted']];
+  if (dateFrom) domain.push(['date', '>=', dateFrom]);
+  if (dateTo) domain.push(['date', '<=', dateTo]);
+  if (filterPartnerId > 0) domain.push(['partner_id', '=', filterPartnerId]);
+
+  if (filterType === 'out_invoice') domain.push(['move_type', '=', 'out_invoice']);
+  else if (filterType === 'in_invoice') domain.push(['move_type', '=', 'in_invoice']);
+  else if (filterType === 'out_refund') domain.push(['move_type', '=', 'out_refund']);
+  else if (filterType === 'in_refund') domain.push(['move_type', '=', 'in_refund']);
+  else if (filterType === 'invoice') domain.push(['move_type', 'in', ['out_invoice', 'in_invoice', 'out_refund', 'in_refund']]);
+  else if (filterType === 'in' || filterType === 'out') {
+    const paymentType = filterType === 'in' ? 'inbound' : 'outbound';
+    const pendingAccountCode = filterType === 'in' ? '101403' : '101404';
+    const selectedJournalTypes = [
+      ...(showBankEntries ? ['bank'] : []),
+      ...(showCashEntries ? ['cash'] : []),
+    ];
+
+    domain.push(
+      '|',
+      ['origin_payment_id.payment_type', '=', paymentType],
+      ['line_ids', 'any', [['account_id.code', '=', pendingAccountCode]]],
+    );
+    if (selectedJournalTypes.length > 0) {
+      domain.push(['journal_id.type', 'in', selectedJournalTypes]);
+    }
+  }
+
+  if (appliedSearch) {
+    domain.push(
+      '|', '|', '|', '|',
+      ['name', 'ilike', appliedSearch],
+      ['ref', 'ilike', appliedSearch],
+      ['narration', 'ilike', appliedSearch],
+      ['partner_id.name', 'ilike', appliedSearch],
+      ['journal_id.name', 'ilike', appliedSearch],
+    );
+  }
+
+  return domain;
+}
 
 interface Journal {
   id: number;
@@ -73,7 +152,7 @@ export default function AccountingPage() {
   const [msg, setMsg] = useState('');
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set());
   const [entryLinesMap, setEntryLinesMap] = useState<Record<number, any[]>>({});
-  const [filterType, setFilterType] = useState<'all' | 'in' | 'out' | 'invoice' | 'out_invoice' | 'in_invoice' | 'out_refund' | 'in_refund'>('all');
+  const [filterType, setFilterType] = useState<AccountingFilterType>('all');
   const [showBankEntries, setShowBankEntries] = useState(false);
   const [showCashEntries, setShowCashEntries] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -113,53 +192,24 @@ export default function AccountingPage() {
     const requestId = ++fetchRequestId.current;
     try {
       setLoading(true);
-      const domain: any[] = [['state', '=', 'posted']];
-      if (dateFrom) domain.push(['date', '>=', dateFrom]);
-      if (dateTo) domain.push(['date', '<=', dateTo]);
-      if (filterPartnerId > 0) domain.push(['partner_id', '=', filterPartnerId]);
-
-      if (filterType === 'out_invoice') domain.push(['move_type', '=', 'out_invoice']);
-      else if (filterType === 'in_invoice') domain.push(['move_type', '=', 'in_invoice']);
-      else if (filterType === 'out_refund') domain.push(['move_type', '=', 'out_refund']);
-      else if (filterType === 'in_refund') domain.push(['move_type', '=', 'in_refund']);
-      else if (filterType === 'invoice') domain.push(['move_type', 'in', ['out_invoice', 'in_invoice', 'out_refund', 'in_refund']]);
-      else if (filterType === 'in' || filterType === 'out') {
-        const paymentType = filterType === 'in' ? 'inbound' : 'outbound';
-        const pendingAccountCode = filterType === 'in' ? '101403' : '101404';
-        const selectedJournalTypes = [
-          ...(showBankEntries ? ['bank'] : []),
-          ...(showCashEntries ? ['cash'] : []),
-        ];
-
-        domain.push(
-          '|',
-          ['origin_payment_id.payment_type', '=', paymentType],
-          ['line_ids', 'any', [['account_id.code', '=', pendingAccountCode]]],
-        );
-        if (selectedJournalTypes.length > 0) {
-          domain.push(['journal_id.type', 'in', selectedJournalTypes]);
-        }
-      }
-
-      if (appliedSearch) {
-        domain.push(
-          '|', '|', '|', '|',
-          ['name', 'ilike', appliedSearch],
-          ['ref', 'ilike', appliedSearch],
-          ['narration', 'ilike', appliedSearch],
-          ['partner_id.name', 'ilike', appliedSearch],
-          ['journal_id.name', 'ilike', appliedSearch],
-        );
-      }
+      const domain = buildAccountingDomain({
+        dateFrom,
+        dateTo,
+        filterPartnerId,
+        filterType,
+        showBankEntries,
+        showCashEntries,
+        appliedSearch,
+      });
 
       const [data, count] = await Promise.all([
         searchRead(
           'account.move',
           domain,
-          ['name', 'date', 'move_type', 'amount_total', 'journal_id', 'partner_id', 'narration', 'state', 'payment_state', 'ref', 'create_date'],
+          ACCOUNT_MOVE_FIELDS,
           PAGE_SIZE,
           page * PAGE_SIZE,
-          'date desc, id desc',
+          ACCOUNT_MOVE_ORDER,
         ),
         callMethod('account.move', 'search_count', [domain]),
       ]);
@@ -174,6 +224,47 @@ export default function AccountingPage() {
     } finally {
       if (requestId === fetchRequestId.current) setLoading(false);
     }
+  }
+
+  async function getAllEntriesForExport(): Promise<AccountEntry[]> {
+    const domain = buildAccountingDomain({
+      dateFrom,
+      dateTo,
+      filterPartnerId,
+      filterType,
+      showBankEntries,
+      showCashEntries,
+      appliedSearch,
+    });
+    const allEntries: AccountEntry[] = [];
+
+    for (let batchIndex = 0; batchIndex < MAX_EXPORT_BATCHES; batchIndex += 1) {
+      const offset = batchIndex * EXPORT_BATCH_SIZE;
+      const batch = await searchRead(
+        'account.move',
+        domain,
+        ACCOUNT_MOVE_FIELDS,
+        EXPORT_BATCH_SIZE,
+        offset,
+        ACCOUNT_MOVE_ORDER,
+      ) as AccountEntry[] | undefined;
+
+      if (!batch || batch.length === 0) break;
+      allEntries.push(...batch);
+      if (batch.length < EXPORT_BATCH_SIZE) break;
+      if (batchIndex === MAX_EXPORT_BATCHES - 1) {
+        throw new Error('Accounting export exceeded the maximum batch limit.');
+      }
+    }
+
+    setMsg(`خروجی ${toPersianDigits(allEntries.length)} سند با موفقیت آماده شد.`);
+    window.setTimeout(() => setMsg(''), 4000);
+    return allEntries;
+  }
+
+  function handleExportError() {
+    setMsg('خطا در آماده‌سازی خروجی اسناد. لطفاً دوباره تلاش کنید.');
+    window.setTimeout(() => setMsg(''), 4000);
   }
 
   async function fetchJournals() {
@@ -455,6 +546,8 @@ export default function AccountingPage() {
               { key: 'state', label: 'وضعیت' },
             ]}
             filename="accounting-entries"
+            getExportData={getAllEntriesForExport}
+            onExportError={handleExportError}
           />
           <button onClick={() => openForm('receipt')} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700 transition">
             + سند دریافت
