@@ -2,8 +2,8 @@
 
 import { Fragment, useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getPartnerBalances, getPartnerLedger, getBankCashBalances, create, callMethod, type PartnerLedgerLine } from '@/lib/odoo-api';
-import { formatPrice, toJalali } from '@/lib/utils';
+import { getPartnerBalances, getPartnerLedger, getSalesInvoiceLines, getBankCashBalances, create, callMethod, type PartnerLedgerLine, type SalesInvoiceLine } from '@/lib/odoo-api';
+import { formatPrice, toJalali, toPersianDigits } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
 
 export default function AccountsPage() {
@@ -39,12 +39,20 @@ function AccountsPageContent() {
   const [partnerLedgers, setPartnerLedgers] = useState<Record<number, PartnerLedgerLine[]>>({});
   const [ledgerLoading, setLedgerLoading] = useState<Set<number>>(new Set());
   const [ledgerErrors, setLedgerErrors] = useState<Record<number, string>>({});
+  const [expandedInvoiceIds, setExpandedInvoiceIds] = useState<Set<number>>(new Set());
+  const [invoiceLinesById, setInvoiceLinesById] = useState<Record<number, SalesInvoiceLine[]>>({});
+  const [invoiceLineLoading, setInvoiceLineLoading] = useState<Set<number>>(new Set());
+  const [invoiceLineErrors, setInvoiceLineErrors] = useState<Record<number, string>>({});
 
   async function load() {
     setLoading(true);
     setError('');
     setPartnerLedgers({});
     setLedgerErrors({});
+    setExpandedPartnerIds(new Set());
+    setExpandedInvoiceIds(new Set());
+    setInvoiceLinesById({});
+    setInvoiceLineErrors({});
     try {
       const [result, jrnls] = await Promise.all([getPartnerBalances(), getBankCashBalances()]);
       setData(result || []);
@@ -99,6 +107,40 @@ function AccountsPageContent() {
     if (type === 'in_refund') return 'برگشت از خرید';
     if (reference.startsWith('FMCG-OPENING:')) return 'سند افتتاحیه';
     return 'سند حسابداری';
+  }
+
+  async function loadSalesInvoiceLines(invoiceId: number) {
+    if (invoiceLineLoading.has(invoiceId)) return;
+    setInvoiceLineLoading((current) => new Set(current).add(invoiceId));
+    setInvoiceLineErrors((current) => ({ ...current, [invoiceId]: '' }));
+    try {
+      const lines = await getSalesInvoiceLines(invoiceId);
+      setInvoiceLinesById((current) => ({ ...current, [invoiceId]: lines }));
+    } catch (reason: unknown) {
+      setInvoiceLineErrors((current) => ({
+        ...current,
+        [invoiceId]: reason instanceof Error ? reason.message : 'خطا در دریافت اقلام فاکتور',
+      }));
+    } finally {
+      setInvoiceLineLoading((current) => {
+        const updated = new Set(current);
+        updated.delete(invoiceId);
+        return updated;
+      });
+    }
+  }
+
+  async function toggleSalesInvoice(invoiceId: number) {
+    const next = new Set(expandedInvoiceIds);
+    if (next.has(invoiceId)) {
+      next.delete(invoiceId);
+      setExpandedInvoiceIds(next);
+      return;
+    }
+
+    next.add(invoiceId);
+    setExpandedInvoiceIds(next);
+    if (!invoiceLinesById[invoiceId]) await loadSalesInvoiceLines(invoiceId);
   }
 
   function openPayForm(partner: any, type: 'inbound' | 'outbound') {
@@ -212,7 +254,7 @@ function AccountsPageContent() {
                 type="button"
                 onClick={() => togglePartnerLedger(p.id)}
                 aria-expanded={isExpanded}
-                className="flex items-center gap-2 text-right hover:text-indigo-600"
+                className="flex items-center gap-2 text-right hover:text-indigo-600 cursor-pointer"
               >
                 <span className={`text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>◀</span>
                 {p.name}
@@ -276,29 +318,89 @@ function AccountsPageContent() {
                           <th className="text-right p-2.5">مانده تجمعی</th>
                         </tr>
                       </thead>
-                      <tbody>{ledger.map((line) => (
-                        <tr key={line.id} className="border-b last:border-b-0 hover:bg-gray-50">
-                          <td className="p-2.5 whitespace-nowrap">{line.date ? toJalali(line.date) : '—'}</td>
-                          <td className="p-2.5 whitespace-nowrap">{getLedgerTypeLabel(line.moveType, line.reference)}</td>
-                          <td className="p-2.5 font-mono whitespace-nowrap" dir="ltr">{line.moveName}</td>
-                          <td className="p-2.5 min-w-[180px]">
-                            <div>{line.description}</div>
-                            {line.reference && line.reference !== line.description && <div className="text-[10px] text-gray-400 mt-0.5">{line.reference}</div>}
-                          </td>
-                          <td className="p-2.5 whitespace-nowrap">
-                            <div>{line.accountName}</div>
-                            <div className="text-[10px] text-gray-400">{line.journalName}</div>
-                          </td>
-                          <td className="p-2.5 text-red-600 font-bold">{line.debit > 0 ? formatPrice(line.debit) : '—'}</td>
-                          <td className="p-2.5 text-green-600 font-bold">{line.credit > 0 ? formatPrice(line.credit) : '—'}</td>
-                          <td className={`p-2.5 font-bold whitespace-nowrap ${line.effect >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            {line.effect >= 0 ? '+' : '−'}{formatPrice(Math.abs(line.effect))}
-                          </td>
-                          <td className={`p-2.5 font-bold whitespace-nowrap ${line.runningBalance > 0 ? 'text-red-600' : line.runningBalance < 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                            {formatPrice(Math.abs(line.runningBalance))} {line.runningBalance > 0 ? 'بد' : line.runningBalance < 0 ? 'بس' : 'تسویه'}
-                          </td>
-                        </tr>
-                      ))}</tbody>
+                      <tbody>{ledger.map((line) => {
+                        const isSalesInvoice = line.moveType === 'out_invoice' && line.moveId > 0;
+                        const isInvoiceExpanded = expandedInvoiceIds.has(line.moveId);
+                        const invoiceLines = invoiceLinesById[line.moveId] || [];
+                        return (
+                          <Fragment key={line.id}>
+                            <tr className={`border-b last:border-b-0 hover:bg-gray-50 ${isSalesInvoice ? 'bg-indigo-50/20' : ''}`}>
+                              <td className="p-2.5 whitespace-nowrap">{line.date ? toJalali(line.date) : '—'}</td>
+                              <td className="p-2.5 whitespace-nowrap">{getLedgerTypeLabel(line.moveType, line.reference)}</td>
+                              <td className="p-2.5 font-mono whitespace-nowrap" dir="ltr">
+                                {isSalesInvoice ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSalesInvoice(line.moveId)}
+                                    aria-expanded={isInvoiceExpanded}
+                                    className="inline-flex items-center gap-1 font-mono text-indigo-700 hover:text-indigo-900 hover:underline cursor-pointer"
+                                    title="مشاهده اقلام فاکتور"
+                                  >
+                                    <span className={`text-[10px] transition-transform ${isInvoiceExpanded ? 'rotate-90' : ''}`}>◀</span>
+                                    {line.moveName}
+                                  </button>
+                                ) : line.moveName}
+                              </td>
+                              <td className="p-2.5 min-w-[180px]">
+                                <div>{line.description}</div>
+                                {line.reference && line.reference !== line.description && <div className="text-[10px] text-gray-400 mt-0.5">{line.reference}</div>}
+                              </td>
+                              <td className="p-2.5 whitespace-nowrap">
+                                <div>{line.accountName}</div>
+                                <div className="text-[10px] text-gray-400">{line.journalName}</div>
+                              </td>
+                              <td className="p-2.5 text-red-600 font-bold">{line.debit > 0 ? formatPrice(line.debit) : '—'}</td>
+                              <td className="p-2.5 text-green-600 font-bold">{line.credit > 0 ? formatPrice(line.credit) : '—'}</td>
+                              <td className={`p-2.5 font-bold whitespace-nowrap ${line.effect >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {line.effect >= 0 ? '+' : '−'}{formatPrice(Math.abs(line.effect))}
+                              </td>
+                              <td className={`p-2.5 font-bold whitespace-nowrap ${line.runningBalance > 0 ? 'text-red-600' : line.runningBalance < 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                                {formatPrice(Math.abs(line.runningBalance))} {line.runningBalance > 0 ? 'بد' : line.runningBalance < 0 ? 'بس' : 'تسویه'}
+                              </td>
+                            </tr>
+                            {isSalesInvoice && isInvoiceExpanded && (
+                              <tr className="border-b bg-indigo-50/50">
+                                <td colSpan={9} className="p-3">
+                                  <div className="text-xs font-bold text-indigo-800 mb-2">اقلام فاکتور فروش {line.moveName}</div>
+                                  {invoiceLineLoading.has(line.moveId) ? (
+                                    <div className="text-xs text-gray-400 py-3">در حال دریافت اقلام فاکتور...</div>
+                                  ) : invoiceLineErrors[line.moveId] ? (
+                                    <div className="text-xs text-red-600 py-3">
+                                      {invoiceLineErrors[line.moveId]}
+                                      <button type="button" onClick={() => loadSalesInvoiceLines(line.moveId)} className="mr-3 bg-red-100 px-2 py-1 rounded cursor-pointer">تلاش مجدد</button>
+                                    </div>
+                                  ) : invoiceLines.length === 0 ? (
+                                    <div className="text-xs text-gray-400 py-3">اقلام کالایی برای این فاکتور ثبت نشده است</div>
+                                  ) : (
+                                    <div className="overflow-x-auto bg-white rounded border">
+                                      <table className="w-full text-xs">
+                                        <thead className="bg-indigo-50"><tr>
+                                          <th className="text-right p-2">کالا</th>
+                                          <th className="text-right p-2">تعداد</th>
+                                          <th className="text-right p-2">واحد</th>
+                                          <th className="text-right p-2">قیمت واحد</th>
+                                          <th className="text-right p-2">تخفیف</th>
+                                          <th className="text-right p-2">جمع</th>
+                                        </tr></thead>
+                                        <tbody>{invoiceLines.map((item) => (
+                                          <tr key={item.id} className="border-t">
+                                            <td className="p-2 font-medium">{item.productName}</td>
+                                            <td className="p-2">{toPersianDigits(item.quantity)}</td>
+                                            <td className="p-2">{item.uomName}</td>
+                                            <td className="p-2">{formatPrice(item.unitPrice)}</td>
+                                            <td className="p-2">{item.discount > 0 ? `${toPersianDigits(item.discount)}٪` : '—'}</td>
+                                            <td className="p-2 font-bold">{formatPrice(item.subtotal)}</td>
+                                          </tr>
+                                        ))}</tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}</tbody>
                     </table>
                   </div>
                 )}

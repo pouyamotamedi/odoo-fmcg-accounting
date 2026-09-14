@@ -745,6 +745,47 @@ export async function createStockDelivery(invoiceLines: Array<{ product_id: numb
   return pickingId;
 }
 
+export interface SalesInvoiceLine {
+  id: number;
+  productName: string;
+  description: string;
+  quantity: number;
+  uomName: string;
+  unitPrice: number;
+  discount: number;
+  subtotal: number;
+}
+
+/**
+ * Get posted product lines for one sales invoice on demand.
+ */
+export async function getSalesInvoiceLines(invoiceId: number): Promise<SalesInvoiceLine[]> {
+  const lines = await searchRead('account.move.line', [
+    ['move_id', '=', invoiceId],
+    ['parent_state', '=', 'posted'],
+    ['move_id.move_type', '=', 'out_invoice'],
+    ['display_type', '=', 'product'],
+  ], [
+    'product_id', 'name', 'quantity', 'product_uom_id', 'price_unit', 'discount', 'price_subtotal',
+  ], 0, 0, 'sequence asc, id asc');
+
+  return (lines || []).map((line: Record<string, unknown>) => {
+    const product = Array.isArray(line.product_id) ? line.product_id : [];
+    const uom = Array.isArray(line.product_uom_id) ? line.product_uom_id : [];
+    const description = typeof line.name === 'string' ? line.name : '';
+    return {
+      id: Number(line.id),
+      productName: typeof product[1] === 'string' ? product[1] : description || '—',
+      description,
+      quantity: Number(line.quantity) || 0,
+      uomName: typeof uom[1] === 'string' ? uom[1] : '—',
+      unitPrice: Number(line.price_unit) || 0,
+      discount: Number(line.discount) || 0,
+      subtotal: Number(line.price_subtotal) || 0,
+    };
+  });
+}
+
 export interface PartnerLedgerLine {
   id: number;
   date: string;
