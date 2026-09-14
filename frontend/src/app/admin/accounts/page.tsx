@@ -229,8 +229,8 @@ function AccountsPageContent() {
 
     {loading ? <div className="text-center py-12 text-gray-400">بارگذاری...</div> :
     filtered.length===0 ? <div className="text-center py-12 text-gray-400">موردی یافت نشد</div> :
-    <div className="bg-white rounded-xl border overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="bg-white rounded-xl border overflow-x-auto">
+      <table className="w-full min-w-[720px] text-sm">
         <thead className="bg-gray-50 border-b">
           <tr>
             <th className="text-right p-3">نام</th>
@@ -280,7 +280,7 @@ function AccountsPageContent() {
           </tr>
           {isExpanded && (
             <tr key={`${p.id}-ledger`} className="border-b bg-slate-50/70">
-              <td colSpan={6} className="p-4">
+              <td colSpan={6} className="p-4 max-w-0">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <div>
                     <div className="text-sm font-bold text-slate-700">ریزگردش و منشأ مانده {p.name}</div>
@@ -303,8 +303,8 @@ function AccountsPageContent() {
                 ) : ledger.length === 0 ? (
                   <div className="text-center py-8 text-gray-400 text-sm">آرتیکل ثبت‌شده‌ای برای این شخص وجود ندارد</div>
                 ) : (
-                  <div className="overflow-x-auto max-h-[440px] overflow-y-auto bg-white rounded-lg border">
-                    <table className="w-full text-xs">
+                  <div className="min-w-0 max-w-full overflow-x-auto max-h-[440px] overflow-y-auto bg-white rounded-lg border">
+                    <table className="w-full min-w-[1050px] text-xs">
                       <thead className="bg-gray-50 sticky top-0 border-b">
                         <tr>
                           <th className="text-right p-2.5">تاریخ</th>
@@ -360,7 +360,7 @@ function AccountsPageContent() {
                             </tr>
                             {isSalesInvoice && isInvoiceExpanded && (
                               <tr className="border-b bg-indigo-50/50">
-                                <td colSpan={9} className="p-3">
+                                <td colSpan={9} className="p-3 max-w-0">
                                   <div className="text-xs font-bold text-indigo-800 mb-2">اقلام فاکتور فروش {line.moveName}</div>
                                   {invoiceLineLoading.has(line.moveId) ? (
                                     <div className="text-xs text-gray-400 py-3">در حال دریافت اقلام فاکتور...</div>
@@ -372,8 +372,8 @@ function AccountsPageContent() {
                                   ) : invoiceLines.length === 0 ? (
                                     <div className="text-xs text-gray-400 py-3">اقلام کالایی برای این فاکتور ثبت نشده است</div>
                                   ) : (
-                                    <div className="overflow-x-auto bg-white rounded border">
-                                      <table className="w-full text-xs">
+                                    <div className="min-w-0 max-w-full overflow-x-auto bg-white rounded border">
+                                      <table className="w-full min-w-[680px] text-xs">
                                         <thead className="bg-indigo-50"><tr>
                                           <th className="text-right p-2">کالا</th>
                                           <th className="text-right p-2">تعداد</th>

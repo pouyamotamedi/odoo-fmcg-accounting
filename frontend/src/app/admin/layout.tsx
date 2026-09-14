@@ -53,10 +53,10 @@ export default function AdminLayout({
 
   return (
     <div className="flex min-h-screen">
-      <div className="print:hidden">
+      <div className="print:hidden shrink-0">
         <Sidebar />
       </div>
-      <main className="flex-1 bg-gray-50 p-6 overflow-auto print:p-0 print:bg-white">
+      <main className="min-w-0 flex-1 bg-gray-50 p-6 overflow-auto print:p-0 print:bg-white">
         {children}
       </main>
     </div>
