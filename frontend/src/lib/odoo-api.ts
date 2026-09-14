@@ -745,6 +745,63 @@ export async function createStockDelivery(invoiceLines: Array<{ product_id: numb
   return pickingId;
 }
 
+export interface PartnerLedgerLine {
+  id: number;
+  date: string;
+  moveId: number;
+  moveName: string;
+  moveType: string;
+  accountName: string;
+  journalName: string;
+  description: string;
+  reference: string;
+  debit: number;
+  credit: number;
+  effect: number;
+  runningBalance: number;
+}
+
+/**
+ * Get the complete posted receivable/payable ledger that composes a partner balance.
+ */
+export async function getPartnerLedger(partnerId: number): Promise<PartnerLedgerLine[]> {
+  const lines = await searchRead('account.move.line', [
+    ['partner_id', '=', partnerId],
+    ['parent_state', '=', 'posted'],
+    ['account_id.account_type', 'in', ['asset_receivable', 'liability_payable']],
+  ], [
+    'date', 'move_id', 'move_type', 'account_id', 'journal_id', 'name', 'ref',
+    'debit', 'credit',
+  ], 0, 0, 'date asc, move_name asc, id asc');
+
+  let runningBalance = 0;
+  return (lines || []).map((line: Record<string, unknown>) => {
+    const debit = Number(line.debit) || 0;
+    const credit = Number(line.credit) || 0;
+    const effect = debit - credit;
+    runningBalance += effect;
+    const move = Array.isArray(line.move_id) ? line.move_id : [];
+    const account = Array.isArray(line.account_id) ? line.account_id : [];
+    const journal = Array.isArray(line.journal_id) ? line.journal_id : [];
+
+    return {
+      id: Number(line.id),
+      date: typeof line.date === 'string' ? line.date : '',
+      moveId: typeof move[0] === 'number' ? move[0] : 0,
+      moveName: typeof move[1] === 'string' ? move[1] : '—',
+      moveType: typeof line.move_type === 'string' ? line.move_type : 'entry',
+      accountName: typeof account[1] === 'string' ? account[1] : '—',
+      journalName: typeof journal[1] === 'string' ? journal[1] : '—',
+      description: typeof line.name === 'string' && line.name ? line.name : '—',
+      reference: typeof line.ref === 'string' ? line.ref : '',
+      debit,
+      credit,
+      effect,
+      runningBalance,
+    };
+  });
+}
+
 /**
  * Get partner account balances (receivable/payable)
  */

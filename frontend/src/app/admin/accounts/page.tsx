@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { Fragment, useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getPartnerBalances, getBankCashBalances, create, callMethod } from '@/lib/odoo-api';
-import { formatPrice } from '@/lib/utils';
+import { getPartnerBalances, getPartnerLedger, getBankCashBalances, create, callMethod, type PartnerLedgerLine } from '@/lib/odoo-api';
+import { formatPrice, toJalali } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
 
 export default function AccountsPage() {
@@ -35,10 +35,16 @@ function AccountsPageContent() {
   const [payNote, setPayNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [expandedPartnerIds, setExpandedPartnerIds] = useState<Set<number>>(new Set());
+  const [partnerLedgers, setPartnerLedgers] = useState<Record<number, PartnerLedgerLine[]>>({});
+  const [ledgerLoading, setLedgerLoading] = useState<Set<number>>(new Set());
+  const [ledgerErrors, setLedgerErrors] = useState<Record<number, string>>({});
 
   async function load() {
     setLoading(true);
     setError('');
+    setPartnerLedgers({});
+    setLedgerErrors({});
     try {
       const [result, jrnls] = await Promise.all([getPartnerBalances(), getBankCashBalances()]);
       setData(result || []);
@@ -51,6 +57,49 @@ function AccountsPageContent() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function loadPartnerLedger(partnerId: number) {
+    if (ledgerLoading.has(partnerId)) return;
+    setLedgerLoading((current) => new Set(current).add(partnerId));
+    setLedgerErrors((current) => ({ ...current, [partnerId]: '' }));
+    try {
+      const lines = await getPartnerLedger(partnerId);
+      setPartnerLedgers((current) => ({ ...current, [partnerId]: lines }));
+    } catch (reason: unknown) {
+      setLedgerErrors((current) => ({
+        ...current,
+        [partnerId]: reason instanceof Error ? reason.message : 'خطا در دریافت ریزگردش حساب',
+      }));
+    } finally {
+      setLedgerLoading((current) => {
+        const updated = new Set(current);
+        updated.delete(partnerId);
+        return updated;
+      });
+    }
+  }
+
+  async function togglePartnerLedger(partnerId: number) {
+    const next = new Set(expandedPartnerIds);
+    if (next.has(partnerId)) {
+      next.delete(partnerId);
+      setExpandedPartnerIds(next);
+      return;
+    }
+
+    next.add(partnerId);
+    setExpandedPartnerIds(next);
+    if (!partnerLedgers[partnerId]) await loadPartnerLedger(partnerId);
+  }
+
+  function getLedgerTypeLabel(type: string, reference: string): string {
+    if (type === 'out_invoice') return 'فاکتور فروش';
+    if (type === 'in_invoice') return 'فاکتور خرید';
+    if (type === 'out_refund') return 'برگشت از فروش';
+    if (type === 'in_refund') return 'برگشت از خرید';
+    if (reference.startsWith('FMCG-OPENING:')) return 'سند افتتاحیه';
+    return 'سند حسابداری';
+  }
 
   function openPayForm(partner: any, type: 'inbound' | 'outbound') {
     setPayPartner(partner);
@@ -150,9 +199,25 @@ function AccountsPageContent() {
             <th className="text-right p-3">عملیات</th>
           </tr>
         </thead>
-        <tbody>{filtered.map(p=>(
-          <tr key={p.id} className="border-b hover:bg-gray-50">
-            <td className="p-3 font-medium">{p.name}</td>
+        <tbody>{filtered.map((p) => {
+          const isExpanded = expandedPartnerIds.has(p.id);
+          const ledger = partnerLedgers[p.id] || [];
+          const ledgerTotal = ledger.length > 0 ? ledger[ledger.length - 1].runningBalance : 0;
+          const balancesMatch = Math.abs(ledgerTotal - p.balance) < 0.01;
+          return (
+          <Fragment key={p.id}>
+          <tr className="border-b hover:bg-gray-50">
+            <td className="p-3 font-medium">
+              <button
+                type="button"
+                onClick={() => togglePartnerLedger(p.id)}
+                aria-expanded={isExpanded}
+                className="flex items-center gap-2 text-right hover:text-indigo-600"
+              >
+                <span className={`text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>◀</span>
+                {p.name}
+              </button>
+            </td>
             <td className="p-3 text-xs">{p.supplier_rank>0?'تامین‌کننده':'مشتری'}</td>
             <td className="p-3 text-red-600">{p.receivable>0?formatPrice(p.receivable):'—'}</td>
             <td className="p-3 text-green-600">{p.payable>0?formatPrice(p.payable):'—'}</td>
@@ -160,17 +225,88 @@ function AccountsPageContent() {
             <td className="p-3">
               <div className="flex gap-1">
                 {p.receivable > 0 && (
-                  <button onClick={()=>openPayForm(p,'inbound')} className="text-[11px] bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">ثبت سند دریافت</button>
+                  <button onClick={(event) => { event.stopPropagation(); openPayForm(p,'inbound'); }} className="text-[11px] bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">ثبت سند دریافت</button>
                 )}
                 {p.payable > 0 && (
-                  <button onClick={()=>openPayForm(p,'outbound')} className="text-[11px] bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200">ثبت سند پرداخت</button>
+                  <button onClick={(event) => { event.stopPropagation(); openPayForm(p,'outbound'); }} className="text-[11px] bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200">ثبت سند پرداخت</button>
                 )}
                 {p.receivable === 0 && p.payable === 0 && (
                   <span className="text-[11px] text-gray-400">تسویه</span>
                 )}
               </div>
             </td>
-          </tr>))}</tbody>
+          </tr>
+          {isExpanded && (
+            <tr key={`${p.id}-ledger`} className="border-b bg-slate-50/70">
+              <td colSpan={6} className="p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div>
+                    <div className="text-sm font-bold text-slate-700">ریزگردش و منشأ مانده {p.name}</div>
+                    <div className="text-[11px] text-gray-500 mt-1">آرتیکل‌های ثبت‌شده دریافتنی و پرداختنی، به ترتیب تاریخ ثبت؛ مانده این شخص از جمع همین ردیف‌ها ساخته شده است</div>
+                  </div>
+                  {ledger.length > 0 && (
+                    <div className={`text-xs font-bold px-3 py-1 rounded-full ${balancesMatch ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      مانده ریزگردش: {formatPrice(Math.abs(ledgerTotal))} {ledgerTotal >= 0 ? 'بدهکار' : 'بستانکار'}
+                    </div>
+                  )}
+                </div>
+
+                {ledgerLoading.has(p.id) ? (
+                  <div className="text-center py-8 text-gray-400 text-sm">در حال دریافت ریزگردش...</div>
+                ) : ledgerErrors[p.id] ? (
+                  <div className="text-center py-6 text-red-600 text-sm">
+                    {ledgerErrors[p.id]}
+                    <button type="button" onClick={() => loadPartnerLedger(p.id)} className="mr-3 text-xs bg-red-100 px-3 py-1 rounded">تلاش مجدد</button>
+                  </div>
+                ) : ledger.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400 text-sm">آرتیکل ثبت‌شده‌ای برای این شخص وجود ندارد</div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[440px] overflow-y-auto bg-white rounded-lg border">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 sticky top-0 border-b">
+                        <tr>
+                          <th className="text-right p-2.5">تاریخ</th>
+                          <th className="text-right p-2.5">نوع</th>
+                          <th className="text-right p-2.5">شماره سند</th>
+                          <th className="text-right p-2.5">شرح / مرجع</th>
+                          <th className="text-right p-2.5">حساب</th>
+                          <th className="text-right p-2.5 text-red-600">بدهکار</th>
+                          <th className="text-right p-2.5 text-green-600">بستانکار</th>
+                          <th className="text-right p-2.5">اثر</th>
+                          <th className="text-right p-2.5">مانده تجمعی</th>
+                        </tr>
+                      </thead>
+                      <tbody>{ledger.map((line) => (
+                        <tr key={line.id} className="border-b last:border-b-0 hover:bg-gray-50">
+                          <td className="p-2.5 whitespace-nowrap">{line.date ? toJalali(line.date) : '—'}</td>
+                          <td className="p-2.5 whitespace-nowrap">{getLedgerTypeLabel(line.moveType, line.reference)}</td>
+                          <td className="p-2.5 font-mono whitespace-nowrap" dir="ltr">{line.moveName}</td>
+                          <td className="p-2.5 min-w-[180px]">
+                            <div>{line.description}</div>
+                            {line.reference && line.reference !== line.description && <div className="text-[10px] text-gray-400 mt-0.5">{line.reference}</div>}
+                          </td>
+                          <td className="p-2.5 whitespace-nowrap">
+                            <div>{line.accountName}</div>
+                            <div className="text-[10px] text-gray-400">{line.journalName}</div>
+                          </td>
+                          <td className="p-2.5 text-red-600 font-bold">{line.debit > 0 ? formatPrice(line.debit) : '—'}</td>
+                          <td className="p-2.5 text-green-600 font-bold">{line.credit > 0 ? formatPrice(line.credit) : '—'}</td>
+                          <td className={`p-2.5 font-bold whitespace-nowrap ${line.effect >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {line.effect >= 0 ? '+' : '−'}{formatPrice(Math.abs(line.effect))}
+                          </td>
+                          <td className={`p-2.5 font-bold whitespace-nowrap ${line.runningBalance > 0 ? 'text-red-600' : line.runningBalance < 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                            {formatPrice(Math.abs(line.runningBalance))} {line.runningBalance > 0 ? 'بد' : line.runningBalance < 0 ? 'بس' : 'تسویه'}
+                          </td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </td>
+            </tr>
+          )}
+          </Fragment>
+        );})}</tbody>
       </table>
     </div>}
 
