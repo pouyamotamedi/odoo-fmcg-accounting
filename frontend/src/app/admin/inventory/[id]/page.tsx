@@ -80,21 +80,6 @@ function monthLabel(month: string): string {
   return year && name ? `${name} ${toPersianDigits(year)}` : '—';
 }
 
-function timelinePointTitle(point: ProductPriceTimelinePoint): string {
-  const source = point.isCurrent
-    ? point.purchaseObserved || point.saleObserved
-      ? 'قیمت‌های تنظیم‌شده فعلی کالا؛ قیمت مؤثر یکسانِ اسناد قطعی امروز نیز برای این نقطه مشاهده شده است'
-      : 'قیمت‌های تنظیم‌شده فعلی کالا'
-    : 'قیمت مؤثر اسناد قطعی؛ مقدار سری دیگر در صورت نبود مشاهده روزانه از آخرین مشاهده حمل شده است';
-  return [
-    toJalali(point.date),
-    `خرید: ${point.purchasePrice == null ? 'ناموجود' : `${formatPrice(point.purchasePrice)} تومان`}`,
-    `فروش: ${point.salePrice == null ? 'ناموجود' : `${formatPrice(point.salePrice)} تومان`}`,
-    `حاشیه اسمی: ${point.marginPercent == null ? 'ناموجود' : metricValue(point.marginPercent, '٪')}`,
-    source,
-  ].join('\n');
-}
-
 function PriceTimelineChart({
   points,
   firstAvailableDate,
@@ -102,6 +87,12 @@ function PriceTimelineChart({
   points: ProductPriceTimelinePoint[];
   firstAvailableDate: string | null;
 }) {
+  const [tooltip, setTooltip] = useState<{
+    point: ProductPriceTimelinePoint;
+    series: 'purchase' | 'sale' | 'margin';
+    x: number;
+    y: number;
+  } | null>(null);
   const validPoints = points.filter((point) => calendarDayNumber(point.date) != null);
   if (validPoints.length === 0) {
     return <div className="py-12 text-center text-sm text-gray-400">داده‌ای برای نمایش روند قیمت وجود ندارد</div>;
@@ -192,28 +183,82 @@ function PriceTimelineChart({
 
         {validPoints.map((point) => {
           const pointX = x(point.date);
-          const title = timelinePointTitle(point);
           const radius = point.isCurrent ? 5 : 3.5;
+          const interactivePoint = (
+            series: 'purchase' | 'sale' | 'margin',
+            value: number,
+            pointY: number,
+            color: string,
+          ) => (
+            <g
+              role="button"
+              tabIndex={0}
+              aria-label={`${toJalali(point.date)}، ${series === 'purchase' ? 'قیمت خرید' : series === 'sale' ? 'قیمت فروش' : 'حاشیه سود'}: ${series === 'margin' ? metricValue(value, '٪') : `${formatPrice(value)} تومان`}`}
+              className="cursor-pointer outline-none"
+              onMouseEnter={() => setTooltip({ point, series, x: pointX, y: pointY })}
+              onMouseLeave={() => setTooltip(null)}
+              onFocus={() => setTooltip({ point, series, x: pointX, y: pointY })}
+              onBlur={() => setTooltip(null)}
+            >
+              <circle cx={pointX} cy={pointY} r={12} fill="transparent" />
+              <circle cx={pointX} cy={pointY} r={radius} fill={color} stroke="white" strokeWidth="1.5" />
+            </g>
+          );
           return (
             <g key={`${point.date}-${point.isCurrent ? 'current' : 'historical'}`}>
-              {point.purchasePrice != null && (
-                <circle cx={pointX} cy={moneyY(point.purchasePrice)} r={radius} fill="#f59e0b" stroke="white" strokeWidth="1.5">
-                  <title>{title}</title>
-                </circle>
-              )}
-              {point.salePrice != null && (
-                <circle cx={pointX} cy={moneyY(point.salePrice)} r={radius} fill="#6366f1" stroke="white" strokeWidth="1.5">
-                  <title>{title}</title>
-                </circle>
-              )}
-              {point.marginPercent != null && (
-                <circle cx={pointX} cy={marginY(point.marginPercent)} r={radius} fill="#10b981" stroke="white" strokeWidth="1.5">
-                  <title>{title}</title>
-                </circle>
-              )}
+              {point.purchasePrice != null && interactivePoint('purchase', point.purchasePrice, moneyY(point.purchasePrice), '#f59e0b')}
+              {point.salePrice != null && interactivePoint('sale', point.salePrice, moneyY(point.salePrice), '#6366f1')}
+              {point.marginPercent != null && interactivePoint('margin', point.marginPercent, marginY(point.marginPercent), '#10b981')}
             </g>
           );
         })}
+
+        {tooltip && (() => {
+          const tooltipWidth = 190;
+          const tooltipHeight = 72;
+          const tooltipX = Math.min(
+            width - padding.right - tooltipWidth,
+            Math.max(padding.left, tooltip.x - tooltipWidth / 2),
+          );
+          const tooltipY = tooltip.y - tooltipHeight - 12 < padding.top
+            ? tooltip.y + 16
+            : tooltip.y - tooltipHeight - 12;
+          const value = tooltip.series === 'purchase'
+            ? tooltip.point.purchasePrice
+            : tooltip.series === 'sale'
+              ? tooltip.point.salePrice
+              : tooltip.point.marginPercent;
+          const label = tooltip.series === 'purchase'
+            ? 'قیمت خرید'
+            : tooltip.series === 'sale'
+              ? 'قیمت فروش'
+              : 'حاشیه سود';
+          const color = tooltip.series === 'purchase'
+            ? '#f59e0b'
+            : tooltip.series === 'sale'
+              ? '#6366f1'
+              : '#10b981';
+          return (
+            <g pointerEvents="none">
+              <rect
+                x={tooltipX}
+                y={tooltipY}
+                width={tooltipWidth}
+                height={tooltipHeight}
+                rx={8}
+                fill="#0f172a"
+                opacity={0.96}
+              />
+              <circle cx={tooltipX + 16} cy={tooltipY + 22} r={4} fill={color} />
+              <text x={tooltipX + 28} y={tooltipY + 26} fontSize="11" fill="#cbd5e1">
+                {toJalali(tooltip.point.date)}
+              </text>
+              <text x={tooltipX + 16} y={tooltipY + 52} fontSize="13" fontWeight="700" fill="white">
+                {label}: {value == null ? '—' : tooltip.series === 'margin' ? metricValue(value, '٪') : `${formatPrice(value)} تومان`}
+              </text>
+            </g>
+          );
+        })()}
 
         <text x={padding.left} y={height - 18} textAnchor="start" fontSize="10" fill="#64748b">{toJalali(axisStartDate)}</text>
         <text x={width - padding.right} y={height - 18} textAnchor="end" fontSize="10" fill="#64748b">{toJalali(axisEndDate)}</text>
