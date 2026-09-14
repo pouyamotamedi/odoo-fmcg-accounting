@@ -8,9 +8,15 @@ import {
   getProductAnalytics,
   type ProductAnalyticsResult,
   type ProductDocumentType,
+  type ProductPriceTimelinePoint,
   type ProductStockMovement,
 } from '@/lib/product-analytics';
 import { formatPrice, toJalali, toPersianDigits } from '@/lib/utils';
+
+const JALALI_MONTH_NAMES = [
+  'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند',
+];
 
 function localDate(value: Date): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
@@ -21,6 +27,23 @@ function defaultDateFrom(): string {
   date.setFullYear(date.getFullYear() - 1);
   date.setDate(date.getDate() + 1);
   return localDate(date);
+}
+
+function calendarDayNumber(value: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return null;
+  return date.getTime() / 86_400_000;
+}
+
+function calendarDaysBetween(from: string, to: string): number | null {
+  const start = calendarDayNumber(from);
+  const end = calendarDayNumber(to);
+  return start == null || end == null ? null : end - start;
 }
 
 function documentLabel(type: ProductDocumentType): string {
@@ -52,8 +75,151 @@ function metricValue(value: number | null, suffix = ''): string {
 }
 
 function monthLabel(month: string): string {
-  if (!month) return '—';
-  return toJalali(`${month}-15`).slice(0, 7);
+  const [year, monthNumber] = month.split('-').map(Number);
+  const name = JALALI_MONTH_NAMES[monthNumber - 1];
+  return year && name ? `${name} ${toPersianDigits(year)}` : '—';
+}
+
+function timelinePointTitle(point: ProductPriceTimelinePoint): string {
+  const source = point.isCurrent
+    ? point.purchaseObserved || point.saleObserved
+      ? 'قیمت‌های تنظیم‌شده فعلی کالا؛ قیمت مؤثر یکسانِ اسناد قطعی امروز نیز برای این نقطه مشاهده شده است'
+      : 'قیمت‌های تنظیم‌شده فعلی کالا'
+    : 'قیمت مؤثر اسناد قطعی؛ مقدار سری دیگر در صورت نبود مشاهده روزانه از آخرین مشاهده حمل شده است';
+  return [
+    toJalali(point.date),
+    `خرید: ${point.purchasePrice == null ? 'ناموجود' : `${formatPrice(point.purchasePrice)} تومان`}`,
+    `فروش: ${point.salePrice == null ? 'ناموجود' : `${formatPrice(point.salePrice)} تومان`}`,
+    `حاشیه اسمی: ${point.marginPercent == null ? 'ناموجود' : metricValue(point.marginPercent, '٪')}`,
+    source,
+  ].join('\n');
+}
+
+function PriceTimelineChart({
+  points,
+  firstAvailableDate,
+}: {
+  points: ProductPriceTimelinePoint[];
+  firstAvailableDate: string | null;
+}) {
+  const validPoints = points.filter((point) => calendarDayNumber(point.date) != null);
+  if (validPoints.length === 0) {
+    return <div className="py-12 text-center text-sm text-gray-400">داده‌ای برای نمایش روند قیمت وجود ندارد</div>;
+  }
+
+  const width = Math.min(2400, Math.max(760, validPoints.length * 72));
+  const height = 320;
+  const padding = { top: 24, right: 74, bottom: 50, left: 84 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const pointDays = validPoints.map((point) => calendarDayNumber(point.date)!).filter(Number.isFinite);
+  const firstPointDay = Math.min(...pointDays);
+  const lastPointDay = Math.max(...pointDays);
+  const requestedStartDay = firstAvailableDate ? calendarDayNumber(firstAvailableDate) : null;
+  const startDay = requestedStartDay != null ? Math.min(requestedStartDay, firstPointDay) : firstPointDay;
+  const endDay = Math.max(startDay, lastPointDay);
+  const daySpan = endDay - startDay;
+  const x = (date: string) => {
+    const day = calendarDayNumber(date) ?? startDay;
+    return daySpan === 0 ? padding.left + plotWidth / 2 : padding.left + (day - startDay) / daySpan * plotWidth;
+  };
+
+  const moneyValues = validPoints.flatMap((point) => [point.purchasePrice, point.salePrice])
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const maxMoney = Math.max(1, ...moneyValues, 0);
+  const moneyY = (value: number) => padding.top + (1 - Math.max(0, value) / maxMoney) * plotHeight;
+
+  const marginValues = validPoints.map((point) => point.marginPercent)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const minMargin = Math.min(0, ...marginValues);
+  let maxMargin = Math.max(0, ...marginValues);
+  if (maxMargin === minMargin) maxMargin = minMargin + 1;
+  const marginY = (value: number) => padding.top + (maxMargin - value) / (maxMargin - minMargin) * plotHeight;
+
+  const linePath = (
+    valueOf: (point: ProductPriceTimelinePoint) => number | null,
+    y: (value: number) => number,
+  ) => {
+    let path = '';
+    let continuing = false;
+    for (const point of validPoints) {
+      const value = valueOf(point);
+      if (value == null || !Number.isFinite(value)) {
+        continuing = false;
+        continue;
+      }
+      path += `${continuing ? ' L' : 'M'} ${x(point.date).toFixed(2)} ${y(value).toFixed(2)}`;
+      continuing = true;
+    }
+    return path;
+  };
+
+  const purchasePath = linePath((point) => point.purchasePrice, moneyY);
+  const salePath = linePath((point) => point.salePrice, moneyY);
+  const marginPath = linePath((point) => point.marginPercent, marginY);
+  const axisStartDate = firstAvailableDate || validPoints[0].date;
+  const axisEndDate = validPoints.at(-1)?.date || axisStartDate;
+
+  return (
+    <div className="overflow-x-auto pb-2" dir="ltr">
+      <svg
+        aria-label="نمودار روند قیمت خرید، قیمت فروش و حاشیه اسمی"
+        role="img"
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ width: `${width}px`, minWidth: '760px', height: '320px' }}
+      >
+        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotHeight} stroke="#cbd5e1" />
+        <line x1={width - padding.right} y1={padding.top} x2={width - padding.right} y2={padding.top + plotHeight} stroke="#cbd5e1" />
+        <line x1={padding.left} y1={padding.top + plotHeight} x2={width - padding.right} y2={padding.top + plotHeight} stroke="#cbd5e1" />
+        {[0, 0.5, 1].map((ratio) => {
+          const y = padding.top + ratio * plotHeight;
+          const money = maxMoney * (1 - ratio);
+          const margin = maxMargin - ratio * (maxMargin - minMargin);
+          return (
+            <g key={ratio}>
+              <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />
+              <text x={padding.left - 10} y={y + 4} textAnchor="end" fontSize="10" fill="#64748b">{formatPrice(money)}</text>
+              <text x={width - padding.right + 10} y={y + 4} textAnchor="start" fontSize="10" fill="#64748b">{metricValue(margin, '٪')}</text>
+            </g>
+          );
+        })}
+        <text x={padding.left} y={14} textAnchor="start" fontSize="10" fill="#64748b">تومان / واحد پایه</text>
+        <text x={width - padding.right} y={14} textAnchor="end" fontSize="10" fill="#64748b">حاشیه اسمی</text>
+
+        {purchasePath && <path d={purchasePath} fill="none" stroke="#f59e0b" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />}
+        {salePath && <path d={salePath} fill="none" stroke="#6366f1" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />}
+        {marginPath && <path d={marginPath} fill="none" stroke="#10b981" strokeWidth="2" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />}
+
+        {validPoints.map((point) => {
+          const pointX = x(point.date);
+          const title = timelinePointTitle(point);
+          const radius = point.isCurrent ? 5 : 3.5;
+          return (
+            <g key={`${point.date}-${point.isCurrent ? 'current' : 'historical'}`}>
+              {point.purchasePrice != null && (
+                <circle cx={pointX} cy={moneyY(point.purchasePrice)} r={radius} fill="#f59e0b" stroke="white" strokeWidth="1.5">
+                  <title>{title}</title>
+                </circle>
+              )}
+              {point.salePrice != null && (
+                <circle cx={pointX} cy={moneyY(point.salePrice)} r={radius} fill="#6366f1" stroke="white" strokeWidth="1.5">
+                  <title>{title}</title>
+                </circle>
+              )}
+              {point.marginPercent != null && (
+                <circle cx={pointX} cy={marginY(point.marginPercent)} r={radius} fill="#10b981" stroke="white" strokeWidth="1.5">
+                  <title>{title}</title>
+                </circle>
+              )}
+            </g>
+          );
+        })}
+
+        <text x={padding.left} y={height - 18} textAnchor="start" fontSize="10" fill="#64748b">{toJalali(axisStartDate)}</text>
+        <text x={width - padding.right} y={height - 18} textAnchor="end" fontSize="10" fill="#64748b">{toJalali(axisEndDate)}</text>
+      </svg>
+    </div>
+  );
 }
 
 export default function ProductAnalyticsPage() {
@@ -100,9 +266,9 @@ export default function ProductAnalyticsPage() {
     if (product.quantityAvailable <= product.reorderThreshold && product.reorderThreshold > 0) {
       rows.push({ tone: 'bg-red-50 text-red-700', text: `موجودی به حد هشدار رسیده است؛ موجودی فعلی ${metricValue(product.quantityAvailable)} و حد هشدار ${metricValue(product.reorderThreshold)} است.` });
     } else if (metrics.stockCoverageDays != null && metrics.stockCoverageDays < 30) {
-      rows.push({ tone: 'bg-orange-50 text-orange-700', text: `با آهنگ فروش این دوره، موجودی تقریباً برای ${metricValue(metrics.stockCoverageDays)} روز کافی است.` });
+      rows.push({ tone: 'bg-orange-50 text-orange-700', text: `براساس میانگین فروش خالص صورتحساب‌شده از اولین دسترسی کالا، موجودی تقریباً برای ${metricValue(metrics.stockCoverageDays)} روز کافی است.` });
     } else if (metrics.stockCoverageDays != null && metrics.stockCoverageDays > 180) {
-      rows.push({ tone: 'bg-amber-50 text-amber-700', text: `پوشش موجودی حدود ${metricValue(metrics.stockCoverageDays)} روز است؛ احتمال خواب سرمایه را بررسی کنید.` });
+      rows.push({ tone: 'bg-amber-50 text-amber-700', text: `پوشش موجودی براساس میانگین فروش از اولین دسترسی حدود ${metricValue(metrics.stockCoverageDays)} روز است؛ احتمال خواب سرمایه را بررسی کنید.` });
     }
 
     if (metrics.grossMargin != null && metrics.grossMargin < 10) {
@@ -120,9 +286,8 @@ export default function ProductAnalyticsPage() {
     }
 
     if (metrics.lastSaleDate) {
-      const reportEnd = new Date(`${dateTo}T23:59:59`).getTime();
-      const daysSinceSale = Math.floor((reportEnd - new Date(`${metrics.lastSaleDate}T00:00:00`).getTime()) / 86_400_000);
-      if (daysSinceSale > 60 && product.quantityAvailable > 0) {
+      const daysSinceSale = calendarDaysBetween(metrics.lastSaleDate, dateTo);
+      if (daysSinceSale != null && daysSinceSale > 60 && product.quantityAvailable > 0) {
         rows.push({ tone: 'bg-amber-50 text-amber-700', text: `تا پایان بازه، ${metricValue(daysSinceSale)} روز از آخرین فروش گذشته و کالا موجودی داشته است؛ کندگردش بودن آن را بررسی کنید.` });
       }
     }
@@ -145,7 +310,7 @@ export default function ProductAnalyticsPage() {
     );
   }
 
-  const { product, metrics, ranking, trends, transactions, stockMovements } = data;
+  const { product, metrics, ranking, trends, priceTimeline, transactions, stockMovements } = data;
   const maxTrendAmount = Math.max(1, ...trends.flatMap((item) => [Math.abs(item.revenue), Math.abs(item.profit)]));
   const costLabel = metrics.costSource === 'actual'
     ? 'ثبت‌شده حسابداری'
@@ -226,7 +391,7 @@ export default function ProductAnalyticsPage() {
           <div className="flex justify-between items-center mb-4">
             <div>
               <h2 className="font-bold text-sm text-slate-800">روند ماهانه فروش و سود</h2>
-              <p className="text-[10px] text-gray-400 mt-1">مبالغ خالص پس از کسر برگشت‌ها</p>
+              <p className="text-[10px] text-gray-400 mt-1">گروه‌بندی ماه‌های واقعی جلالی؛ مبالغ خالص پس از کسر برگشت‌ها</p>
             </div>
             <div className="flex gap-3 text-[10px] text-gray-500">
               <span><i className="inline-block w-2 h-2 rounded bg-indigo-400 ml-1" />فروش</span>
@@ -235,7 +400,7 @@ export default function ProductAnalyticsPage() {
           </div>
           <div className="space-y-3 max-h-80 overflow-auto pl-1">
             {trends.map((item) => (
-              <div key={item.month} className="grid grid-cols-[64px_1fr_100px] gap-2 items-center">
+              <div key={item.month} className="grid grid-cols-[90px_1fr_100px] gap-2 items-center">
                 <div className="text-[10px] text-gray-500">{monthLabel(item.month)}</div>
                 <div className="space-y-1">
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -271,11 +436,35 @@ export default function ProductAnalyticsPage() {
             <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">میانگین فروش واحد</dt><dd>{metrics.averageSalePrice == null ? '—' : formatPrice(metrics.averageSalePrice)}</dd></div>
             <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">میانگین خرید واحد</dt><dd>{metrics.averagePurchasePrice == null ? '—' : formatPrice(metrics.averagePurchasePrice)}</dd></div>
             <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">نرخ برگشت فروش</dt><dd>{metricValue(metrics.returnRate, '٪')}</dd></div>
-            <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">پوشش تقریبی موجودی</dt><dd>{metrics.stockCoverageDays == null ? '—' : `${metricValue(metrics.stockCoverageDays)} روز`}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">آخرین فروش / خرید</dt><dd>{metrics.lastSaleDate ? toJalali(metrics.lastSaleDate) : '—'} / {metrics.lastPurchaseDate ? toJalali(metrics.lastPurchaseDate) : '—'}</dd></div>
+            <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">اولین دسترسی کالا</dt><dd>{metrics.firstAvailableDate ? toJalali(metrics.firstAvailableDate) : '—'}</dd></div>
+            <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">فروش خالص کل دوره عمر</dt><dd>{metrics.lifetimeSoldQuantity == null ? '—' : `${metricValue(metrics.lifetimeSoldQuantity)} ${product.uom}`}</dd></div>
+            <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">روزهای مشاهده عمر کالا</dt><dd>{metrics.lifetimeObservationDays == null ? '—' : `${metricValue(metrics.lifetimeObservationDays)} روز`}</dd></div>
+            <div className="flex justify-between border-b pb-2"><dt className="text-gray-500">پوشش با میانگین فروش عمر</dt><dd>{metrics.stockCoverageDays == null ? '—' : `${metricValue(metrics.stockCoverageDays)} روز`}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">آخرین فروش / خرید در بازه</dt><dd>{metrics.lastSaleDate ? toJalali(metrics.lastSaleDate) : '—'} / {metrics.lastPurchaseDate ? toJalali(metrics.lastPurchaseDate) : '—'}</dd></div>
           </dl>
+          <p className="mt-3 rounded-lg bg-slate-50 p-2 text-[10px] leading-5 text-slate-500">
+            پوشش = بیشینه موجودی فعلی و صفر × روزهای تقویمی از اولین دسترسی تا امروز ÷ فروش خالص صورتحساب‌شده همان دوره. این شاخص مستقل از بازه انتخابی بالای صفحه است.
+          </p>
         </section>
       </div>
+
+      <section className="bg-white rounded-xl border border-gray-100 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div>
+            <h2 className="font-bold text-sm text-slate-800">روند قیمت و حاشیه اسمی عمر کالا</h2>
+            <p className="text-[10px] text-gray-400 mt-1">از اولین دسترسی تا امروز؛ مستقل از بازه تاریخ انتخابی</p>
+          </div>
+          <div className="flex flex-wrap gap-3 text-[10px] text-gray-500">
+            <span><i className="inline-block w-2 h-2 rounded-full bg-amber-500 ml-1" />قیمت خرید</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-indigo-500 ml-1" />قیمت فروش</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-emerald-500 ml-1" />حاشیه اسمی</span>
+          </div>
+        </div>
+        <PriceTimelineChart points={priceTimeline} firstAvailableDate={metrics.firstAvailableDate} />
+        <p className="mt-2 text-[10px] leading-5 text-gray-500">
+          نقاط تاریخی، قیمت مؤثر وزنی هر واحد پایه در فاکتورهای قطعی خرید و فروشِ غیرمرجوعی هستند و مقدار مشاهده‌شده طرف مقابل تا رویداد بعدی حمل می‌شود. نقطه امروز از بهای استاندارد و قیمت فروش فعلی تنظیم‌شده کالا می‌آید. تغییرات تاریخی تنظیمات قیمت که در اسناد ثبت نشده‌اند قابل بازسازی نیستند. برای جزئیات هر نقطه، نشانگر را روی آن نگه دارید.
+        </p>
+      </section>
 
       <section>
         <h2 className="font-bold text-sm text-slate-800 mb-2">جمع‌بندی مدیریتی</h2>
