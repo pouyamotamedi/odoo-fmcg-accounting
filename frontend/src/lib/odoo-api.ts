@@ -565,59 +565,61 @@ export async function createPurchaseInvoice(values: {
  * @param journalId - the specific bank/cash journal to pay from
  * @param amount - the amount to pay (partial or full)
  */
+const PAYMENT_CURRENCY_TOLERANCE = 0.5;
+
+export async function getInvoiceResidual(invoiceId: number): Promise<number> {
+  if (!Number.isInteger(invoiceId) || invoiceId <= 0) throw new Error('Invalid invoice ID');
+  const invoices = await searchRead('account.move', [['id', '=', invoiceId]], ['amount_residual'], 1);
+  if (!invoices || invoices.length === 0) throw new Error(`Invoice ${invoiceId} was not found`);
+  const residual = Number(invoices[0].amount_residual);
+  if (!Number.isFinite(residual)) throw new Error('Invoice residual is invalid');
+  return residual;
+}
+
 export async function registerInvoicePayment(invoiceId: number, journalId: number, amount: number) {
-  const invoice = await searchRead('account.move', [['id', '=', invoiceId]], ['amount_total', 'partner_id', 'move_type', 'amount_residual', 'name'], 1);
-  if (!invoice || invoice.length === 0) return;
+  if (!Number.isInteger(invoiceId) || invoiceId <= 0) throw new Error('Invalid invoice ID');
+  if (!Number.isInteger(journalId) || journalId <= 0) throw new Error('Invalid payment journal ID');
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Payment amount must be finite and positive');
 
-  const payAmount = amount || invoice[0].amount_residual || invoice[0].amount_total;
-  const paymentType = invoice[0].move_type === 'in_invoice' ? 'outbound' : 'inbound';
-  const partnerType = invoice[0].move_type === 'in_invoice' ? 'supplier' : 'customer';
+  const invoices = await searchRead('account.move', [['id', '=', invoiceId]], ['move_type', 'amount_residual', 'name', 'state'], 1);
+  if (!invoices || invoices.length === 0) throw new Error(`Invoice ${invoiceId} was not found`);
+  const invoice = invoices[0];
+  if (invoice.state !== 'posted') throw new Error(`Invoice ${invoice.name || invoiceId} is not posted`);
 
-  // Try using the payment register wizard (properly reconciles payment with invoice)
+  const residualBefore = Number(invoice.amount_residual);
+  if (!Number.isFinite(residualBefore)) throw new Error('Invoice residual is invalid');
+  if (amount > residualBefore + PAYMENT_CURRENCY_TOLERANCE) {
+    throw new Error(`Payment amount ${amount} exceeds invoice residual ${residualBefore}`);
+  }
+
+  const paymentType = invoice.move_type === 'in_invoice' ? 'outbound' : 'inbound';
+  const partnerType = invoice.move_type === 'in_invoice' ? 'supplier' : 'customer';
+  let wizardId: number | undefined;
   try {
-    // Create the wizard in the context of the invoice
-    const wizardId = await jsonRpc('/web/dataset/call_kw', {
+    wizardId = await jsonRpc('/web/dataset/call_kw', {
       model: 'account.payment.register',
       method: 'create',
-      args: [{
-        journal_id: journalId,
-        amount: payAmount,
-        payment_type: paymentType,
-        partner_type: partnerType,
-      }],
-      kwargs: {
-        context: {
-          active_model: 'account.move',
-          active_ids: [invoiceId],
-        },
-      },
+      args: [{ journal_id: journalId, amount, payment_type: paymentType, partner_type: partnerType }],
+      kwargs: { context: { active_model: 'account.move', active_ids: [invoiceId] } },
     });
-
-    // Execute the wizard to create and reconcile the payment
     await jsonRpc('/web/dataset/call_kw', {
       model: 'account.payment.register',
       method: 'action_create_payments',
       args: [[wizardId]],
-      kwargs: {
-        context: {
-          active_model: 'account.move',
-          active_ids: [invoiceId],
-        },
-      },
+      kwargs: { context: { active_model: 'account.move', active_ids: [invoiceId] } },
     });
-    return wizardId;
-  } catch (e) {
-    // Fallback: Create payment directly (won't be reconciled but at least records the payment)
-    console.warn('[registerInvoicePayment] Wizard failed, using direct payment:', e);
-    const paymentId = await create('account.payment', {
-      payment_type: paymentType,
-      partner_type: partnerType,
-      partner_id: invoice[0].partner_id?.[0] || false,
-      amount: payAmount,
-      journal_id: journalId,
-    });
-    await callMethod('account.payment', 'action_post', [[paymentId]]);
-    return paymentId;
+    const residualAfter = await getInvoiceResidual(invoiceId);
+    return { wizardId, residualBefore, residualAfter, amount };
+  } catch (error) {
+    try {
+      const residualAfter = await getInvoiceResidual(invoiceId);
+      const expectedResidual = Math.max(0, residualBefore - amount);
+      if (Math.abs(residualAfter - expectedResidual) <= PAYMENT_CURRENCY_TOLERANCE) {
+        return { wizardId, residualBefore, residualAfter, amount };
+      }
+    } catch { /* preserve the original wizard error */ }
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invoice payment registration and reconciliation failed: ${reason}`);
   }
 }
 

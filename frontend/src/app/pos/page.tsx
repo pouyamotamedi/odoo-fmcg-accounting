@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, getInvoiceResidual, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { logout as odooLogout } from '@/lib/odoo-api';
@@ -21,6 +21,18 @@ interface OdooProduct {
 }
 
 const SALES_HISTORY_LIMIT = 100;
+const TOMAN_TOLERANCE = 1;
+
+type CardPaymentRow = { amount: string; paid: boolean; accounted: boolean };
+
+function toman(value: string | number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+}
+
+function amountsMatch(left: number, right: number): boolean {
+  return Math.abs(toman(left) - toman(right)) <= TOMAN_TOLERANCE;
+}
 
 function formatSaleDateTime(value: string | false | undefined): string {
   if (!value) return '—';
@@ -54,10 +66,11 @@ export default function PosPage() {
   const [pendingCount, setPendingCount] = useState(0);
   const [showSplit, setShowSplit] = useState(false);
   const [splitCash, setSplitCash] = useState('');
-  const [splitCard, setSplitCard] = useState('');
   const [splitCredit, setSplitCredit] = useState('');
   const [splitCustomer, setSplitCustomer] = useState(0);
-  const [splitCardPayments, setSplitCardPayments] = useState<{amount: string; paid: boolean}[]>([{amount: '', paid: false}]);
+  const [splitCardPayments, setSplitCardPayments] = useState<CardPaymentRow[]>([{amount: '', paid: false, accounted: false}]);
+  const [splitInvoiceId, setSplitInvoiceId] = useState<number | null>(null);
+  const [splitCashAccounted, setSplitCashAccounted] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
   const [expandedSale, setExpandedSale] = useState<number | null>(null);
@@ -73,7 +86,8 @@ export default function PosPage() {
   const [pinnedIds, setPinnedIds] = useState<Set<number>>(new Set());
   // Multi-card payment
   const [showMultiCard, setShowMultiCard] = useState(false);
-  const [cardPayments, setCardPayments] = useState<{amount: string; paid: boolean}[]>([{amount: '', paid: false}]);
+  const [cardPayments, setCardPayments] = useState<CardPaymentRow[]>([{amount: '', paid: false, accounted: false}]);
+  const [multiCardInvoiceId, setMultiCardInvoiceId] = useState<number | null>(null);
   // Quick add customer
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustName, setNewCustName] = useState('');
@@ -413,6 +427,32 @@ export default function PosPage() {
 
   const cartTotal = total();
 
+  function resolvePosJournal(type: 'cash' | 'bank'): number | undefined {
+    let configuredId = 0;
+    try {
+      const settings = JSON.parse(localStorage.getItem('pos_journal_settings') || '{}');
+      configuredId = Number(type === 'cash' ? settings.cash : settings.card);
+    } catch {}
+    if (configuredId > 0 && posJournals.some(j => j.id === configuredId && j.type === type)) return configuredId;
+    return posJournals.find(j => j.type === type)?.id;
+  }
+
+  function closeSplitPayment(): void {
+    if (splitInvoiceId || splitCashAccounted || splitCardPayments.some(row => row.paid || row.accounted)) {
+      alert('بخشی از پرداخت انجام شده است؛ تا تکمیل حسابداری امکان بستن این پنجره وجود ندارد');
+      return;
+    }
+    setShowSplit(false);
+  }
+
+  function closeMultiCardPayment(): void {
+    if (multiCardInvoiceId || cardPayments.some(row => row.paid || row.accounted)) {
+      alert('بخشی از پرداخت انجام شده است؛ تا تکمیل حسابداری امکان بستن این پنجره وجود ندارد');
+      return;
+    }
+    setShowMultiCard(false);
+  }
+
   // Reset all per-sale state only after the sale is registered or safely queued.
   function completeSale() {
     clearCart();
@@ -544,12 +584,15 @@ export default function PosPage() {
   }
 
   async function handleSplitPayment() {
-    const cashAmt = Number(splitCash) || 0;
-    const cardAmt = Number(splitCard) || 0;
-    const creditAmt = Number(splitCredit) || 0;
+    const cashAmt = toman(splitCash);
+    const creditAmt = toman(splitCredit);
+    const positiveCards = splitCardPayments
+      .map((row, index) => ({ ...row, index, normalizedAmount: toman(row.amount) }))
+      .filter(row => row.normalizedAmount > 0);
+    const cardAmt = positiveCards.reduce((sum, row) => sum + row.normalizedAmount, 0);
     const totalSplit = cashAmt + cardAmt + creditAmt;
 
-    if (totalSplit !== cartTotal) {
+    if (!amountsMatch(totalSplit, cartTotal)) {
       alert(`مجموع مبالغ (${formatPrice(totalSplit)}) با جمع فاکتور (${formatPrice(cartTotal)}) برابر نیست`);
       return;
     }
@@ -557,61 +600,60 @@ export default function PosPage() {
       alert('برای بخش اعتباری، انتخاب مشتری الزامی است');
       return;
     }
-    // Check all card payments are done
-    if (cardAmt > 0 && splitCardPayments.some(cp => Number(cp.amount) > 0 && !cp.paid)) {
-      alert('ابتدا همه کارت‌ها را پرداخت کنید');
+    if (positiveCards.some(row => !row.paid)) {
+      alert('ابتدا همه کارت‌های دارای مبلغ را پرداخت کنید');
+      return;
+    }
+    if (splitCardPayments.some(row => row.paid && toman(row.amount) <= 0)) {
+      alert('مبلغ کارت پرداخت‌شده نامعتبر است');
       return;
     }
 
+    const cashJournalId = cashAmt > 0 ? resolvePosJournal('cash') : undefined;
+    const bankJournalId = cardAmt > 0 ? resolvePosJournal('bank') : undefined;
+    if (cashAmt > 0 && !cashJournalId) { alert('دفتر نقدی صندوق تنظیم نشده است'); return; }
+    if (cardAmt > 0 && !bankJournalId) { alert('دفتر بانکی کارت تنظیم نشده است'); return; }
+
     setSubmitting(true);
     try {
-      // Load customers if credit amount > 0 and not loaded
-      if (creditAmt > 0 && customers.length === 0) {
-        const cust = await getPartners('customer');
-        setCustomers(cust?.map((c:any) => ({id:c.id, name:c.name})) || []);
-      }
-
       const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
       const partnerId = creditAmt > 0 ? splitCustomer : undefined;
-
-      // If card amount > 0, send to PAX terminal if enabled
-      if (cardAmt > 0 && paxTerminalEnabled) {
-        setMsg('💳 مبلغ کارت به دستگاه کارتخوان ارسال شد...');
-        const pax = await payWithPaxTerminal(cardAmt, 'sale');
-        if (!pax?.success) {
-          setMsg('');
-          alert(pax?.error || 'تراکنش کارتخوان ناموفق بود');
-          setSubmitting(false);
-          return;
-        }
+      let invoiceId = splitInvoiceId;
+      if (!invoiceId) {
+        const createdInvoiceId = await createPosOrder({ lines, payment_method: 'split', partner_id: partnerId });
+        await confirmInvoice(createdInvoiceId);
+        setSplitInvoiceId(createdInvoiceId);
+        invoiceId = createdInvoiceId;
       }
 
-      const invoiceId = await createPosOrder({ lines, payment_method: 'split', partner_id: partnerId });
-      await confirmInvoice(invoiceId);
-
-      // Only register payment for cash/card portions
-      if (cashAmt > 0 || cardAmt > 0) {
-        const cashJournal = posJournals.find(j => j.type === 'cash');
-        const bankJournal = posJournals.find(j => j.type === 'bank');
-        if (cashAmt > 0 && cashJournal) {
-          await registerInvoicePayment(invoiceId, cashJournal.id, cashAmt);
-        }
-        if (cardAmt > 0 && bankJournal) {
-          await registerInvoicePayment(invoiceId, bankJournal.id, cardAmt);
-        }
+      const activeInvoiceId = Number(invoiceId);
+      if (cashAmt > 0 && !splitCashAccounted) {
+        await registerInvoicePayment(activeInvoiceId, cashJournalId!, cashAmt);
+        setSplitCashAccounted(true);
       }
-      // Create stock delivery to reduce inventory
-      try {
-        await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
-      } catch { /* best effort */ }
+      for (const card of positiveCards) {
+        if (card.accounted) continue;
+        await registerInvoicePayment(activeInvoiceId, bankJournalId!, card.normalizedAmount);
+        setSplitCardPayments(previous => previous.map((row, index) =>
+          index === card.index ? { ...row, accounted: true } : row
+        ));
+      }
 
+      const residual = await getInvoiceResidual(activeInvoiceId);
+      if (!amountsMatch(residual, creditAmt)) {
+        throw new Error(`مانده فاکتور (${formatPrice(residual)}) با مبلغ اعتباری مورد انتظار (${formatPrice(creditAmt)}) برابر نیست؛ وضعیت پرداخت را بررسی کنید`);
+      }
+
+      try { await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })), partnerId); } catch { /* best effort */ }
       finishSale(lines.map(line => ({ product_id: line.product_id, qty: line.qty })), true);
       setShowSplit(false);
-      setSplitCash(''); setSplitCard(''); setSplitCredit(''); setSplitCustomer(0);
+      setSplitCash(''); setSplitCredit(''); setSplitCustomer(0);
+      setSplitCardPayments([{amount: '', paid: false, accounted: false}]);
+      setSplitCashAccounted(false); setSplitInvoiceId(null);
       setMsg('✅ پرداخت ترکیبی ثبت شد');
       setTimeout(() => setMsg(''), 3000);
     } catch (e:any) {
-      alert(e.message || 'خطا در ثبت');
+      alert(`${e.message || 'خطا در ثبت'}\nپرداخت‌های کارتخوان برگشت خودکار نمی‌خورند؛ این پنجره را باز نگه دارید و دوباره تلاش کنید.`);
     }
     setSubmitting(false);
   }
@@ -852,7 +894,11 @@ export default function PosPage() {
             💳 کارت
           </button>
           <button
-            onClick={() => { setCardPayments([{amount: String(cartTotal), paid: false}]); setShowMultiCard(true); }}
+            onClick={() => {
+              setCardPayments([{amount: String(toman(cartTotal)), paid: false, accounted: false}]);
+              setMultiCardInvoiceId(null);
+              setShowMultiCard(true);
+            }}
             disabled={items.length === 0 || submitting || !isOnline}
             className="py-3 bg-blue-400 text-white rounded-lg text-xs font-bold hover:bg-blue-500 disabled:opacity-40 transition"
           >
@@ -868,8 +914,9 @@ export default function PosPage() {
           <button
             onClick={async () => {
               try { const cust = await getPartners('customer'); setCustomers(cust?.map((c:any) => ({id:c.id, name:c.name})) || []); } catch {}
-              setSplitCash(''); setSplitCard(''); setSplitCredit(''); setSplitCustomer(0);
-              setSplitCardPayments([{amount: '', paid: false}]);
+              setSplitCash(''); setSplitCredit(''); setSplitCustomer(0);
+              setSplitCardPayments([{amount: '', paid: false, accounted: false}]);
+              setSplitCashAccounted(false); setSplitInvoiceId(null);
               setShowSplit(true);
             }}
             disabled={items.length === 0 || submitting}
@@ -950,7 +997,7 @@ export default function PosPage() {
                       <input
                         type="text"
                         value={cp.amount ? Number(cp.amount).toLocaleString() : ''}
-                        onChange={(e) => { const val = e.target.value.replace(/[^\d]/g, ''); const next = [...splitCardPayments]; next[idx] = {...next[idx], amount: val}; setSplitCardPayments(next); setSplitCard(String(next.reduce((s,c)=>s+(Number(c.amount)||0),0))); }}
+                        onChange={(e) => { const val = e.target.value.replace(/[^\d]/g, ''); const next = [...splitCardPayments]; next[idx] = {...next[idx], amount: val}; setSplitCardPayments(next); }}
                         placeholder="مبلغ"
                         disabled={cp.paid}
                         className="flex-1 p-2 border border-gray-200 rounded-lg text-xs"
@@ -977,12 +1024,12 @@ export default function PosPage() {
                         >پرداخت</button>
                       )}
                       {!cp.paid && splitCardPayments.length > 1 && (
-                        <button onClick={() => { const next = splitCardPayments.filter((_,i)=>i!==idx); setSplitCardPayments(next); setSplitCard(String(next.reduce((s,c)=>s+(Number(c.amount)||0),0))); }} className="text-red-400 text-xs">✕</button>
+                        <button onClick={() => setSplitCardPayments(splitCardPayments.filter((_,i)=>i!==idx))} className="text-red-400 text-xs">✕</button>
                       )}
                     </div>
                   ))}
                 </div>
-                <button onClick={() => setSplitCardPayments([...splitCardPayments, {amount: '', paid: false}])} className="text-[10px] text-blue-600 font-bold mt-1">+ کارت دیگر</button>
+                <button onClick={() => setSplitCardPayments([...splitCardPayments, {amount: '', paid: false, accounted: false}])} className="text-[10px] text-blue-600 font-bold mt-1">+ کارت دیگر</button>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">🤝 مبلغ اعتباری (نسیه)</label>
@@ -999,7 +1046,7 @@ export default function PosPage() {
                 </div>
               )}
               <div className="bg-gray-50 p-2 rounded-lg text-xs text-gray-500">
-                مجموع وارد شده: {formatPrice((Number(splitCash) || 0) + (Number(splitCard) || 0) + (Number(splitCredit) || 0))} از {formatPrice(cartTotal)}
+                مجموع وارد شده: {formatPrice(toman(splitCash) + splitCardPayments.reduce((sum, row) => sum + Math.max(0, toman(row.amount)), 0) + toman(splitCredit))} از {formatPrice(cartTotal)}
               </div>
             </div>
             <div className="flex gap-3 mt-5">
@@ -1010,7 +1057,7 @@ export default function PosPage() {
               >
                 {submitting ? 'در حال ثبت...' : 'ثبت پرداخت ترکیبی'}
               </button>
-              <button onClick={() => setShowSplit(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">
+              <button onClick={closeSplitPayment} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">
                 انصراف
               </button>
             </div>
@@ -1109,7 +1156,7 @@ export default function PosPage() {
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">💳 پرداخت چند کارته</h3>
-              <button onClick={() => setShowMultiCard(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              <button onClick={closeMultiCardPayment} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             <div className="text-sm text-gray-500 mb-3">جمع فاکتور: <b>{formatPrice(cartTotal)}</b></div>
             <div className="space-y-3 mb-4">
@@ -1150,29 +1197,55 @@ export default function PosPage() {
                 </div>
               ))}
             </div>
-            <button onClick={() => setCardPayments([...cardPayments, {amount: '', paid: false}])} className="text-xs text-blue-600 font-bold mb-4">+ افزودن کارت دیگر</button>
+            <button onClick={() => setCardPayments([...cardPayments, {amount: '', paid: false, accounted: false}])} className="text-xs text-blue-600 font-bold mb-4">+ افزودن کارت دیگر</button>
             <div className="text-xs text-gray-500 mb-3">
               پرداخت شده: {formatPrice(cardPayments.filter(c=>c.paid).reduce((s,c)=>s+(Number(c.amount)||0),0))} از {formatPrice(cartTotal)}
             </div>
             <button
               onClick={async () => {
-                const totalPaid = cardPayments.filter(c=>c.paid).reduce((s,c)=>s+(Number(c.amount)||0),0);
-                if (totalPaid < cartTotal) { alert('کل مبلغ هنوز پرداخت نشده'); return; }
-                // All cards paid - create invoice
+                const positiveCards = cardPayments
+                  .map((row, index) => ({ ...row, index, normalizedAmount: toman(row.amount) }))
+                  .filter(row => row.normalizedAmount > 0);
+                const totalPaid = positiveCards.reduce((sum, row) => sum + row.normalizedAmount, 0);
+                if (positiveCards.length === 0) { alert('حداقل یک مبلغ کارت معتبر وارد کنید'); return; }
+                if (positiveCards.some(row => !row.paid)) { alert('ابتدا همه کارت‌های دارای مبلغ را پرداخت کنید'); return; }
+                if (cardPayments.some(row => row.paid && toman(row.amount) <= 0)) { alert('مبلغ کارت پرداخت‌شده نامعتبر است'); return; }
+                if (!amountsMatch(totalPaid, cartTotal)) { alert('مجموع کارت‌ها باید دقیقاً برابر جمع فاکتور باشد'); return; }
+                const bankJournalId = resolvePosJournal('bank');
+                if (!bankJournalId) { alert('دفتر بانکی کارت تنظیم نشده است'); return; }
+
                 setSubmitting(true);
                 try {
                   const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
-                  const invoiceId = await createPosOrder({ lines, payment_method: 'multi_card' });
-                  await confirmInvoice(invoiceId);
-                  const bankJournal = posJournals.find(j => j.type === 'bank');
-                  if (bankJournal) await registerInvoicePayment(invoiceId, bankJournal.id, cartTotal);
+                  let invoiceId = multiCardInvoiceId;
+                  if (!invoiceId) {
+                    const createdInvoiceId = await createPosOrder({ lines, payment_method: 'multi_card' });
+                    await confirmInvoice(createdInvoiceId);
+                    setMultiCardInvoiceId(createdInvoiceId);
+                    invoiceId = createdInvoiceId;
+                  }
+                  const activeInvoiceId = Number(invoiceId);
+                  for (const card of positiveCards) {
+                    if (card.accounted) continue;
+                    await registerInvoicePayment(activeInvoiceId, bankJournalId, card.normalizedAmount);
+                    setCardPayments(previous => previous.map((row, index) =>
+                      index === card.index ? { ...row, accounted: true } : row
+                    ));
+                  }
+                  const residual = await getInvoiceResidual(activeInvoiceId);
+                  if (!amountsMatch(residual, 0)) {
+                    throw new Error(`مانده فاکتور باید صفر باشد اما ${formatPrice(residual)} است`);
+                  }
                   try { await createStockDelivery(lines); } catch {}
-                  finishSale(lines, true); setShowMultiCard(false); setMsg('✅ فاکتور ثبت شد');
-                  setTimeout(() => setMsg(''), 3000);
-                } catch (e: any) { alert(e.message || 'خطا'); }
+                  finishSale(lines, true);
+                  setShowMultiCard(false); setCardPayments([{amount: '', paid: false, accounted: false}]); setMultiCardInvoiceId(null);
+                  setMsg('✅ فاکتور ثبت شد'); setTimeout(() => setMsg(''), 3000);
+                } catch (e: any) {
+                  alert(`${e.message || 'خطا'}\nپرداخت‌های کارتخوان برگشت خودکار نمی‌خورند؛ این پنجره را باز نگه دارید و دوباره تلاش کنید.`);
+                }
                 setSubmitting(false);
               }}
-              disabled={submitting || cardPayments.some(c => !c.paid)}
+              disabled={submitting}
               className="w-full py-2.5 bg-green-600 text-white rounded-lg text-sm font-bold disabled:opacity-40"
             >
               {submitting ? 'ثبت...' : '✓ ثبت فاکتور'}
