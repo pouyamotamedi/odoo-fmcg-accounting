@@ -115,12 +115,46 @@ interface FreeFormAccount {
   code: string;
 }
 
-type FreeFormAccountsStatus = 'idle' | 'loading' | 'success' | 'error';
+interface FreeFormJournal {
+  id: number;
+  name: string;
+  type: string;
+  code: string;
+  company_id?: [number, string] | false;
+}
+
+type FreeFormResourceStatus = 'idle' | 'loading' | 'success' | 'error';
+type FreeFormAccountsStatus = FreeFormResourceStatus;
+type FreeFormJournalsStatus = FreeFormResourceStatus;
 
 interface AccountRow {
   id?: unknown;
   name?: unknown;
   code?: unknown;
+}
+
+interface JournalRow {
+  id?: unknown;
+  name?: unknown;
+  type?: unknown;
+  code?: unknown;
+  company_id?: unknown;
+}
+
+function getJournalTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    general: 'متفرقه',
+    bank: 'بانک',
+    cash: 'صندوق نقدی',
+    sale: 'فروش',
+    purchase: 'خرید',
+  };
+  return labels[type] || type || 'دفتر سند';
+}
+
+function formatJournalOption(journal: FreeFormJournal): string {
+  const details = [journal.name, journal.code].filter(Boolean).join(' / ');
+  return details ? `${getJournalTypeLabel(journal.type)} — ${details}` : getJournalTypeLabel(journal.type);
 }
 
 interface AccountEntry {
@@ -204,6 +238,11 @@ export default function AccountingPage() {
   const [allAccountsStatus, setAllAccountsStatus] = useState<FreeFormAccountsStatus>('idle');
   const [allAccountsError, setAllAccountsError] = useState('');
   const allAccountsRequestId = useRef(0);
+  const [freeFormJournalId, setFreeFormJournalId] = useState(0);
+  const [freeFormJournals, setFreeFormJournals] = useState<FreeFormJournal[]>([]);
+  const [freeFormJournalsStatus, setFreeFormJournalsStatus] = useState<FreeFormJournalsStatus>('idle');
+  const [freeFormJournalsError, setFreeFormJournalsError] = useState('');
+  const freeFormJournalsRequestId = useRef(0);
 
   async function fetchEntries() {
     const requestId = ++fetchRequestId.current;
@@ -341,10 +380,77 @@ export default function AccountingPage() {
     }
   }
 
+  async function loadFreeFormJournals() {
+    const requestId = ++freeFormJournalsRequestId.current;
+    setFreeFormJournalsStatus('loading');
+    setFreeFormJournalsError('');
+    try {
+      let result: unknown;
+      try {
+        result = await searchRead(
+          'account.journal',
+          [['active', '=', true]],
+          ['id', 'name', 'type', 'code', 'company_id'],
+          0,
+          0,
+          'type asc, name asc, id asc',
+        );
+      } catch {
+        result = await searchRead(
+          'account.journal',
+          [],
+          ['id', 'name', 'type'],
+          0,
+          0,
+          'type asc, name asc, id asc',
+        );
+      }
+      if (requestId !== freeFormJournalsRequestId.current) return;
+      if (!Array.isArray(result)) throw new Error('پاسخ نامعتبر از سرور');
+      const loadedJournals = result.flatMap((row: unknown) => {
+        if (!row || typeof row !== 'object') return [];
+        const journal = row as JournalRow;
+        const id = Number(journal.id);
+        if (!Number.isFinite(id) || id <= 0) return [];
+        const companyId: [number, string] | false = Array.isArray(journal.company_id)
+          && typeof journal.company_id[0] === 'number'
+          && typeof journal.company_id[1] === 'string'
+          ? [journal.company_id[0], journal.company_id[1]] as [number, string]
+          : false;
+        return [{
+          id,
+          name: typeof journal.name === 'string' ? journal.name : '',
+          type: typeof journal.type === 'string' ? journal.type : '',
+          code: typeof journal.code === 'string' ? journal.code : '',
+          company_id: companyId,
+        }];
+      });
+      setFreeFormJournals(loadedJournals);
+      setFreeFormJournalId((currentId) => {
+        if (loadedJournals.some((journal) => journal.id === currentId)) return currentId;
+        return loadedJournals.find((journal) => journal.type === 'general')?.id || 0;
+      });
+      setFreeFormJournalsStatus('success');
+    } catch (error: unknown) {
+      if (requestId !== freeFormJournalsRequestId.current) return;
+      setFreeFormJournals([]);
+      setFreeFormJournalsStatus('error');
+      setFreeFormJournalsError(error instanceof Error ? error.message : 'خطا در بارگذاری دفترهای سند');
+    }
+  }
+
   function openFreeForm() {
     setShowFreeForm(true);
     if (allAccountsStatus !== 'success' || allAccounts.length === 0) {
       void loadAllAccounts();
+    }
+    if (freeFormJournalsStatus !== 'success' || freeFormJournals.length === 0) {
+      void loadFreeFormJournals();
+    } else {
+      setFreeFormJournalId((currentId) => {
+        if (freeFormJournals.some((journal) => journal.id === currentId)) return currentId;
+        return freeFormJournals.find((journal) => journal.type === 'general')?.id || 0;
+      });
     }
   }
 
@@ -499,6 +605,13 @@ export default function AccountingPage() {
 
   // Free-form journal entry submit
   async function handleFreeFormSubmit() {
+    const selectedFreeFormJournal = freeFormJournals.find((journal) => journal.id === freeFormJournalId);
+    if (freeFormJournalsStatus !== 'success' || !selectedFreeFormJournal) {
+      alert(freeFormJournalId
+        ? 'دفتر سند انتخاب‌شده در دسترس نیست؛ لطفاً دوباره انتخاب کنید.'
+        : 'انتخاب حساب / دفتر سند الزامی است.');
+      return;
+    }
     if (allAccountsStatus !== 'success' || allAccounts.length === 0) {
       alert('حساب‌ها هنوز بارگذاری نشده‌اند؛ پس از بارگذاری یا تلاش مجدد، دوباره ثبت کنید.');
       return;
@@ -527,6 +640,7 @@ export default function AccountingPage() {
       }]);
       const moveId = await create('account.move', {
         move_type: 'entry',
+        journal_id: freeFormJournalId,
         date: freeFormDate,
         partner_id: headerPartnerId,
         line_ids: lines,
@@ -534,6 +648,7 @@ export default function AccountingPage() {
       });
       await callMethod('account.move', 'action_post', [[moveId]]);
       setShowFreeForm(false);
+      setFreeFormJournalId(0);
       setFreeFormLines([{ account_id: 0, debit: '', credit: '', name: '', partner_id: 0 }, { account_id: 0, debit: '', credit: '', name: '', partner_id: 0 }]);
       setFreeFormNote('');
       setMsg('✅ سند آزاد ثبت شد');
@@ -963,11 +1078,47 @@ export default function AccountingPage() {
                 <label className="text-[10px] text-gray-500">تاریخ سند</label>
                 <JalaliDatePicker value={freeFormDate} onChange={setFreeFormDate} placeholder="تاریخ" />
               </div>
+              <div className="min-w-[240px] sm:flex-1">
+                <label className="text-[10px] text-gray-500">حساب / دفتر سند *</label>
+                <select
+                  value={freeFormJournalId}
+                  disabled={freeFormJournalsStatus !== 'success' || freeFormJournals.length === 0}
+                  onChange={(event) => setFreeFormJournalId(Number(event.target.value))}
+                  className="w-full p-2 border border-gray-200 rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  <option value={0}>— انتخاب حساب / دفتر —</option>
+                  {freeFormJournals.map((journal) => (
+                    <option key={journal.id} value={journal.id}>{formatJournalOption(journal)}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex-1">
                 <label className="text-[10px] text-gray-500">شرح سند (narration)</label>
                 <input type="text" value={freeFormNote} onChange={e => setFreeFormNote(e.target.value)} placeholder="مثلاً: مغایرت بانکی مورخ ..." className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
               </div>
             </div>
+
+            {freeFormJournalsStatus === 'loading' && (
+              <div role="status" className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
+                در حال بارگذاری حساب‌ها / دفترهای سند...
+              </div>
+            )}
+            {freeFormJournalsStatus === 'error' && (
+              <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                <span>خطا در بارگذاری حساب‌ها / دفترهای سند{freeFormJournalsError ? `: ${freeFormJournalsError}` : ''}</span>
+                <button type="button" onClick={() => void loadFreeFormJournals()} className="rounded bg-red-100 px-3 py-1 font-bold hover:bg-red-200">
+                  تلاش مجدد
+                </button>
+              </div>
+            )}
+            {freeFormJournalsStatus === 'success' && freeFormJournals.length === 0 && (
+              <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                <span>هیچ حساب / دفتر سند فعالی یافت نشد</span>
+                <button type="button" onClick={() => void loadFreeFormJournals()} className="rounded bg-amber-100 px-3 py-1 font-bold hover:bg-amber-200">
+                  تلاش مجدد
+                </button>
+              </div>
+            )}
 
             {allAccountsStatus === 'loading' && (
               <div role="status" className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
@@ -1044,7 +1195,11 @@ export default function AccountingPage() {
             <div className="flex gap-3 mt-4">
               <button
                 onClick={handleFreeFormSubmit}
-                disabled={saving || allAccountsStatus !== 'success' || allAccounts.length === 0}
+                disabled={saving
+                  || allAccountsStatus !== 'success'
+                  || allAccounts.length === 0
+                  || freeFormJournalsStatus !== 'success'
+                  || freeFormJournals.length === 0}
                 className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-50"
               >
                 {saving ? 'ثبت...' : '✓ ثبت سند'}
