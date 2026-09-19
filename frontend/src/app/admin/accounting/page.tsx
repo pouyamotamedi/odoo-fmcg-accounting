@@ -109,6 +109,20 @@ interface Account {
   account_type: string;
 }
 
+interface FreeFormAccount {
+  id: number;
+  name: string;
+  code: string;
+}
+
+type FreeFormAccountsStatus = 'idle' | 'loading' | 'success' | 'error';
+
+interface AccountRow {
+  id?: unknown;
+  name?: unknown;
+  code?: unknown;
+}
+
 interface AccountEntry {
   id: number;
   name: string;
@@ -186,7 +200,10 @@ export default function AccountingPage() {
     { account_id: 0, debit: '', credit: '', name: '', partner_id: 0 },
     { account_id: 0, debit: '', credit: '', name: '', partner_id: 0 },
   ]);
-  const [allAccounts, setAllAccounts] = useState<{id: number; name: string; code: string}[]>([]);
+  const [allAccounts, setAllAccounts] = useState<FreeFormAccount[]>([]);
+  const [allAccountsStatus, setAllAccountsStatus] = useState<FreeFormAccountsStatus>('idle');
+  const [allAccountsError, setAllAccountsError] = useState('');
+  const allAccountsRequestId = useRef(0);
 
   async function fetchEntries() {
     const requestId = ++fetchRequestId.current;
@@ -289,13 +306,49 @@ export default function AccountingPage() {
   }
 
   async function loadAllAccounts() {
+    const requestId = ++allAccountsRequestId.current;
+    setAllAccountsStatus('loading');
+    setAllAccountsError('');
     try {
-      const data = await searchRead('account.account', [['deprecated', '=', false]], ['name', 'code'], 0, 0, 'code asc');
-      setAllAccounts((data || []).map((a: any) => ({ id: a.id, name: a.name, code: a.code })));
-    } catch {}
+      const result: unknown = await searchRead(
+        'account.account',
+        [['deprecated', '=', false]],
+        ['id', 'name', 'code'],
+        0,
+        0,
+        'code asc',
+      );
+      if (requestId !== allAccountsRequestId.current) return;
+      if (!Array.isArray(result)) throw new Error('پاسخ نامعتبر از سرور');
+      const loadedAccounts = result.flatMap((row: unknown) => {
+        if (!row || typeof row !== 'object') return [];
+        const account = row as AccountRow;
+        const id = Number(account.id);
+        if (!Number.isFinite(id) || id <= 0) return [];
+        return [{
+          id,
+          name: typeof account.name === 'string' ? account.name : '',
+          code: typeof account.code === 'string' ? account.code : '',
+        }];
+      });
+      setAllAccounts(loadedAccounts);
+      setAllAccountsStatus('success');
+    } catch (error: unknown) {
+      if (requestId !== allAccountsRequestId.current) return;
+      setAllAccounts([]);
+      setAllAccountsStatus('error');
+      setAllAccountsError(error instanceof Error ? error.message : 'خطا در بارگذاری حساب‌ها');
+    }
   }
 
-  useEffect(() => { fetchJournals(); fetchPartners(); fetchAccounts(); loadAllAccounts(); }, []);
+  function openFreeForm() {
+    setShowFreeForm(true);
+    if (allAccountsStatus !== 'success' || allAccounts.length === 0) {
+      void loadAllAccounts();
+    }
+  }
+
+  useEffect(() => { fetchJournals(); fetchPartners(); fetchAccounts(); }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -446,6 +499,10 @@ export default function AccountingPage() {
 
   // Free-form journal entry submit
   async function handleFreeFormSubmit() {
+    if (allAccountsStatus !== 'success' || allAccounts.length === 0) {
+      alert('حساب‌ها هنوز بارگذاری نشده‌اند؛ پس از بارگذاری یا تلاش مجدد، دوباره ثبت کنید.');
+      return;
+    }
     if (!freeFormDate) { alert('تاریخ الزامی'); return; }
     const validLines = freeFormLines.filter(l => l.account_id && (Number(l.debit) > 0 || Number(l.credit) > 0));
     if (validLines.length < 2) { alert('حداقل ۲ آرتیکل با مبلغ وارد کنید'); return; }
@@ -555,7 +612,7 @@ export default function AccountingPage() {
           <button onClick={() => openForm('payment')} className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-600 transition">
             + سند پرداخت
           </button>
-          <button onClick={() => setShowFreeForm(true)} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition">
+          <button onClick={openFreeForm} className="bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-600 transition">
             + سند آزاد
           </button>
         </div>
@@ -896,12 +953,12 @@ export default function AccountingPage() {
 
       {/* Free-Form Journal Entry Modal */}
       {showFreeForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-4xl shadow-2xl max-h-[90vh] overflow-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-[min(64rem,calc(100vw-1rem))] shadow-2xl max-h-[calc(100vh-1rem)] overflow-auto">
             <h3 className="text-lg font-bold mb-2">📝 سند آزاد (چند آرتیکلی)</h3>
             <p className="text-xs text-gray-500 mb-4">برای مغایرت بانکی، تسویه پرداخت‌های معلق، اسناد اصلاحی و موارد تجمیعی استفاده کنید.</p>
 
-            <div className="flex gap-4 mb-4">
+            <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <div>
                 <label className="text-[10px] text-gray-500">تاریخ سند</label>
                 <JalaliDatePicker value={freeFormDate} onChange={setFreeFormDate} placeholder="تاریخ" />
@@ -912,38 +969,68 @@ export default function AccountingPage() {
               </div>
             </div>
 
-            <table className="w-full text-xs border rounded-lg overflow-hidden mb-3">
-              <thead className="bg-gray-50"><tr>
-                <th className="text-right p-2">حساب *</th>
-                <th className="text-right p-2 w-32">شرح آرتیکل</th>
-                <th className="text-right p-2 w-28">شخص</th>
-                <th className="text-right p-2 w-28">بدهکار</th>
-                <th className="text-right p-2 w-28">بستانکار</th>
-                <th className="p-2 w-8"></th>
-              </tr></thead>
-              <tbody>
-                {freeFormLines.map((line, idx) => (
-                  <tr key={idx} className="border-t">
-                    <td className="p-1">
-                      <select value={line.account_id} onChange={e => { const next = [...freeFormLines]; next[idx] = {...next[idx], account_id: Number(e.target.value)}; setFreeFormLines(next); }} className="w-full p-1.5 border rounded text-xs">
-                        <option value={0}>— حساب —</option>
-                        {allAccounts.map(a => <option key={a.id} value={a.id}>{a.code} - {a.name}</option>)}
-                      </select>
-                    </td>
-                    <td className="p-1"><input type="text" value={line.name} onChange={e => { const next = [...freeFormLines]; next[idx] = {...next[idx], name: e.target.value}; setFreeFormLines(next); }} className="w-full p-1.5 border rounded text-xs" placeholder="شرح" /></td>
-                    <td className="p-1">
-                      <select value={line.partner_id} onChange={e => { const next = [...freeFormLines]; next[idx] = {...next[idx], partner_id: Number(e.target.value)}; setFreeFormLines(next); }} className="w-full p-1.5 border rounded text-xs">
-                        <option value={0}>—</option>
-                        {partners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
-                    </td>
-                    <td className="p-1"><PriceInput value={line.debit} onChange={v => { const next = [...freeFormLines]; next[idx] = {...next[idx], debit: v}; setFreeFormLines(next); }} placeholder="۰" className="w-full p-1.5 border rounded text-xs" /></td>
-                    <td className="p-1"><PriceInput value={line.credit} onChange={v => { const next = [...freeFormLines]; next[idx] = {...next[idx], credit: v}; setFreeFormLines(next); }} placeholder="۰" className="w-full p-1.5 border rounded text-xs" /></td>
-                    <td className="p-1"><button onClick={() => setFreeFormLines(freeFormLines.filter((_,i) => i !== idx))} className="text-red-400 text-xs">✕</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {allAccountsStatus === 'loading' && (
+              <div role="status" className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
+                در حال بارگذاری حساب‌ها...
+              </div>
+            )}
+            {allAccountsStatus === 'error' && (
+              <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                <span>خطا در بارگذاری حساب‌ها{allAccountsError ? `: ${allAccountsError}` : ''}</span>
+                <button type="button" onClick={() => void loadAllAccounts()} className="rounded bg-red-100 px-3 py-1 font-bold hover:bg-red-200">
+                  تلاش مجدد
+                </button>
+              </div>
+            )}
+            {allAccountsStatus === 'success' && allAccounts.length === 0 && (
+              <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                <span>هیچ حساب فعالی یافت نشد</span>
+                <button type="button" onClick={() => void loadAllAccounts()} className="rounded bg-amber-100 px-3 py-1 font-bold hover:bg-amber-200">
+                  تلاش مجدد
+                </button>
+              </div>
+            )}
+
+            <div className="overflow-x-auto mb-3">
+              <table className="w-full min-w-[760px] text-xs border rounded-lg overflow-hidden">
+                <thead className="bg-gray-50"><tr>
+                  <th className="text-right p-2 min-w-[220px]">حساب *</th>
+                  <th className="text-right p-2 w-32">شرح آرتیکل</th>
+                  <th className="text-right p-2 w-28">شخص</th>
+                  <th className="text-right p-2 w-28">بدهکار</th>
+                  <th className="text-right p-2 w-28">بستانکار</th>
+                  <th className="p-2 w-8"></th>
+                </tr></thead>
+                <tbody>
+                  {freeFormLines.map((line, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="p-1 min-w-[220px]">
+                        <select
+                          aria-label={`حساب آرتیکل ${idx + 1}`}
+                          value={line.account_id}
+                          disabled={allAccountsStatus === 'loading' || allAccounts.length === 0}
+                          onChange={e => { const next = [...freeFormLines]; next[idx] = {...next[idx], account_id: Number(e.target.value)}; setFreeFormLines(next); }}
+                          className="w-full min-w-[220px] p-1.5 border rounded text-xs disabled:bg-gray-100 disabled:text-gray-400"
+                        >
+                          <option value={0}>— حساب —</option>
+                          {allAccounts.map(a => <option key={a.id} value={a.id}>{a.code} - {a.name}</option>)}
+                        </select>
+                      </td>
+                      <td className="p-1"><input type="text" value={line.name} onChange={e => { const next = [...freeFormLines]; next[idx] = {...next[idx], name: e.target.value}; setFreeFormLines(next); }} className="w-full p-1.5 border rounded text-xs" placeholder="شرح" /></td>
+                      <td className="p-1">
+                        <select value={line.partner_id} onChange={e => { const next = [...freeFormLines]; next[idx] = {...next[idx], partner_id: Number(e.target.value)}; setFreeFormLines(next); }} className="w-full p-1.5 border rounded text-xs">
+                          <option value={0}>—</option>
+                          {partners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      </td>
+                      <td className="p-1"><PriceInput value={line.debit} onChange={v => { const next = [...freeFormLines]; next[idx] = {...next[idx], debit: v}; setFreeFormLines(next); }} placeholder="۰" className="w-full p-1.5 border rounded text-xs" /></td>
+                      <td className="p-1"><PriceInput value={line.credit} onChange={v => { const next = [...freeFormLines]; next[idx] = {...next[idx], credit: v}; setFreeFormLines(next); }} placeholder="۰" className="w-full p-1.5 border rounded text-xs" /></td>
+                      <td className="p-1"><button onClick={() => setFreeFormLines(freeFormLines.filter((_,i) => i !== idx))} className="text-red-400 text-xs">✕</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             <button onClick={() => setFreeFormLines([...freeFormLines, { account_id: 0, debit: '', credit: '', name: '', partner_id: 0 }])} className="text-xs text-blue-600 font-bold mb-3">+ افزودن آرتیکل</button>
 
@@ -955,7 +1042,13 @@ export default function AccountingPage() {
             </div>
 
             <div className="flex gap-3 mt-4">
-              <button onClick={handleFreeFormSubmit} disabled={saving} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-50">{saving ? 'ثبت...' : '✓ ثبت سند'}</button>
+              <button
+                onClick={handleFreeFormSubmit}
+                disabled={saving || allAccountsStatus !== 'success' || allAccounts.length === 0}
+                className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold disabled:opacity-50"
+              >
+                {saving ? 'ثبت...' : '✓ ثبت سند'}
+              </button>
               <button onClick={() => setShowFreeForm(false)} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold">انصراف</button>
             </div>
 
