@@ -24,6 +24,7 @@ const menuItems = [
   { href: '/admin/discounts', label: 'تخفیفات', icon: '🏷️', key: 'discounts' },
   { href: '/admin/stock-count', label: 'انبارگردانی', icon: '📋', key: 'stock-count' },
   { href: '/admin/fiscal-year', label: 'سال مالی', icon: '📅', key: 'fiscal-year' },
+  { href: '/admin/incentives', label: 'پورسانت و هابلیوم', icon: '🪙', key: 'incentives' },
   { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️', key: 'settings' },
 ];
 

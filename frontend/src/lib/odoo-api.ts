@@ -2049,3 +2049,40 @@ export async function voidInvoice(invoiceId: number, journalId?: number) {
 
   return refundId;
 }
+
+// ============ Sales Incentive & Hubbleium ============
+
+export async function getIncentiveConfiguration() {
+  return callMethod('fmcg.incentive.policy', 'get_configuration', []);
+}
+
+export async function saveIncentiveConfiguration(values: Record<string, any>) {
+  return callMethod('fmcg.incentive.policy', 'save_configuration', [values]);
+}
+
+export async function getCurrentIncentiveDashboard() {
+  return callMethod('fmcg.incentive.period', 'current_dashboard', []);
+}
+
+export async function recomputeCurrentIncentivePeriod() {
+  const period = await callMethod('fmcg.incentive.period', 'get_or_create_for_date', []);
+  return callMethod('fmcg.incentive.period', 'recompute', [[period]]);
+}
+
+export async function swapIncentiveShifts(firstShiftId: number, secondShiftId: number) {
+  return callMethod('fmcg.incentive.shift', 'swap_sellers', [firstShiftId, secondShiftId]);
+}
+
+export async function createIncentiveAdjustment(values: {
+  seller_id: number;
+  period_id: number;
+  adjustment_type: 'commission' | 'hubbleium';
+  amount: number;
+  reason: string;
+}) {
+  return create('fmcg.incentive.adjustment', values);
+}
+
+export async function requestHubbleiumReward(rewardId: number) {
+  return create('fmcg.reward.redemption', { reward_id: rewardId });
+}

@@ -57,6 +57,27 @@ export function todayJalali(): string {
   return toJalali(new Date());
 }
 
+export function formatTehranDateTime(value: string | Date | false | undefined): string {
+  if (!value) return '—';
+  const date = value instanceof Date
+    ? value
+    : new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('fa-IR-u-ca-persian', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran',
+  });
+}
+
+export function formatTehranJalaliDate(value: string | Date | false | undefined): string {
+  if (!value) return '—';
+  const date = value instanceof Date ? value : new Date(`${value}T12:00:00+03:30`);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('fa-IR-u-ca-persian', {
+    year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Tehran',
+  });
+}
+
 /**
  * Tailwind class merge utility
  */

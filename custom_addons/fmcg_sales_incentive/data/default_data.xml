@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="default_incentive_policy" model="fmcg.incentive.policy">
+        <field name="name">سیاست پیش‌فرض هابل</field>
+        <field name="monthly_target">650000000</field>
+        <field name="morning_start">8.0</field>
+        <field name="morning_end">15.0</field>
+        <field name="evening_start">15.0</field>
+        <field name="evening_end">23.9833</field>
+        <field name="active">True</field>
+    </record>
+</odoo>

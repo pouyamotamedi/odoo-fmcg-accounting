@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="group_incentive_manager" model="res.groups">
+        <field name="name">Sales Incentive Manager</field>
+        <field name="category_id" ref="base.module_category_sales_sales"/>
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+
+    <record id="shift_seller_rule" model="ir.rule">
+        <field name="name">Seller can see own shifts</field>
+        <field name="model_id" ref="model_fmcg_incentive_shift"/>
+        <field name="domain_force">[('seller_id', '=', user.id)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    <record id="shift_manager_rule" model="ir.rule">
+        <field name="name">Manager can see all shifts</field>
+        <field name="model_id" ref="model_fmcg_incentive_shift"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager'))]"/>
+    </record>
+
+    <record id="wallet_seller_rule" model="ir.rule">
+        <field name="name">Seller can see own wallet</field>
+        <field name="model_id" ref="model_fmcg_hubbleium_wallet"/>
+        <field name="domain_force">[('seller_id', '=', user.id)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    <record id="wallet_manager_rule" model="ir.rule">
+        <field name="name">Manager can see all wallets</field>
+        <field name="model_id" ref="model_fmcg_hubbleium_wallet"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager'))]"/>
+    </record>
+
+    <record id="ledger_seller_rule" model="ir.rule">
+        <field name="name">Seller can see own Hubbleium ledger</field>
+        <field name="model_id" ref="model_fmcg_hubbleium_ledger"/>
+        <field name="domain_force">[('seller_id', '=', user.id)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    <record id="ledger_manager_rule" model="ir.rule">
+        <field name="name">Manager can see all Hubbleium ledger</field>
+        <field name="model_id" ref="model_fmcg_hubbleium_ledger"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager'))]"/>
+    </record>
+
+    <record id="redemption_seller_rule" model="ir.rule">
+        <field name="name">Seller can see own reward requests</field>
+        <field name="model_id" ref="model_fmcg_reward_redemption"/>
+        <field name="domain_force">[('seller_id', '=', user.id)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+    <record id="redemption_manager_rule" model="ir.rule">
+        <field name="name">Manager can see all reward requests</field>
+        <field name="model_id" ref="model_fmcg_reward_redemption"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager'))]"/>
+    </record>
+</odoo>

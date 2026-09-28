@@ -321,6 +321,7 @@ function SellerMenuAccess() {
     { key: 'discounts', label: 'تخفیفات' },
     { key: 'stock-count', label: 'انبارگردانی' },
     { key: 'fiscal-year', label: 'سال مالی' },
+    { key: 'incentives', label: 'پورسانت و هابلیوم' },
     { key: 'settings', label: 'تنظیمات' },
   ];
 

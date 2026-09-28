@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_incentive_policy_form" model="ir.ui.view">
+        <field name="name">fmcg.incentive.policy.form</field>
+        <field name="model">fmcg.incentive.policy</field>
+        <field name="arch" type="xml">
+            <form string="سیاست پورسانت و هابلیوم">
+                <sheet>
+                    <group>
+                        <field name="name"/><field name="active"/><field name="company_id" groups="base.group_multi_company"/>
+                        <field name="monthly_target"/>
+                    </group>
+                    <notebook>
+                        <page string="شیفت‌ها">
+                            <group><field name="morning_start" widget="float_time"/><field name="morning_end" widget="float_time"/><field name="evening_start" widget="float_time"/><field name="evening_end" widget="float_time"/></group>
+                            <field name="weight_ids"><list editable="bottom"><field name="weekday"/><field name="shift_type"/><field name="weight"/></list></field>
+                        </page>
+                        <page string="پلکان پورسانت">
+                            <field name="tier_ids"><list editable="bottom"><field name="sequence"/><field name="from_percent"/><field name="to_percent"/><field name="rate"/></list></field>
+                        </page>
+                        <page string="هابلیوم">
+                            <group><field name="hubbleium_90"/><field name="hubbleium_100"/><field name="hubbleium_110"/><field name="hubbleium_team_day"/><field name="hubbleium_personal_best"/><field name="hubbleium_consistency"/><field name="consistency_threshold"/></group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_incentive_policy" model="ir.actions.act_window"><field name="name">تنظیمات انگیزشی</field><field name="res_model">fmcg.incentive.policy</field><field name="view_mode">form</field></record>
+
+    <record id="view_incentive_shift_list" model="ir.ui.view"><field name="name">fmcg.incentive.shift.list</field><field name="model">fmcg.incentive.shift</field><field name="arch" type="xml"><list editable="bottom"><field name="shift_date"/><field name="shift_type"/><field name="seller_id"/><field name="weight"/><field name="target_amount"/><field name="actual_sales"/><field name="achievement_percent"/><field name="hubbleium_awarded"/><field name="note"/></list></field></record>
+    <record id="action_incentive_shift" model="ir.actions.act_window"><field name="name">برنامه شیفت‌ها</field><field name="res_model">fmcg.incentive.shift</field><field name="view_mode">list,form</field></record>
+
+    <record id="view_incentive_period_list" model="ir.ui.view"><field name="name">fmcg.incentive.period.list</field><field name="model">fmcg.incentive.period</field><field name="arch" type="xml"><list><field name="name"/><field name="date_from"/><field name="date_to"/><field name="target_amount"/><field name="total_sales"/><field name="excess_percent"/><field name="commission_pool"/><field name="manual_commission_total"/><field name="state"/></list></field></record>
+    <record id="view_incentive_period_form" model="ir.ui.view"><field name="name">fmcg.incentive.period.form</field><field name="model">fmcg.incentive.period</field><field name="arch" type="xml"><form><header><button name="recompute" type="object" string="محاسبه مجدد" class="btn-primary" invisible="state != 'open'"/><button name="action_approve" type="object" string="تأیید دوره" invisible="state != 'open'"/><field name="state" widget="statusbar"/></header><sheet><group><field name="name"/><field name="date_from"/><field name="date_to"/><field name="target_amount"/><field name="total_sales"/><field name="excess_percent"/><field name="gross_profit_above_target"/><field name="commission_pool"/><field name="manual_commission_total"/></group><field name="result_ids"><list><field name="seller_id"/><field name="personal_target"/><field name="actual_sales"/><field name="achievement_percent"/><field name="eligible"/><field name="commission_amount"/><field name="manual_commission"/><field name="final_commission"/></list></field></sheet></form></field></record>
+    <record id="action_incentive_period" model="ir.actions.act_window"><field name="name">محاسبات پورسانت</field><field name="res_model">fmcg.incentive.period</field><field name="view_mode">list,form</field></record>
+
+    <record id="view_incentive_adjustment_list" model="ir.ui.view"><field name="name">fmcg.incentive.adjustment.list</field><field name="model">fmcg.incentive.adjustment</field><field name="arch" type="xml"><list editable="bottom"><field name="seller_id"/><field name="period_id"/><field name="adjustment_type"/><field name="amount"/><field name="reason"/><field name="created_by"/></list></field></record>
+    <record id="action_incentive_adjustment" model="ir.actions.act_window"><field name="name">تعدیلات دستی</field><field name="res_model">fmcg.incentive.adjustment</field><field name="view_mode">list</field></record>
+
+    <record id="view_reward_list" model="ir.ui.view"><field name="name">fmcg.reward.list</field><field name="model">fmcg.reward</field><field name="arch" type="xml"><list editable="bottom"><field name="name"/><field name="cost"/><field name="stock_qty"/><field name="unlimited_stock"/><field name="active"/></list></field></record>
+    <record id="action_reward" model="ir.actions.act_window"><field name="name">جوایز هابلیوم</field><field name="res_model">fmcg.reward</field><field name="view_mode">list,form</field></record>
+
+    <record id="view_redemption_list" model="ir.ui.view"><field name="name">fmcg.reward.redemption.list</field><field name="model">fmcg.reward.redemption</field><field name="arch" type="xml"><list><field name="seller_id"/><field name="reward_id"/><field name="cost"/><field name="state"/><field name="note"/><button name="action_approve" type="object" string="تأیید" invisible="state != 'pending'"/><button name="action_reject" type="object" string="رد" invisible="state != 'pending'"/></list></field></record>
+    <record id="action_redemption" model="ir.actions.act_window"><field name="name">درخواست جوایز</field><field name="res_model">fmcg.reward.redemption</field><field name="view_mode">list</field></record>
+
+    <menuitem id="menu_incentive_root" name="پورسانت و هابلیوم" sequence="60" groups="fmcg_sales_incentive.group_incentive_manager"/>
+    <menuitem id="menu_incentive_policy" name="تنظیمات" parent="menu_incentive_root" action="action_incentive_policy" sequence="10"/>
+    <menuitem id="menu_incentive_shift" name="شیفت‌ها" parent="menu_incentive_root" action="action_incentive_shift" sequence="20"/>
+    <menuitem id="menu_incentive_period" name="پورسانت‌ها" parent="menu_incentive_root" action="action_incentive_period" sequence="30"/>
+    <menuitem id="menu_incentive_adjustment" name="تعدیلات دستی" parent="menu_incentive_root" action="action_incentive_adjustment" sequence="40"/>
+    <menuitem id="menu_reward" name="جوایز" parent="menu_incentive_root" action="action_reward" sequence="50"/>
+    <menuitem id="menu_redemption" name="درخواست جوایز" parent="menu_incentive_root" action="action_redemption" sequence="60"/>
+</odoo>
