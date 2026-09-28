@@ -127,7 +127,10 @@ class FmcgIncentivePolicy(models.Model):
 
     @api.model
     def save_configuration(self, values):
-        if not self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager'):
+        if not (
+            self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
+            or self.env.user.has_group('base.group_system')
+        ):
             raise UserError(_('Only incentive managers can change these settings.'))
         policy = self.search([('company_id', '=', self.env.company.id), ('active', '=', True)], limit=1)
         if not policy:
@@ -270,7 +273,10 @@ class FmcgIncentiveShift(models.Model):
 
     @api.model
     def swap_sellers(self, first_shift_id, second_shift_id):
-        if not self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager'):
+        if not (
+            self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
+            or self.env.user.has_group('base.group_system')
+        ):
             raise UserError(_('Only incentive managers can swap shifts.'))
         first = self.browse(first_shift_id).exists()
         second = self.browse(second_shift_id).exists()
@@ -380,19 +386,74 @@ class FmcgIncentivePeriod(models.Model):
 
     @api.model
     def current_dashboard(self):
-        period = self.get_or_create_for_date()
+        """Return the current user's dashboard through one safe RPC endpoint.
+
+        Bootstrap and recomputation are intentionally performed in a narrowly
+        scoped sudo environment because ordinary sellers only have read access.
+        The returned payload is still restricted to the requesting user.
+        """
+        requesting_user = self.env.user
+        sudo_period_model = self.sudo()
+        period = sudo_period_model.get_or_create_for_date()
         period.recompute()
-        seller_result = period.result_ids.filtered(lambda row: row.seller_id == self.env.user)[:1]
-        wallet = self.env['fmcg.hubbleium.wallet'].get_wallet(self.env.user)
-        shifts = self.env['fmcg.incentive.shift'].search([
-            ('seller_id', '=', self.env.user.id), ('shift_date', '>=', period.date_from), ('shift_date', '<=', period.date_to)
+        seller_result = period.result_ids.filtered(lambda row: row.seller_id.id == requesting_user.id)[:1]
+        wallet = self.env['fmcg.hubbleium.wallet'].sudo().get_wallet(requesting_user)
+        shifts = self.env['fmcg.incentive.shift'].sudo().search([
+            ('seller_id', '=', requesting_user.id), ('shift_date', '>=', period.date_from), ('shift_date', '<=', period.date_to)
         ], order='shift_date, shift_type')
+        rewards = self.env['fmcg.reward'].sudo().search([
+            ('active', '=', True), '|', ('stock_qty', '>', 0), ('unlimited_stock', '=', True)
+        ])
         return {
             'period': period.read(['name', 'date_from', 'date_to', 'target_amount', 'total_sales', 'excess_percent', 'commission_pool', 'state'])[0],
             'result': seller_result.read(['personal_target', 'actual_sales', 'achievement_percent', 'eligible', 'commission_amount', 'manual_commission', 'final_commission'])[0] if seller_result else False,
             'wallet': wallet.read(['balance'])[0],
             'shifts': shifts.read(['shift_date', 'shift_type', 'target_amount', 'actual_sales', 'achievement_percent', 'hubbleium_awarded']),
-            'rewards': self.env['fmcg.reward'].search([('active', '=', True), '|', ('stock_qty', '>', 0), ('unlimited_stock', '=', True)]).read(['name', 'cost', 'stock_qty', 'unlimited_stock']),
+            'rewards': rewards.read(['name', 'cost', 'stock_qty', 'unlimited_stock']),
+            'capabilities': {
+                'is_manager': requesting_user.has_group('fmcg_sales_incentive.group_incentive_manager')
+                or requesting_user.has_group('base.group_system'),
+                'is_seller': bool(requesting_user.fmcg_is_seller),
+            },
+        }
+
+    @api.model
+    def manager_bootstrap(self):
+        """Return all data required by the management screen."""
+        if not (
+            self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
+            or self.env.user.has_group('base.group_system')
+        ):
+            raise UserError(_('Only incentive managers can access management data.'))
+        sudo_period_model = self.sudo()
+        period = sudo_period_model.get_or_create_for_date()
+        period.recompute()
+        policy = period.policy_id
+        policy_data = policy.read([
+            'name', 'monthly_target', 'morning_start', 'morning_end', 'evening_start', 'evening_end',
+            'hubbleium_90', 'hubbleium_100', 'hubbleium_110', 'hubbleium_team_day',
+            'hubbleium_personal_best', 'hubbleium_consistency', 'consistency_threshold',
+        ])[0]
+        policy_data['weights'] = policy.weight_ids.sorted(
+            lambda row: (int(row.weekday), row.shift_type)
+        ).read(['weekday', 'shift_type', 'weight'])
+        policy_data['tiers'] = policy.tier_ids.sorted('sequence').read([
+            'from_percent', 'to_percent', 'rate', 'sequence'
+        ])
+        sellers = self.env['res.users'].sudo().search([
+            ('active', '=', True), ('share', '=', False), ('fmcg_is_seller', '=', True)
+        ], order='name')
+        shifts = self.env['fmcg.incentive.shift'].sudo().search([
+            ('company_id', '=', period.company_id.id),
+            ('shift_date', '>=', period.date_from), ('shift_date', '<=', period.date_to),
+        ], order='shift_date, shift_type')
+        rewards = self.env['fmcg.reward'].sudo().search([], order='cost, name')
+        return {
+            'period': period.read(['name', 'date_from', 'date_to', 'target_amount', 'total_sales', 'commission_pool', 'state'])[0],
+            'config': policy_data,
+            'sellers': sellers.read(['name']),
+            'shifts': shifts.read(['shift_date', 'shift_type', 'seller_id', 'target_amount', 'actual_sales', 'achievement_percent']),
+            'rewards': rewards.read(['name', 'cost', 'stock_qty', 'unlimited_stock', 'active']),
         }
 
     def _sales_for_period(self):
@@ -553,7 +614,10 @@ class FmcgIncentiveAdjustment(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
-        if not self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager'):
+        if not (
+            self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
+            or self.env.user.has_group('base.group_system')
+        ):
             raise UserError(_('Only incentive managers can create adjustments.'))
         records = super().create(vals_list)
         for record in records:

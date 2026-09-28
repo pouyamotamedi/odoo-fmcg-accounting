@@ -295,9 +295,10 @@ export default function AdminDashboard() {
   const router = useRouter();
   const { role, isAdmin, name: userName } = useAuthStore();
 
-  // Sellers get a different, motivational dashboard
-  if (role === 'seller' && !isAdmin) {
-    return <SellerDashboard userName={userName} />;
+  // The seller's home is the commission and Hubbleium dashboard.
+  if (role === 'seller') {
+    router.replace('/admin/incentives');
+    return <div className="py-12 text-center text-gray-400">انتقال به داشبورد فروشنده...</div>;
   }
 
   const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [] });

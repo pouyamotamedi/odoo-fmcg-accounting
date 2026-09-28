@@ -2,9 +2,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
 import { useEffect, useState } from 'react';
+import JalaliDatePicker from '@/components/JalaliDatePicker';
 import {
-  create, getCurrentIncentiveDashboard, getIncentiveConfiguration,
-  requestHubbleiumReward, saveIncentiveConfiguration, searchRead, swapIncentiveShifts,
+  create, getCurrentIncentiveDashboard, getIncentiveManagerData,
+  requestHubbleiumReward, saveIncentiveConfiguration, swapIncentiveShifts,
 } from '@/lib/odoo-api';
 import { formatPrice, formatTehranJalaliDate, toPersianDigits } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
@@ -15,111 +16,85 @@ const DAYS = [
   { value: '2', label: 'چهارشنبه' }, { value: '3', label: 'پنجشنبه' },
   { value: '4', label: 'جمعه' },
 ];
-
 type Tab = 'dashboard' | 'settings' | 'shifts' | 'adjustments' | 'rewards';
 
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : 'خطای ناشناخته';
+}
+
 export default function IncentivesPage() {
-  const { isAdmin } = useAuthStore();
+  const authIsAdmin = useAuthStore(state => state.isAdmin);
   const [tab, setTab] = useState<Tab>('dashboard');
   const [dashboard, setDashboard] = useState<any>(null);
-  const [config, setConfig] = useState<any>(null);
+  const [managerData, setManagerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
   async function load() {
-    setLoading(true);
+    setLoading(true); setError('');
     try {
       const dash = await getCurrentIncentiveDashboard();
       setDashboard(dash);
-      if (isAdmin) setConfig(await getIncentiveConfiguration());
-    } catch (error: any) {
-      setMsg(error?.message || 'خطا در دریافت اطلاعات؛ ماژول Odoo را نصب یا ارتقا دهید.');
-    }
-    setLoading(false);
+      if (dash?.capabilities?.is_manager || authIsAdmin) {
+        try { setManagerData(await getIncentiveManagerData()); }
+        catch (managerError) { setError(`اطلاعات مدیریتی بارگذاری نشد: ${errorText(managerError)}`); }
+      }
+    } catch (loadError) {
+      setDashboard(null);
+      setError(`اتصال به ماژول پورسانت برقرار نشد: ${errorText(loadError)}`);
+    } finally { setLoading(false); }
   }
 
-  useEffect(() => { void load(); }, [isAdmin]);
-
-  if (loading) return <div className="py-16 text-center text-gray-400">در حال بارگذاری...</div>;
-
-  const tabs: { key: Tab; label: string; admin?: boolean }[] = [
-    { key: 'dashboard', label: 'داشبورد من' },
-    { key: 'settings', label: 'تنظیمات', admin: true },
-    { key: 'shifts', label: 'برنامه شیفت', admin: true },
-    { key: 'adjustments', label: 'تعدیلات دستی', admin: true },
-    { key: 'rewards', label: 'جوایز', admin: true },
+  useEffect(() => { void load(); }, [authIsAdmin]);
+  const isManager = Boolean(dashboard?.capabilities?.is_manager || managerData);
+  const tabs = [
+    { key: 'dashboard' as Tab, label: 'داشبورد من' },
+    { key: 'settings' as Tab, label: 'تنظیمات', manager: true },
+    { key: 'shifts' as Tab, label: 'برنامه شیفت', manager: true },
+    { key: 'adjustments' as Tab, label: 'تعدیلات دستی', manager: true },
+    { key: 'rewards' as Tab, label: 'جوایز', manager: true },
   ];
 
+  if (loading) return <div className="py-16 text-center text-gray-500">در حال دریافت اطلاعات پورسانت...</div>;
   return <div>
-    <div className="flex items-center justify-between mb-5">
-      <div><h1 className="text-2xl font-bold text-slate-800">🪙 پورسانت و هابلیوم</h1><p className="text-sm text-gray-500">تمام تاریخ‌ها شمسی و زمان‌ها براساس تهران هستند.</p></div>
-      {msg && <span className="text-xs bg-indigo-50 text-indigo-700 rounded-lg px-3 py-2">{msg}</span>}
+    <div className="flex items-center justify-between mb-5 gap-3">
+      <div><h1 className="text-2xl font-bold text-slate-800">🪙 پورسانت و هابلیوم</h1><p className="text-sm text-gray-500">تاریخ‌ها شمسی و محاسبات زمانی براساس تهران است.</p></div>
+      <button onClick={() => void load()} className="px-3 py-2 rounded-lg bg-white border text-sm">بازخوانی</button>
     </div>
-    <div className="flex gap-2 mb-5 overflow-auto">
-      {tabs.filter(item => !item.admin || isAdmin).map(item => <button key={item.key} onClick={() => setTab(item.key)} className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap ${tab === item.key ? 'bg-indigo-600 text-white' : 'bg-white border text-gray-600'}`}>{item.label}</button>)}
-    </div>
-    {tab === 'dashboard' && <Dashboard data={dashboard} reload={load} />}
-    {tab === 'settings' && isAdmin && config && <Settings config={config} onSaved={async text => { setMsg(text); await load(); }} />}
-    {tab === 'shifts' && isAdmin && <Shifts period={dashboard?.period} reload={load} />}
-    {tab === 'adjustments' && isAdmin && <Adjustments period={dashboard?.period} reload={load} />}
-    {tab === 'rewards' && isAdmin && <Rewards reload={load} />}
+    {error && <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm"><b>خطا:</b> {error}<div className="mt-1 text-xs">اگر پیام 404 یا Model not found است، اسکریپت به‌روزرسانی سرور را دوباره اجرا کنید تا ماژول Odoo نصب/ارتقا شود.</div></div>}
+    {message && <div className="mb-4 bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 text-sm">{message}</div>}
+    <div className="flex gap-2 mb-5 overflow-auto">{tabs.filter(item => !item.manager || isManager).map(item => <button key={item.key} onClick={() => setTab(item.key)} className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap ${tab === item.key ? 'bg-indigo-600 text-white' : 'bg-white border text-gray-600'}`}>{item.label}</button>)}</div>
+    {tab === 'dashboard' && <Dashboard data={dashboard} reload={load} report={setError} />}
+    {tab === 'settings' && isManager && (managerData?.config ? <Settings initial={managerData.config} saved={async () => { setMessage('تنظیمات ذخیره و محاسبات به‌روز شد.'); await load(); }} report={setError} /> : <Empty text="تنظیمات مدیریتی بارگذاری نشده است." />)}
+    {tab === 'shifts' && isManager && <Shifts data={managerData} reload={load} report={setError} />}
+    {tab === 'adjustments' && isManager && <Adjustments data={managerData} reload={load} report={setError} />}
+    {tab === 'rewards' && isManager && <Rewards data={managerData} reload={load} report={setError} />}
   </div>;
 }
 
-function Dashboard({ data, reload }: { data: any; reload: () => Promise<void> }) {
-  if (!data) return <div className="bg-white rounded-xl p-8 text-center">اطلاعاتی وجود ندارد.</div>;
-  const period = data.period || {};
-  const result = data.result || {};
-  const progress = period.target_amount ? Math.min(period.total_sales / period.target_amount * 100, 100) : 0;
+function Empty({ text }: { text: string }) { return <div className="bg-white border rounded-xl p-8 text-center text-gray-500">{text}</div>; }
+function Card({ label, value }: { label: string; value: string }) { return <div className="bg-white rounded-xl border p-4"><div className="text-xl font-bold">{value}</div><div className="text-xs text-gray-500 mt-1">{label}</div></div>; }
+
+function Dashboard({ data, reload, report }: { data: any; reload: () => Promise<void>; report: (value: string) => void }) {
+  if (!data) return <Empty text="داشبورد در دسترس نیست؛ خطای بالای صفحه را بررسی کنید." />;
+  const period = data.period || {}; const result = data.result || {};
+  const percent = period.target_amount ? period.total_sales / period.target_amount * 100 : 0;
   return <div className="space-y-5">
-    <div className="grid sm:grid-cols-4 gap-3">
-      <Card label="هدف تیم" value={`${formatPrice(period.target_amount)} تومان`} />
-      <Card label="فروش تیم" value={`${formatPrice(period.total_sales)} تومان`} />
-      <Card label="پورسانت تخمینی من" value={`${formatPrice(result.final_commission || 0)} تومان`} />
-      <Card label="موجودی هابلیوم" value={`${formatPrice(data.wallet?.balance || 0)} H`} />
-    </div>
-    <div className="bg-white rounded-xl border p-5">
-      <div className="flex justify-between text-sm mb-2"><span>پیشرفت هدف تیم در ماه {toPersianDigits(period.name || '')}</span><span>{toPersianDigits((period.total_sales / Math.max(period.target_amount || 1, 1) * 100).toFixed(1))}٪</span></div>
-      <div className="h-3 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500" style={{ width: `${progress}%` }} /></div>
-      {result && <div className="grid sm:grid-cols-3 gap-3 mt-5 text-sm"><div>هدف شخصی: <b>{formatPrice(result.personal_target || 0)}</b></div><div>فروش شیفت‌ها: <b>{formatPrice(result.actual_sales || 0)}</b></div><div>تحقق: <b>{toPersianDigits((result.achievement_percent || 0).toFixed(1))}٪</b></div></div>}
-    </div>
-    <div className="bg-white rounded-xl border overflow-hidden">
-      <div className="font-bold p-4 border-b">شیفت‌های من</div>
-      <table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-right">تاریخ</th><th>شیفت</th><th>هدف</th><th>فروش</th><th>تحقق</th><th>هابلیوم</th></tr></thead><tbody>{(data.shifts || []).map((shift: any) => <tr key={shift.id} className="border-t"><td className="p-3">{formatTehranJalaliDate(shift.shift_date)}</td><td>{shift.shift_type === 'morning' ? 'صبح' : 'عصر'}</td><td>{formatPrice(shift.target_amount)}</td><td>{formatPrice(shift.actual_sales)}</td><td>{toPersianDigits((shift.achievement_percent || 0).toFixed(1))}٪</td><td>{formatPrice(shift.hubbleium_awarded)} H</td></tr>)}</tbody></table>
-    </div>
-    <div className="bg-white rounded-xl border p-5"><div className="font-bold mb-3">فروشگاه جایزه</div><div className="grid sm:grid-cols-3 gap-3">{(data.rewards || []).map((reward: any) => <div key={reward.id} className="border rounded-xl p-4"><div className="font-bold">{reward.name}</div><div className="text-indigo-600 my-2">{formatPrice(reward.cost)} H</div><button onClick={async () => { await requestHubbleiumReward(reward.id); alert('درخواست جایزه ثبت شد'); await reload(); }} className="w-full bg-indigo-600 text-white rounded-lg py-2 text-xs">درخواست جایزه</button></div>)}</div></div>
+    <div className="grid sm:grid-cols-4 gap-3"><Card label="هدف تیم" value={`${formatPrice(period.target_amount)} تومان`} /><Card label="فروش تیم" value={`${formatPrice(period.total_sales)} تومان`} /><Card label="پورسانت تخمینی من" value={`${formatPrice(result.final_commission || 0)} تومان`} /><Card label="موجودی هابلیوم" value={`${formatPrice(data.wallet?.balance || 0)} H`} /></div>
+    <div className="bg-white rounded-xl border p-5"><div className="flex justify-between text-sm mb-2"><span>پیشرفت ماه {toPersianDigits(period.name || '')}</span><b>{toPersianDigits(percent.toFixed(1))}٪</b></div><div className="h-3 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500" style={{width:`${Math.min(percent,100)}%`}} /></div><div className="grid sm:grid-cols-3 gap-3 mt-5 text-sm"><div>هدف شخصی: <b>{formatPrice(result.personal_target || 0)}</b></div><div>فروش شیفت‌ها: <b>{formatPrice(result.actual_sales || 0)}</b></div><div>تحقق: <b>{toPersianDigits((result.achievement_percent || 0).toFixed(1))}٪</b></div></div></div>
+    <div className="bg-white rounded-xl border overflow-auto"><div className="font-bold p-4 border-b">شیفت‌های من</div>{data.shifts?.length ? <table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3">تاریخ</th><th>شیفت</th><th>هدف</th><th>فروش</th><th>تحقق</th><th>H</th></tr></thead><tbody>{data.shifts.map((s:any)=><tr key={s.id} className="border-t text-center"><td className="p-3">{formatTehranJalaliDate(s.shift_date)}</td><td>{s.shift_type==='morning'?'صبح':'عصر'}</td><td>{formatPrice(s.target_amount)}</td><td>{formatPrice(s.actual_sales)}</td><td>{toPersianDigits((s.achievement_percent||0).toFixed(1))}٪</td><td>{formatPrice(s.hubbleium_awarded)}</td></tr>)}</tbody></table>:<div className="p-6 text-center text-gray-400">هنوز شیفتی برای شما تعریف نشده است.</div>}</div>
+    <div className="bg-white rounded-xl border p-5"><div className="font-bold mb-3">فروشگاه جایزه</div><div className="grid sm:grid-cols-3 gap-3">{(data.rewards||[]).map((r:any)=><div key={r.id} className="border rounded-xl p-4"><b>{r.name}</b><div className="text-indigo-600 my-2">{formatPrice(r.cost)} H</div><Action label="درخواست جایزه" onClick={async()=>{try{await requestHubbleiumReward(r.id);await reload();}catch(e){report(errorText(e));}}}/></div>)}</div></div>
   </div>;
 }
 
-function Card({ label, value }: { label: string; value: string }) { return <div className="bg-white rounded-xl border p-4"><div className="text-xl font-bold text-slate-800">{value}</div><div className="text-xs text-gray-500 mt-1">{label}</div></div>; }
+function Action({label,onClick,disabled=false}:{label:string;onClick:()=>Promise<void>;disabled?:boolean}) { const [busy,setBusy]=useState(false);return <button disabled={disabled||busy} onClick={async()=>{setBusy(true);try{await onClick();}finally{setBusy(false);}}} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-40">{busy?'در حال انجام...':label}</button>; }
+function Field({label,value,onChange,step='1'}:{label:string;value:any;onChange:(v:string)=>void;step?:string}) {return <label className="text-xs text-gray-500"><span className="block mb-1">{label}</span><input type="number" step={step} value={value??''} onChange={e=>onChange(e.target.value)} className="w-full border rounded-lg p-2 text-slate-800"/></label>;}
 
-function Settings({ config: initial, onSaved }: { config: any; onSaved: (text: string) => Promise<void> }) {
-  const [config, setConfig] = useState<any>(structuredClone(initial));
-  const [saving, setSaving] = useState(false);
-  function updateWeight(day: string, shift: string, value: string) {
-    setConfig((current: any) => ({ ...current, weights: current.weights.map((row: any) => String(row.weekday) === day && row.shift_type === shift ? { ...row, weight: Number(value) } : row) }));
-  }
-  function weight(day: string, shift: string) { return config.weights.find((row: any) => String(row.weekday) === day && row.shift_type === shift)?.weight ?? 1; }
-  return <div className="space-y-5">
-    <div className="bg-white rounded-xl border p-5 grid sm:grid-cols-3 gap-4"><Field label="هدف ماهانه (تومان)" value={config.monthly_target} onChange={(v) => setConfig({ ...config, monthly_target: Number(v) })}/><Field label="شروع صبح" value={config.morning_start} step="0.25" onChange={v => setConfig({ ...config, morning_start: Number(v) })}/><Field label="پایان صبح" value={config.morning_end} step="0.25" onChange={v => setConfig({ ...config, morning_end: Number(v) })}/><Field label="شروع عصر" value={config.evening_start} step="0.25" onChange={v => setConfig({ ...config, evening_start: Number(v) })}/><Field label="پایان عصر" value={config.evening_end} step="0.25" onChange={v => setConfig({ ...config, evening_end: Number(v) })}/></div>
-    <div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 font-bold border-b">وزن شیفت‌ها</div><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3">روز</th><th>صبح</th><th>عصر</th></tr></thead><tbody>{DAYS.map(day => <tr key={day.value} className="border-t"><td className="p-3">{day.label}</td>{['morning','evening'].map(shift => <td key={shift} className="p-2"><input className="w-28 border rounded p-2" type="number" step="0.01" value={weight(day.value, shift)} onChange={e => updateWeight(day.value, shift, e.target.value)}/></td>)}</tr>)}</tbody></table></div>
-    <div className="bg-white rounded-xl border p-5"><div className="font-bold mb-3">پلکان پورسانت از سود ناخالص فروش مازاد</div>{config.tiers.map((tier: any, index: number) => <div key={index} className="grid grid-cols-3 gap-3 mb-2"><Field label="از درصد" value={tier.from_percent} onChange={v => { const tiers=[...config.tiers]; tiers[index]={...tier,from_percent:Number(v)}; setConfig({...config,tiers}); }}/><Field label="تا درصد (صفر=بی‌نهایت)" value={tier.to_percent} onChange={v => { const tiers=[...config.tiers]; tiers[index]={...tier,to_percent:Number(v)}; setConfig({...config,tiers}); }}/><Field label="درصد پورسانت" value={tier.rate} onChange={v => { const tiers=[...config.tiers]; tiers[index]={...tier,rate:Number(v)}; setConfig({...config,tiers}); }}/></div>)}</div>
-    <div className="bg-white rounded-xl border p-5"><div className="font-bold mb-3">امتیازهای هابلیوم</div><div className="grid sm:grid-cols-3 gap-3"><Field label="تحقق ۹۰٪" value={config.hubbleium_90} onChange={v=>setConfig({...config,hubbleium_90:Number(v)})}/><Field label="تحقق ۱۰۰٪" value={config.hubbleium_100} onChange={v=>setConfig({...config,hubbleium_100:Number(v)})}/><Field label="تحقق ۱۱۰٪" value={config.hubbleium_110} onChange={v=>setConfig({...config,hubbleium_110:Number(v)})}/><Field label="هدف تیمی روز" value={config.hubbleium_team_day} onChange={v=>setConfig({...config,hubbleium_team_day:Number(v)})}/><Field label="رکورد شخصی" value={config.hubbleium_personal_best} onChange={v=>setConfig({...config,hubbleium_personal_best:Number(v)})}/><Field label="ثبات" value={config.hubbleium_consistency} onChange={v=>setConfig({...config,hubbleium_consistency:Number(v)})}/></div></div>
-    <button disabled={saving} onClick={async()=>{setSaving(true); await saveIncentiveConfiguration(config); await onSaved('✅ تنظیمات ذخیره و دوره باز محاسبه شد'); setSaving(false);}} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold">{saving?'ذخیره...':'ذخیره تنظیمات'}</button>
-  </div>;
-}
+function Settings({initial,saved,report}:{initial:any;saved:()=>Promise<void>;report:(v:string)=>void}) { const [config,setConfig]=useState(structuredClone(initial)); const weight=(d:string,s:string)=>config.weights.find((r:any)=>String(r.weekday)===d&&r.shift_type===s)?.weight??1; return <div className="space-y-5"><div className="bg-white rounded-xl border p-5 grid sm:grid-cols-3 gap-4"><Field label="هدف ماهانه" value={config.monthly_target} onChange={v=>setConfig({...config,monthly_target:Number(v)})}/><Field label="شروع صبح" value={config.morning_start} step="0.25" onChange={v=>setConfig({...config,morning_start:Number(v)})}/><Field label="پایان صبح" value={config.morning_end} step="0.25" onChange={v=>setConfig({...config,morning_end:Number(v)})}/><Field label="شروع عصر" value={config.evening_start} step="0.25" onChange={v=>setConfig({...config,evening_start:Number(v)})}/><Field label="پایان عصر" value={config.evening_end} step="0.25" onChange={v=>setConfig({...config,evening_end:Number(v)})}/></div><div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 font-bold">وزن شیفت‌ها</div><table className="w-full text-sm"><thead><tr><th>روز</th><th>صبح</th><th>عصر</th></tr></thead><tbody>{DAYS.map(d=><tr key={d.value} className="border-t"><td className="p-3">{d.label}</td>{['morning','evening'].map(s=><td key={s} className="p-2"><input type="number" step="0.01" value={weight(d.value,s)} onChange={e=>setConfig({...config,weights:config.weights.map((r:any)=>String(r.weekday)===d.value&&r.shift_type===s?{...r,weight:Number(e.target.value)}:r)})} className="w-28 border rounded p-2"/></td>)}</tr>)}</tbody></table></div><div className="bg-white rounded-xl border p-5"><b>پلکان‌های پورسانت</b>{config.tiers.map((t:any,i:number)=><div key={i} className="grid grid-cols-3 gap-3 mt-3"><Field label="از درصد" value={t.from_percent} onChange={v=>{const a=[...config.tiers];a[i]={...t,from_percent:Number(v)};setConfig({...config,tiers:a});}}/><Field label="تا درصد؛ صفر یعنی باز" value={t.to_percent} onChange={v=>{const a=[...config.tiers];a[i]={...t,to_percent:Number(v)};setConfig({...config,tiers:a});}}/><Field label="درصد پورسانت" value={t.rate} onChange={v=>{const a=[...config.tiers];a[i]={...t,rate:Number(v)};setConfig({...config,tiers:a});}}/></div>)}</div><Action label="ذخیره تنظیمات" onClick={async()=>{try{await saveIncentiveConfiguration(config);await saved();}catch(e){report(errorText(e));throw e;}}}/></div>; }
 
-function Field({ label, value, onChange, step='1' }: { label:string; value:any; onChange:(value:string)=>void; step?:string }) { return <label className="text-xs text-gray-500"><span className="block mb-1">{label}</span><input type="number" step={step} value={value ?? ''} onChange={e=>onChange(e.target.value)} className="w-full border rounded-lg p-2 text-sm text-slate-800"/></label>; }
+function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(v:string)=>void}) {const shifts=data?.shifts||[],sellers=data?.sellers||[];const [date,setDate]=useState('');const [type,setType]=useState('morning');const [seller,setSeller]=useState(0);const [first,setFirst]=useState(0);const [second,setSecond]=useState(0);return <div className="space-y-4"><div className="bg-white border rounded-xl p-4"><b className="block mb-3">افزودن شیفت با تاریخ شمسی</b><div className="grid sm:grid-cols-4 gap-2"><JalaliDatePicker value={date} onChange={setDate}/><select value={type} onChange={e=>setType(e.target.value)} className="border rounded p-2"><option value="morning">صبح</option><option value="evening">عصر</option></select><select value={seller} onChange={e=>setSeller(Number(e.target.value))} className="border rounded p-2"><option value={0}>{sellers.length?'انتخاب فروشنده':'فروشنده‌ای تعریف نشده'}</option>{sellers.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}</select><Action disabled={!date||!seller} label="ثبت شیفت" onClick={async()=>{try{await create('fmcg.incentive.shift',{shift_date:date,shift_type:type,seller_id:seller});setDate('');await reload();}catch(e){report(errorText(e));throw e;}}}/></div></div><div className="bg-white border rounded-xl p-4"><b className="block mb-3">تعویض دو شیفت</b><div className="flex flex-wrap gap-2">{[first,second].map((value,i)=><select key={i} value={value} onChange={e=>i?setSecond(Number(e.target.value)):setFirst(Number(e.target.value))} className="border rounded p-2"><option value={0}>شیفت {i?'دوم':'اول'}</option>{shifts.map((s:any)=><option key={s.id} value={s.id}>{formatTehranJalaliDate(s.shift_date)} {s.shift_type==='morning'?'صبح':'عصر'} - {s.seller_id?.[1]}</option>)}</select>)}<Action disabled={!first||!second||first===second} label="تعویض و محاسبه مجدد" onClick={async()=>{try{await swapIncentiveShifts(first,second);await reload();}catch(e){report(errorText(e));throw e;}}}/></div></div><div className="bg-white border rounded-xl overflow-auto">{shifts.length?<table className="w-full text-sm"><thead><tr><th className="p-3">تاریخ</th><th>شیفت</th><th>فروشنده</th><th>هدف</th><th>فروش</th></tr></thead><tbody>{shifts.map((s:any)=><tr className="border-t text-center" key={s.id}><td className="p-3">{formatTehranJalaliDate(s.shift_date)}</td><td>{s.shift_type==='morning'?'صبح':'عصر'}</td><td>{s.seller_id?.[1]}</td><td>{formatPrice(s.target_amount)}</td><td>{formatPrice(s.actual_sales)}</td></tr>)}</tbody></table>:<Empty text="هنوز شیفتی ثبت نشده است."/>}</div></div>;}
 
-function Shifts({ period, reload }: { period:any; reload:()=>Promise<void> }) {
-  const [shifts,setShifts]=useState<any[]>([]); const [sellers,setSellers]=useState<any[]>([]); const [first,setFirst]=useState(0); const [second,setSecond]=useState(0);
-  async function load(){ if(!period)return; const [s,u]=await Promise.all([searchRead('fmcg.incentive.shift',[['shift_date','>=',period.date_from],['shift_date','<=',period.date_to]],['shift_date','shift_type','seller_id','target_amount','actual_sales','achievement_percent'],0,0,'shift_date, shift_type'),searchRead('res.users',[['active','=',true],['share','=',false]],['name','fmcg_is_seller'],0,0,'name')]); setShifts(s||[]); setSellers(u||[]); }
-  useEffect(()=>{void load();},[period?.id]);
-  return <div className="space-y-4"><NewShift sellers={sellers} onCreated={async()=>{await load();await reload();}}/><div className="bg-white border rounded-xl p-4"><div className="font-bold mb-3">تعویض دو شیفت</div><div className="flex flex-wrap gap-2"><select className="border rounded p-2" value={first} onChange={e=>setFirst(Number(e.target.value))}><option value={0}>شیفت اول</option>{shifts.map(s=><option key={s.id} value={s.id}>{formatTehranJalaliDate(s.shift_date)} {s.shift_type==='morning'?'صبح':'عصر'} - {s.seller_id?.[1]}</option>)}</select><select className="border rounded p-2" value={second} onChange={e=>setSecond(Number(e.target.value))}><option value={0}>شیفت دوم</option>{shifts.map(s=><option key={s.id} value={s.id}>{formatTehranJalaliDate(s.shift_date)} {s.shift_type==='morning'?'صبح':'عصر'} - {s.seller_id?.[1]}</option>)}</select><button className="bg-indigo-600 text-white px-4 rounded" onClick={async()=>{if(!first||!second)return;await swapIncentiveShifts(first,second);await load();await reload();}}>تعویض و محاسبه مجدد</button></div></div><div className="bg-white border rounded-xl overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3">تاریخ شمسی</th><th>شیفت</th><th>مسئول</th><th>هدف</th><th>فروش</th><th>تحقق</th></tr></thead><tbody>{shifts.map(s=><tr key={s.id} className="border-t"><td className="p-3">{formatTehranJalaliDate(s.shift_date)}</td><td>{s.shift_type==='morning'?'صبح':'عصر'}</td><td>{s.seller_id?.[1]}</td><td>{formatPrice(s.target_amount)}</td><td>{formatPrice(s.actual_sales)}</td><td>{toPersianDigits((s.achievement_percent||0).toFixed(1))}٪</td></tr>)}</tbody></table></div></div>;
-}
+function Adjustments({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(v:string)=>void}) {const [seller,setSeller]=useState(0),[type,setType]=useState('commission'),[amount,setAmount]=useState(''),[reason,setReason]=useState('');return <div className="bg-white border rounded-xl p-5"><b className="block mb-4">افزایش یا کاهش دستی</b><div className="grid sm:grid-cols-2 gap-3"><select value={seller} onChange={e=>setSeller(Number(e.target.value))} className="border rounded p-2"><option value={0}>فروشنده</option>{(data?.sellers||[]).map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={type} onChange={e=>setType(e.target.value)} className="border rounded p-2"><option value="commission">پورسانت</option><option value="hubbleium">هابلیوم</option></select><input type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="مقدار؛ منفی برای کاهش" className="border rounded p-2"/><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="دلیل الزامی" className="border rounded p-2"/></div><div className="mt-4"><Action disabled={!seller||!data?.period?.id||!Number(amount)||!reason.trim()} label="ثبت تعدیل" onClick={async()=>{try{await create('fmcg.incentive.adjustment',{seller_id:seller,period_id:data.period.id,adjustment_type:type,amount:Number(amount),reason});setAmount('');setReason('');await reload();}catch(e){report(errorText(e));throw e;}}}/></div></div>;}
 
-function NewShift({sellers,onCreated}:{sellers:any[];onCreated:()=>Promise<void>}) { const [date,setDate]=useState('');const [type,setType]=useState('morning');const [seller,setSeller]=useState(0);return <div className="bg-white border rounded-xl p-4"><div className="font-bold mb-3">افزودن شیفت</div><div className="flex flex-wrap gap-2"><input type="date" title="تاریخ در دیتابیس میلادی است؛ نمایش جدول شمسی است" value={date} onChange={e=>setDate(e.target.value)} className="border rounded p-2"/><select value={type} onChange={e=>setType(e.target.value)} className="border rounded p-2"><option value="morning">صبح</option><option value="evening">عصر</option></select><select value={seller} onChange={e=>setSeller(Number(e.target.value))} className="border rounded p-2"><option value={0}>فروشنده</option>{sellers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><button onClick={async()=>{if(!date||!seller)return;await create('fmcg.incentive.shift',{shift_date:date,shift_type:type,seller_id:seller});await onCreated();}} className="bg-green-600 text-white px-4 rounded">ثبت شیفت</button></div><div className="text-[11px] text-gray-400 mt-2">پس از ثبت، تاریخ به‌صورت شمسی نمایش داده می‌شود و تمام محاسبات با تهران انجام می‌شود.</div></div>; }
-
-function Adjustments({period,reload}:{period:any;reload:()=>Promise<void>}) {const [sellers,setSellers]=useState<any[]>([]);const [seller,setSeller]=useState(0);const [type,setType]=useState('commission');const [amount,setAmount]=useState('');const [reason,setReason]=useState('');useEffect(()=>{searchRead('res.users',[['active','=',true],['share','=',false]],['name'],0,0,'name').then(setSellers)},[]);return <div className="bg-white border rounded-xl p-5"><div className="font-bold mb-4">افزایش یا کاهش دستی</div><div className="grid sm:grid-cols-2 gap-3"><select className="border rounded p-2" value={seller} onChange={e=>setSeller(Number(e.target.value))}><option value={0}>فروشنده</option>{sellers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><select className="border rounded p-2" value={type} onChange={e=>setType(e.target.value)}><option value="commission">پورسانت</option><option value="hubbleium">هابلیوم</option></select><input className="border rounded p-2" type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="مقدار؛ برای کاهش منفی وارد کنید"/><input className="border rounded p-2" value={reason} onChange={e=>setReason(e.target.value)} placeholder="دلیل تعدیل"/></div><button className="mt-4 bg-indigo-600 text-white px-5 py-2 rounded" onClick={async()=>{if(!seller||!period?.id||!amount||!reason)return;await create('fmcg.incentive.adjustment',{seller_id:seller,period_id:period.id,adjustment_type:type,amount:Number(amount),reason});setAmount('');setReason('');await reload();}}>ثبت تعدیل</button></div>;}
-
-function Rewards({reload}:{reload:()=>Promise<void>}) {const [items,setItems]=useState<any[]>([]);const [name,setName]=useState('');const [cost,setCost]=useState('');const [stock,setStock]=useState('');async function load(){setItems(await searchRead('fmcg.reward',[],['name','cost','stock_qty','unlimited_stock','active'],0,0,'cost'));}useEffect(()=>{void load();},[]);return <div className="space-y-4"><div className="bg-white border rounded-xl p-4 flex flex-wrap gap-2"><input className="border rounded p-2" placeholder="نام جایزه" value={name} onChange={e=>setName(e.target.value)}/><input className="border rounded p-2" type="number" placeholder="قیمت هابلیوم" value={cost} onChange={e=>setCost(e.target.value)}/><input className="border rounded p-2" type="number" placeholder="موجودی" value={stock} onChange={e=>setStock(e.target.value)}/><button className="bg-green-600 text-white px-4 rounded" onClick={async()=>{if(!name||!cost)return;await create('fmcg.reward',{name,cost:Number(cost),stock_qty:Number(stock||0)});setName('');setCost('');setStock('');await load();await reload();}}>افزودن</button></div><div className="grid sm:grid-cols-3 gap-3">{items.map(i=><div className="bg-white border rounded-xl p-4" key={i.id}><b>{i.name}</b><div className="text-indigo-600 my-1">{formatPrice(i.cost)} H</div><div className="text-xs text-gray-500">موجودی: {formatPrice(i.stock_qty)}</div></div>)}</div></div>;}
+function Rewards({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(v:string)=>void}) {const [name,setName]=useState(''),[cost,setCost]=useState(''),[stock,setStock]=useState('');return <div className="space-y-4"><div className="bg-white border rounded-xl p-4 grid sm:grid-cols-4 gap-2"><input value={name} onChange={e=>setName(e.target.value)} placeholder="نام جایزه" className="border rounded p-2"/><input type="number" value={cost} onChange={e=>setCost(e.target.value)} placeholder="قیمت H" className="border rounded p-2"/><input type="number" value={stock} onChange={e=>setStock(e.target.value)} placeholder="موجودی" className="border rounded p-2"/><Action disabled={!name.trim()||Number(cost)<=0} label="افزودن جایزه" onClick={async()=>{try{await create('fmcg.reward',{name,cost:Number(cost),stock_qty:Number(stock||0)});setName('');setCost('');setStock('');await reload();}catch(e){report(errorText(e));throw e;}}}/></div><div className="grid sm:grid-cols-3 gap-3">{(data?.rewards||[]).map((r:any)=><div key={r.id} className="bg-white border rounded-xl p-4"><b>{r.name}</b><div className="text-indigo-600">{formatPrice(r.cost)} H</div><div className="text-xs text-gray-500">موجودی: {formatPrice(r.stock_qty)}</div></div>)}</div></div>;}

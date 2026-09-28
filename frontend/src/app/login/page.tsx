@@ -43,24 +43,13 @@ export default function LoginPage() {
       const actualRole: UserRole = role === 'admin' && result.isAdmin ? 'admin' : 'seller';
       authLogin(result.uid, result.name, result.username, actualRole, result.isAdmin);
 
-      if (actualRole === 'seller') {
-        // Check if seller has allowed menus - if yes, show admin panel with limited menus
-        try {
-          const savedMenus = localStorage.getItem('seller_allowed_menus');
-          const allowedMenus = savedMenus ? JSON.parse(savedMenus) : [];
-          if (allowedMenus.length > 0) {
-            router.push('/admin');
-          } else {
-            router.push('/pos');
-          }
-        } catch {
-          router.push('/pos');
-        }
+      if (role === 'seller') {
+        router.push('/admin/incentives');
       } else {
         router.push('/admin');
       }
-    } catch (err: any) {
-      setError(err.message || 'خطا در ورود');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'خطا در ورود');
     } finally {
       setLoading(false);
     }

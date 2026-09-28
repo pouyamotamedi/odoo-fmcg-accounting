@@ -2086,3 +2086,7 @@ export async function createIncentiveAdjustment(values: {
 export async function requestHubbleiumReward(rewardId: number) {
   return create('fmcg.reward.redemption', { reward_id: rewardId });
 }
+
+export async function getIncentiveManagerData() {
+  return callMethod('fmcg.incentive.period', 'manager_bootstrap', []);
+}

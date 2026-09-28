@@ -73,17 +73,20 @@ PATCH
 # Update Odoo modules
 echo "[3/4] Updating Odoo modules..."
 sudo systemctl stop "odoo-${DB_NAME}"
-sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
-    -u fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
-    --stop-after-init 2>&1 | grep -E "^(INFO|ERROR)" | tail -3
+MODULES="fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports,fmcg_sales_incentive"
+if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
+    -i fmcg_sales_incentive -u "${MODULES}" --stop-after-init; then
+    echo "ERROR: Odoo module installation/update failed. Services were not restarted."
+    sudo systemctl start "odoo-${DB_NAME}"
+    exit 1
+fi
 sudo systemctl start "odoo-${DB_NAME}"
 
 # Rebuild frontend (without stopping service - only restart after successful build)
 echo "[4/4] Rebuilding frontend..."
 cd "${INSTALL_DIR}/frontend"
 sudo -u odoo npm install --quiet 2>/dev/null
-sudo -u odoo npm run build 2>&1 | tail -2
-if [ $? -eq 0 ]; then
+if sudo -u odoo npm run build; then
   sudo systemctl restart "fmcg-${DB_NAME}" "odoo-${DB_NAME}"
   echo "  Services restarted."
 else
