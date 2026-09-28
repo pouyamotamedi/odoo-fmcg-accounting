@@ -25,6 +25,7 @@ const ACCOUNT_MOVE_FIELDS = [
   'payment_state',
   'ref',
   'create_date',
+  'create_uid',
 ];
 const ACCOUNT_MOVE_ORDER = 'date desc, id desc';
 
@@ -170,6 +171,8 @@ interface AccountEntry {
   payment_state: string;
   ref: string | false;
   create_date?: string;
+  create_uid: [number, string] | false;
+  seller_name?: string;
 }
 
 /**
@@ -306,7 +309,12 @@ export default function AccountingPage() {
       ) as AccountEntry[] | undefined;
 
       if (!batch || batch.length === 0) break;
-      allEntries.push(...batch);
+      allEntries.push(...batch.map((entry) => ({
+        ...entry,
+        seller_name: entry.move_type === 'out_invoice'
+          ? (entry.create_uid ? entry.create_uid[1] : 'نامشخص')
+          : '',
+      })));
       if (batch.length < EXPORT_BATCH_SIZE) break;
       if (batchIndex === MAX_EXPORT_BATCHES - 1) {
         throw new Error('Accounting export exceeded the maximum batch limit.');
@@ -710,6 +718,7 @@ export default function AccountingPage() {
             data={entries}
             columns={[
               { key: 'name', label: 'شماره سند' },
+              { key: 'seller_name', label: 'فروشنده' },
               { key: 'date', label: 'تاریخ', transform: (v) => v ? toJalali(v) : '' },
               { key: 'partner_id', label: 'طرف حساب', transform: (v) => v ? v[1] : '' },
               { key: 'journal_id', label: 'دفتر', transform: (v) => v ? v[1] : '' },
@@ -872,6 +881,9 @@ export default function AccountingPage() {
                 <tr className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${isReversal ? 'bg-red-50/50' : ''} ${hasBeenReversed ? 'opacity-50' : ''}`} onClick={() => handleExpandEntry(entry.id)}>
                   <td className="p-3 text-gray-500 text-xs">
                     {entry.name}
+                    {entry.move_type === 'out_invoice' && (
+                      <div className="mt-0.5 text-[10px] text-gray-400">فروشنده: {entry.create_uid ? entry.create_uid[1] : 'نامشخص'}</div>
+                    )}
                     {isReversal && <span className="mr-2 text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">سند معکوس</span>}
                     {hasBeenReversed && <span className="mr-2 text-[9px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">ابطال شده</span>}
                   </td>

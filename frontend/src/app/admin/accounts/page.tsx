@@ -327,19 +327,26 @@ function AccountsPageContent() {
                             <tr className={`border-b last:border-b-0 hover:bg-gray-50 ${isSalesInvoice ? 'bg-indigo-50/20' : ''}`}>
                               <td className="p-2.5 whitespace-nowrap">{line.date ? toJalali(line.date) : '—'}</td>
                               <td className="p-2.5 whitespace-nowrap">{getLedgerTypeLabel(line.moveType, line.reference)}</td>
-                              <td className="p-2.5 font-mono whitespace-nowrap" dir="ltr">
-                                {isSalesInvoice ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleSalesInvoice(line.moveId)}
-                                    aria-expanded={isInvoiceExpanded}
-                                    className="inline-flex items-center gap-1 font-mono text-indigo-700 hover:text-indigo-900 hover:underline cursor-pointer"
-                                    title="مشاهده اقلام فاکتور"
-                                  >
-                                    <span className={`text-[10px] transition-transform ${isInvoiceExpanded ? 'rotate-90' : ''}`}>◀</span>
-                                    {line.moveName}
-                                  </button>
-                                ) : line.moveName}
+                              <td className="p-2.5 whitespace-nowrap">
+                                <div dir="ltr" className="font-mono text-left inline-block">
+                                  {isSalesInvoice ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSalesInvoice(line.moveId)}
+                                      aria-expanded={isInvoiceExpanded}
+                                      className="inline-flex items-center gap-1 font-mono text-indigo-700 hover:text-indigo-900 hover:underline cursor-pointer"
+                                      title="مشاهده اقلام فاکتور"
+                                    >
+                                      <span className={`text-[10px] transition-transform ${isInvoiceExpanded ? 'rotate-90' : ''}`}>◀</span>
+                                      {line.moveName}
+                                    </button>
+                                  ) : line.moveName}
+                                </div>
+                                {isSalesInvoice && (
+                                  <div dir="rtl" className="mt-0.5 text-[10px] font-sans text-gray-500 whitespace-nowrap">
+                                    فروشنده: {line.sellerName || 'نامشخص'}
+                                  </div>
+                                )}
                               </td>
                               <td className="p-2.5 min-w-[180px]">
                                 <div>{line.description}</div>
@@ -361,7 +368,10 @@ function AccountsPageContent() {
                             {isSalesInvoice && isInvoiceExpanded && (
                               <tr className="border-b bg-indigo-50/50">
                                 <td colSpan={9} className="p-3 max-w-0">
-                                  <div className="text-xs font-bold text-indigo-800 mb-2">اقلام فاکتور فروش {line.moveName}</div>
+                                  <div className="text-xs font-bold text-indigo-800 mb-2">
+                                    اقلام فاکتور فروش {line.moveName}
+                                    <span className="mr-2 text-[10px] font-normal text-indigo-600">فروشنده: {line.sellerName || 'نامشخص'}</span>
+                                  </div>
                                   {invoiceLineLoading.has(line.moveId) ? (
                                     <div className="text-xs text-gray-400 py-3">در حال دریافت اقلام فاکتور...</div>
                                   ) : invoiceLineErrors[line.moveId] ? (

@@ -21,6 +21,41 @@ interface OdooProduct {
 }
 
 const SALES_HISTORY_LIMIT = 100;
+const SALES_HISTORY_FIELDS = [
+  'name',
+  'partner_id',
+  'amount_total',
+  'invoice_date',
+  'create_date',
+  'payment_state',
+  'narration',
+  'create_uid',
+];
+
+interface SalesHistoryInvoice {
+  id: number;
+  name: string;
+  partner_id: [number, string] | false;
+  amount_total: number;
+  invoice_date: string | false;
+  create_date: string | false;
+  payment_state: string;
+  narration: string | false;
+  create_uid: [number, string] | false;
+}
+
+async function loadSalesHistory(): Promise<SalesHistoryInvoice[]> {
+  const history = await searchRead(
+    'account.move',
+    [['move_type', '=', 'out_invoice'], ['state', '=', 'posted']],
+    SALES_HISTORY_FIELDS,
+    SALES_HISTORY_LIMIT,
+    0,
+    'create_date desc',
+  );
+  return (history || []) as SalesHistoryInvoice[];
+}
+
 const TOMAN_TOLERANCE = 1;
 
 type CardPaymentRow = { amount: string; paid: boolean; accounted: boolean };
@@ -72,7 +107,7 @@ export default function PosPage() {
   const [splitInvoiceId, setSplitInvoiceId] = useState<number | null>(null);
   const [splitCashAccounted, setSplitCashAccounted] = useState(false);
   const [showSalesHistory, setShowSalesHistory] = useState(false);
-  const [salesHistory, setSalesHistory] = useState<any[]>([]);
+  const [salesHistory, setSalesHistory] = useState<SalesHistoryInvoice[]>([]);
   const [expandedSale, setExpandedSale] = useState<number | null>(null);
   const [saleLines, setSaleLines] = useState<any[]>([]);
   const [posJournals, setPosJournals] = useState<{id:number;name:string;type:string}[]>([]);
@@ -706,7 +741,7 @@ export default function PosPage() {
               ) : null;
             })()}
             <button onClick={async () => {
-              try { const d = await searchRead('account.move', [['move_type','=','out_invoice'],['state','=','posted']], ['name','partner_id','amount_total','invoice_date','create_date','payment_state','narration'], SALES_HISTORY_LIMIT, 0, 'create_date desc'); setSalesHistory(d||[]); } catch { setSalesHistory([]); }
+              try { const d = await loadSalesHistory(); setSalesHistory(d); } catch { setSalesHistory([]); }
               setShowSalesHistory(true);
             }} className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded">📋 سوابق</button>
             <button onClick={async () => {
@@ -1082,9 +1117,12 @@ export default function PosPage() {
                 <thead className="bg-gray-50 border-b"><tr>
                   <th className="text-right p-2">شماره</th><th className="text-right p-2">تاریخ و ساعت</th><th className="text-right p-2">مشتری</th><th className="text-right p-2">روش پرداخت</th><th className="text-right p-2">مبلغ</th><th className="text-right p-2">وضعیت</th><th className="text-right p-2">عملیات</th>
                 </tr></thead>
-                <tbody>{salesHistory.map((inv:any) => (<React.Fragment key={inv.id}>
+                <tbody>{salesHistory.map((inv) => (<React.Fragment key={inv.id}>
                   <tr className="border-b hover:bg-gray-50">
-                    <td className="p-2">{inv.name}</td>
+                    <td className="p-2">
+                      <div>{inv.name}</div>
+                      <div className="mt-0.5 text-[10px] text-gray-500">فروشنده: {inv.create_uid ? inv.create_uid[1] : 'نامشخص'}</div>
+                    </td>
                     <td className="p-2 text-xs whitespace-nowrap">{formatSaleDateTime(inv.create_date)}</td>
                     <td className="p-2">{inv.partner_id?inv.partner_id[1]:'—'}</td>
                     <td className="p-2 text-xs whitespace-nowrap">{getPosPaymentLabel(inv.narration, inv.payment_state)}</td>
@@ -1103,7 +1141,7 @@ export default function PosPage() {
                             await voidInvoice(inv.id, jId);
                             setMsg(`✅ فاکتور ${inv.name} ابطال شد`);
                             setTimeout(()=>setMsg(''),4000);
-                            try { const h = await searchRead('account.move',[['move_type','=','out_invoice'],['state','=','posted']],['name','partner_id','amount_total','invoice_date','create_date','payment_state','narration'],SALES_HISTORY_LIMIT,0,'create_date desc'); setSalesHistory(h||[]); } catch{}
+                            try { const h = await loadSalesHistory(); setSalesHistory(h); } catch{}
                           } catch(e:any){alert(e.message||'خطا در ابطال');}
                         }} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded">🚫 ابطال</button>
                       ) : (

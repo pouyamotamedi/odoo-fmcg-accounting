@@ -798,6 +798,7 @@ export interface PartnerLedgerLine {
   journalName: string;
   description: string;
   reference: string;
+  sellerName: string;
   debit: number;
   credit: number;
   effect: number;
@@ -817,8 +818,37 @@ export async function getPartnerLedger(partnerId: number): Promise<PartnerLedger
     'debit', 'credit',
   ], 0, 0, 'date asc, move_name asc, id asc');
 
+  const rawLines = (lines || []) as Record<string, unknown>[];
+  const moveIds = [...new Set(rawLines.flatMap((line) => {
+    const move = Array.isArray(line.move_id) ? line.move_id : [];
+    return typeof move[0] === 'number' && move[0] > 0 ? [move[0]] : [];
+  }))];
+  const moveMetadata = new Map<number, { moveType: string; sellerName: string }>();
+
+  if (moveIds.length > 0) {
+    try {
+      const moves = await searchRead(
+        'account.move',
+        [['id', 'in', moveIds]],
+        ['create_uid', 'move_type'],
+        0,
+      );
+      for (const move of (moves || []) as Record<string, unknown>[]) {
+        const id = Number(move.id);
+        if (!Number.isFinite(id) || id <= 0) continue;
+        const creator = Array.isArray(move.create_uid) ? move.create_uid : [];
+        moveMetadata.set(id, {
+          moveType: typeof move.move_type === 'string' ? move.move_type : '',
+          sellerName: typeof creator[1] === 'string' ? creator[1] : '',
+        });
+      }
+    } catch {
+      // Seller metadata is supplementary; the ledger remains usable without it.
+    }
+  }
+
   let runningBalance = 0;
-  return (lines || []).map((line: Record<string, unknown>) => {
+  return rawLines.map((line) => {
     const debit = Number(line.debit) || 0;
     const credit = Number(line.credit) || 0;
     const effect = debit - credit;
@@ -826,6 +856,7 @@ export async function getPartnerLedger(partnerId: number): Promise<PartnerLedger
     const move = Array.isArray(line.move_id) ? line.move_id : [];
     const account = Array.isArray(line.account_id) ? line.account_id : [];
     const journal = Array.isArray(line.journal_id) ? line.journal_id : [];
+    const metadata = moveMetadata.get(typeof move[0] === 'number' ? move[0] : 0);
 
     return {
       id: Number(line.id),
@@ -837,6 +868,7 @@ export async function getPartnerLedger(partnerId: number): Promise<PartnerLedger
       journalName: typeof journal[1] === 'string' ? journal[1] : '—',
       description: typeof line.name === 'string' && line.name ? line.name : '—',
       reference: typeof line.ref === 'string' ? line.ref : '',
+      sellerName: metadata?.moveType === 'out_invoice' ? metadata.sellerName : '',
       debit,
       credit,
       effect,
