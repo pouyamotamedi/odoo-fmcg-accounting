@@ -79,7 +79,7 @@ export async function login(username: string, password: string) {
   let isAdmin = false;
   try {
     // Check user groups - admin users have base.group_system or account.group_account_manager
-    const user = await jsonRpc('/web/dataset/call_kw', {
+    const user = await jsonRpc(callKwPath('res.users', 'read'), {
       model: 'res.users',
       method: 'read',
       args: [[result.uid]],
@@ -87,7 +87,7 @@ export async function login(username: string, password: string) {
     });
     if (user && user[0]) {
       // Check if user has any admin-level group
-      const groups = await jsonRpc('/web/dataset/call_kw', {
+      const groups = await jsonRpc(callKwPath('res.groups', 'search_read'), {
         model: 'res.groups',
         method: 'search_read',
         args: [[['id', 'in', user[0].groups_id], ['full_name', 'in', [
@@ -120,6 +120,10 @@ export async function logout() {
 
 // ============ CRUD Operations ============
 
+function callKwPath(model: string, method: string): string {
+  return `/web/dataset/call_kw/${encodeURIComponent(model)}/${encodeURIComponent(method)}`;
+}
+
 export async function searchRead(
   model: string,
   domain: any[] = [],
@@ -128,9 +132,7 @@ export async function searchRead(
   offset?: number,
   order?: string
 ) {
-  return await jsonRpc('/web/dataset/call_kw', {
-    model,
-    method: 'search_read',
+  return await jsonRpc(callKwPath(model, 'search_read'), {
     args: [domain],
     kwargs: {
       fields,
@@ -142,36 +144,28 @@ export async function searchRead(
 }
 
 export async function create(model: string, values: Record<string, any>) {
-  return await jsonRpc('/web/dataset/call_kw', {
-    model,
-    method: 'create',
+  return await jsonRpc(callKwPath(model, 'create'), {
     args: [values],
     kwargs: {},
   });
 }
 
 export async function write(model: string, ids: number[], values: Record<string, any>) {
-  return await jsonRpc('/web/dataset/call_kw', {
-    model,
-    method: 'write',
+  return await jsonRpc(callKwPath(model, 'write'), {
     args: [ids, values],
     kwargs: {},
   });
 }
 
 export async function unlink(model: string, ids: number[]) {
-  return await jsonRpc('/web/dataset/call_kw', {
-    model,
-    method: 'unlink',
+  return await jsonRpc(callKwPath(model, 'unlink'), {
     args: [ids],
     kwargs: {},
   });
 }
 
 export async function callMethod(model: string, method: string, args: any[] = [], kwargs: any = {}) {
-  return await jsonRpc('/web/dataset/call_kw', {
-    model,
-    method,
+  return await jsonRpc(callKwPath(model, method), {
     args,
     kwargs,
   });
@@ -596,13 +590,13 @@ export async function registerInvoicePayment(invoiceId: number, journalId: numbe
   const partnerType = invoice.move_type === 'in_invoice' ? 'supplier' : 'customer';
   let wizardId: number | undefined;
   try {
-    wizardId = await jsonRpc('/web/dataset/call_kw', {
+    wizardId = await jsonRpc(callKwPath('account.payment.register', 'create'), {
       model: 'account.payment.register',
       method: 'create',
       args: [{ journal_id: journalId, amount, payment_type: paymentType, partner_type: partnerType }],
       kwargs: { context: { active_model: 'account.move', active_ids: [invoiceId] } },
     });
-    await jsonRpc('/web/dataset/call_kw', {
+    await jsonRpc(callKwPath('account.payment.register', 'action_create_payments'), {
       model: 'account.payment.register',
       method: 'action_create_payments',
       args: [[wizardId]],
@@ -677,7 +671,7 @@ export async function createStockReceipt(invoiceId: number) {
     await callMethod('stock.picking', 'button_validate', [[pickingId]]);
   } catch {
     try {
-      await jsonRpc('/web/dataset/call_kw', {
+      await jsonRpc(callKwPath('stock.picking', 'button_validate'), {
         model: 'stock.picking',
         method: 'button_validate',
         args: [[pickingId]],
@@ -735,7 +729,7 @@ export async function createStockDelivery(invoiceLines: Array<{ product_id: numb
     await callMethod('stock.picking', 'button_validate', [[pickingId]]);
   } catch {
     try {
-      await jsonRpc('/web/dataset/call_kw', {
+      await jsonRpc(callKwPath('stock.picking', 'button_validate'), {
         model: 'stock.picking',
         method: 'button_validate',
         args: [[pickingId]],
@@ -1123,7 +1117,7 @@ export async function createSalesReturn(values: {
           await callMethod('stock.picking', 'button_validate', [[pickingId]]);
         } catch {
           try {
-            await jsonRpc('/web/dataset/call_kw', {
+            await jsonRpc(callKwPath('stock.picking', 'button_validate'), {
               model: 'stock.picking',
               method: 'button_validate',
               args: [[pickingId]],

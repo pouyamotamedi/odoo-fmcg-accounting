@@ -82,9 +82,17 @@ if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "$
 fi
 sudo systemctl start "odoo-${DB_NAME}"
 
-# Rebuild frontend (without stopping service - only restart after successful build)
-echo "[4/4] Rebuilding frontend..."
+# Rebuild frontend with explicit instance-specific build settings.
+echo "[4/5] Rebuilding frontend..."
+ODOO_PORT=$(grep "http_port" "${ODOO_CONF}" | awk -F= '{print $2}' | tr -d ' ')
+[ -z "$ODOO_PORT" ] && ODOO_PORT=8069
 cd "${INSTALL_DIR}/frontend"
+cat > .env.local << EOF
+NEXT_PUBLIC_ODOO_URL=/api
+NEXT_PUBLIC_ODOO_DB=${DB_NAME}
+ODOO_INTERNAL_URL=http://localhost:${ODOO_PORT}
+EOF
+sudo chown odoo:odoo .env.local
 sudo -u odoo npm install --quiet 2>/dev/null
 if sudo -u odoo npm run build; then
   sudo systemctl restart "fmcg-${DB_NAME}" "odoo-${DB_NAME}"
@@ -95,8 +103,7 @@ fi
 
 # Re-apply translations (in case new ones were added)
 echo "[5/5] Applying translations..."
-ODOO_PORT=$(grep "http_port" "${ODOO_CONF}" | awk -F= '{print $2}' | tr -d ' ')
-[ -z "$ODOO_PORT" ] && ODOO_PORT=8069
+# ODOO_PORT was resolved before the frontend build.
 # Wait for Odoo
 for i in $(seq 1 20); do
     curl -s "http://localhost:${ODOO_PORT}/web/login" >/dev/null 2>&1 && break

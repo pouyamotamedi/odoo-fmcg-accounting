@@ -215,15 +215,15 @@ fi
 # Step C: Install all FMCG modules
 echo "  Step C: Installing FMCG modules..."
 sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
-    -i fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports \
+    -i fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports,fmcg_sales_incentive \
     --stop-after-init 2>&1 | tail -3
 
 # Verify
 ACCOUNT_COUNT=$(sudo -u odoo psql -t -d "${DB_NAME}" -c "SELECT count(*) FROM account_account;" 2>/dev/null | tr -d ' ')
 FMCG_COUNT=$(sudo -u odoo psql -t -d "${DB_NAME}" -c "SELECT count(*) FROM ir_module_module WHERE name LIKE 'fmcg%' AND state='installed';" 2>/dev/null | tr -d ' ')
-echo "  Accounts: ${ACCOUNT_COUNT}, FMCG modules: ${FMCG_COUNT}/10"
+echo "  Accounts: ${ACCOUNT_COUNT}, FMCG modules: ${FMCG_COUNT}/11"
 
-if [ "${FMCG_COUNT}" -lt "8" ] 2>/dev/null; then
+if [ "${FMCG_COUNT}" -lt "11" ] 2>/dev/null; then
     echo -e "${RED}  WARNING: Not all modules installed! Check logs at /var/log/odoo/odoo-${DB_NAME}.log${NC}"
 fi
 
@@ -236,18 +236,8 @@ echo "  Modules installed."
 echo -e "${GREEN}[8/10] Building frontend...${NC}"
 cd "${INSTALL_DIR}/frontend"
 
-# Fix next.config.ts to use dynamic port from env
-cat > next.config.ts << 'NEXTCFG'
-import type { NextConfig } from "next";
-const ODOO_INTERNAL_URL = process.env.ODOO_INTERNAL_URL || 'http://localhost:8069';
-const nextConfig: NextConfig = {
-  async rewrites() {
-    return [{ source: '/api/:path*', destination: `${ODOO_INTERNAL_URL}/:path*` }];
-  },
-};
-export default nextConfig;
-NEXTCFG
-
+# Keep the repository next.config.ts as the single source of truth.
+# Only environment values are generated for this specific instance.
 cat > .env.local << EOF
 NEXT_PUBLIC_ODOO_URL=/api
 NEXT_PUBLIC_ODOO_DB=${DB_NAME}
