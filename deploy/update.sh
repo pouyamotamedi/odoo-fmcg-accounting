@@ -70,20 +70,41 @@ def check_session(session, env, request=None):
     return False
 PATCH
 
-# Update Odoo modules
-echo "[3/4] Updating Odoo modules..."
+# Install the incentive module first when it is not installed yet.
+echo "[3/6] Ensuring incentive module is installed..."
 sudo systemctl stop "odoo-${DB_NAME}"
+MODULE_STATE=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT state FROM ir_module_module WHERE name='fmcg_sales_incentive' LIMIT 1" 2>/dev/null || true)
+if [ "${MODULE_STATE}" != "installed" ]; then
+    echo "  Current state: ${MODULE_STATE:-missing}; installing fmcg_sales_incentive..."
+    if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
+        -i fmcg_sales_incentive --stop-after-init --without-demo=all; then
+        echo "ERROR: fmcg_sales_incentive installation failed."
+        sudo systemctl start "odoo-${DB_NAME}"
+        exit 1
+    fi
+fi
+
+# Upgrade all custom modules only after the incentive module exists.
+echo "[4/6] Upgrading Odoo modules..."
 MODULES="fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports,fmcg_sales_incentive"
 if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
-    -i fmcg_sales_incentive -u "${MODULES}" --stop-after-init; then
-    echo "ERROR: Odoo module installation/update failed. Services were not restarted."
+    -u "${MODULES}" --stop-after-init --without-demo=all; then
+    echo "ERROR: Odoo module upgrade failed."
+    sudo systemctl start "odoo-${DB_NAME}"
+    exit 1
+fi
+
+MODULE_STATE=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT state FROM ir_module_module WHERE name='fmcg_sales_incentive' LIMIT 1" 2>/dev/null || true)
+MODEL_COUNT=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT count(*) FROM ir_model WHERE model='fmcg.incentive.period'" 2>/dev/null || echo 0)
+if [ "${MODULE_STATE}" != "installed" ] || [ "${MODEL_COUNT}" != "1" ]; then
+    echo "ERROR: Incentive verification failed (module=${MODULE_STATE:-missing}, model_count=${MODEL_COUNT})."
     sudo systemctl start "odoo-${DB_NAME}"
     exit 1
 fi
 sudo systemctl start "odoo-${DB_NAME}"
 
 # Rebuild frontend with explicit instance-specific build settings.
-echo "[4/5] Rebuilding frontend..."
+echo "[5/6] Rebuilding frontend..."
 ODOO_PORT=$(grep "http_port" "${ODOO_CONF}" | awk -F= '{print $2}' | tr -d ' ')
 [ -z "$ODOO_PORT" ] && ODOO_PORT=8069
 cd "${INSTALL_DIR}/frontend"
@@ -99,10 +120,25 @@ if sudo -u odoo npm run build; then
   echo "  Services restarted."
 else
   echo "  ERROR: Build failed! Services NOT restarted (old version still running)."
+  exit 1
+fi
+
+# Verify the exact RPC used by the incentives page through the Next.js proxy.
+echo "[6/6] Verifying login, dashboard and incentive RPC..."
+FRONTEND_PORT=$(systemctl show "fmcg-${DB_NAME}" -p Environment --value | grep -oE 'PORT=[0-9]+' | head -1 | cut -d= -f2)
+[ -z "$FRONTEND_PORT" ] && FRONTEND_PORT=3000
+for i in $(seq 1 30); do
+    curl -s "http://localhost:${FRONTEND_PORT}/login" >/dev/null 2>&1 && break
+    sleep 2
+done
+if ! sudo -u odoo python3 "${INSTALL_DIR}/deploy/verify_incentives.py" \
+    --base-url "http://localhost:${FRONTEND_PORT}/api" --database "${DB_NAME}"; then
+    echo "ERROR: Post-deploy RPC verification failed. Update is NOT complete."
+    exit 1
 fi
 
 # Re-apply translations (in case new ones were added)
-echo "[5/5] Applying translations..."
+echo "[+] Applying translations..."
 # ODOO_PORT was resolved before the frontend build.
 # Wait for Odoo
 for i in $(seq 1 20); do
