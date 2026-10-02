@@ -57,7 +57,7 @@ class FmcgBoostConfig(models.Model):
             ('active', '=', True),
             ('type', '=', 'consu'),
             '|', ('company_id', '=', False), ('company_id', '=', self.env.company.id),
-        ], order='display_name, id')
+        ], order='name, id')
 
     @api.model
     def _active_plans(self):
