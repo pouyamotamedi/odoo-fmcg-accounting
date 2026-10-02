@@ -1,0 +1,10 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_fmcg_boost_config_user,fmcg.boost.config.user,model_fmcg_boost_config,base.group_user,1,0,0,0
+access_fmcg_boost_product_user,fmcg.boost.product.user,model_fmcg_boost_product,base.group_user,1,0,0,0
+access_fmcg_boost_plan_override_user,fmcg.boost.plan.override.user,model_fmcg_boost_plan_override,base.group_user,1,0,0,0
+access_fmcg_boost_config_system,fmcg.boost.config.system,model_fmcg_boost_config,base.group_system,1,1,1,1
+access_fmcg_boost_product_system,fmcg.boost.product.system,model_fmcg_boost_product,base.group_system,1,1,1,1
+access_fmcg_boost_plan_override_system,fmcg.boost.plan.override.system,model_fmcg_boost_plan_override,base.group_system,1,1,1,1
+access_fmcg_boost_config_account_manager,fmcg.boost.config.account.manager,model_fmcg_boost_config,account.group_account_manager,1,1,1,1
+access_fmcg_boost_product_account_manager,fmcg.boost.product.account.manager,model_fmcg_boost_product,account.group_account_manager,1,1,1,1
+access_fmcg_boost_plan_override_account_manager,fmcg.boost.plan.override.account.manager,model_fmcg_boost_plan_override,account.group_account_manager,1,1,1,1

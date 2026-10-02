@@ -70,23 +70,25 @@ def check_session(session, env, request=None):
     return False
 PATCH
 
-# Install the incentive module first when it is not installed yet.
-echo "[3/6] Ensuring incentive module is installed..."
+# Install required feature modules before upgrading them.
+echo "[3/6] Ensuring required Odoo modules are installed..."
 sudo systemctl stop "odoo-${DB_NAME}"
-MODULE_STATE=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT state FROM ir_module_module WHERE name='fmcg_sales_incentive' LIMIT 1" 2>/dev/null || true)
-if [ "${MODULE_STATE}" != "installed" ]; then
-    echo "  Current state: ${MODULE_STATE:-missing}; installing fmcg_sales_incentive..."
-    if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
-        -i fmcg_sales_incentive --stop-after-init --without-demo=all; then
-        echo "ERROR: fmcg_sales_incentive installation failed."
-        sudo systemctl start "odoo-${DB_NAME}"
-        exit 1
+for REQUIRED_MODULE in fmcg_sales_incentive fmcg_boost; do
+    MODULE_STATE=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT state FROM ir_module_module WHERE name='${REQUIRED_MODULE}' LIMIT 1" 2>/dev/null || true)
+    if [ "${MODULE_STATE}" != "installed" ]; then
+        echo "  Current state: ${MODULE_STATE:-missing}; installing ${REQUIRED_MODULE}..."
+        if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
+            -i "${REQUIRED_MODULE}" --stop-after-init --without-demo=all; then
+            echo "ERROR: ${REQUIRED_MODULE} installation failed."
+            sudo systemctl start "odoo-${DB_NAME}"
+            exit 1
+        fi
     fi
-fi
+done
 
-# Upgrade all custom modules only after the incentive module exists.
+# Upgrade all custom modules only after required feature modules exist.
 echo "[4/6] Upgrading Odoo modules..."
-MODULES="fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports,fmcg_sales_incentive"
+MODULES="fmcg_base,fmcg_accounting,fmcg_bank_cash,fmcg_credit,fmcg_discount,fmcg_inventory,fmcg_persian,fmcg_offline,fmcg_pos_terminal,fmcg_reports,fmcg_sales_incentive,fmcg_boost"
 if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "${DB_NAME}" \
     -u "${MODULES}" --stop-after-init --without-demo=all; then
     echo "ERROR: Odoo module upgrade failed."
@@ -94,10 +96,17 @@ if ! sudo -u odoo python3 "${INSTALL_DIR}/odoo/odoo-bin" -c "${ODOO_CONF}" -d "$
     exit 1
 fi
 
-MODULE_STATE=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT state FROM ir_module_module WHERE name='fmcg_sales_incentive' LIMIT 1" 2>/dev/null || true)
-MODEL_COUNT=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT count(*) FROM ir_model WHERE model='fmcg.incentive.period'" 2>/dev/null || echo 0)
-if [ "${MODULE_STATE}" != "installed" ] || [ "${MODEL_COUNT}" != "1" ]; then
-    echo "ERROR: Incentive verification failed (module=${MODULE_STATE:-missing}, model_count=${MODEL_COUNT})."
+INCENTIVE_STATE=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT state FROM ir_module_module WHERE name='fmcg_sales_incentive' LIMIT 1" 2>/dev/null || true)
+BOOST_STATE=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT state FROM ir_module_module WHERE name='fmcg_boost' LIMIT 1" 2>/dev/null || true)
+INCENTIVE_MODEL_COUNT=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT count(*) FROM ir_model WHERE model='fmcg.incentive.period'" 2>/dev/null || echo 0)
+BOOST_MODEL_COUNT=$(sudo -u postgres psql -d "${DB_NAME}" -tAc "SELECT count(*) FROM ir_model WHERE model='fmcg.boost.config'" 2>/dev/null || echo 0)
+if [ "${INCENTIVE_STATE}" != "installed" ] || [ "${INCENTIVE_MODEL_COUNT}" != "1" ]; then
+    echo "ERROR: Incentive verification failed (module=${INCENTIVE_STATE:-missing}, model_count=${INCENTIVE_MODEL_COUNT})."
+    sudo systemctl start "odoo-${DB_NAME}"
+    exit 1
+fi
+if [ "${BOOST_STATE}" != "installed" ] || [ "${BOOST_MODEL_COUNT}" != "1" ]; then
+    echo "ERROR: Boost verification failed (module=${BOOST_STATE:-missing}, model_count=${BOOST_MODEL_COUNT})."
     sudo systemctl start "odoo-${DB_NAME}"
     exit 1
 fi

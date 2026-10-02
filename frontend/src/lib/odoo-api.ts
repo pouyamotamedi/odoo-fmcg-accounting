@@ -2090,3 +2090,77 @@ export async function requestHubbleiumReward(rewardId: number) {
 export async function getIncentiveManagerData() {
   return callMethod('fmcg.incentive.period', 'manager_bootstrap', []);
 }
+
+// ============ Boost Pricing ============
+
+export type BoostSelectionState = 'inherit' | 'included' | 'excluded';
+
+export interface BoostPlan {
+  id: number;
+  name: string;
+  is_fixed_percent: boolean;
+  fixed_percent: number;
+}
+
+export interface BoostProductPlanPrice {
+  category_id: number;
+  original_price: number;
+  override_price: number | null;
+}
+
+export interface BoostConfigurationProduct {
+  id: number;
+  name: string;
+  selected_state: BoostSelectionState;
+  selected: boolean;
+  regular_original_price: number;
+  regular_override_price: number | null;
+  plan_prices: BoostProductPlanPrice[];
+}
+
+export interface BoostConfiguration {
+  enabled: boolean;
+  percent: number;
+  all_products: boolean;
+  revision: number;
+  regular_prices: Record<string, number>;
+  plan_prices: Record<string, Record<string, number>>;
+  plans: BoostPlan[];
+  products: BoostConfigurationProduct[];
+}
+
+export interface BoostPosPricing {
+  enabled: boolean;
+  percent: number;
+  all_products: boolean;
+  revision: number;
+  regular_prices: Record<string, number>;
+  plan_prices: Record<string, Record<string, number>>;
+  plans: [];
+  products: [];
+}
+
+export interface SaveBoostConfiguration {
+  revision: number;
+  enabled: boolean;
+  percent: number;
+  all_products: boolean;
+  products: Array<{
+    product_id: number;
+    selected_state: BoostSelectionState;
+    regular_override_price: number | null;
+    plan_overrides: Array<{ category_id: number; override_price: number | null }>;
+  }>;
+}
+
+export async function getBoostConfiguration(): Promise<BoostConfiguration> {
+  return callMethod('fmcg.boost.config', 'get_configuration');
+}
+
+export async function saveBoostConfiguration(values: SaveBoostConfiguration): Promise<BoostConfiguration> {
+  return callMethod('fmcg.boost.config', 'save_configuration', [values]);
+}
+
+export async function getBoostPosPricing(): Promise<BoostPosPricing> {
+  return callMethod('fmcg.boost.config', 'get_pos_pricing');
+}

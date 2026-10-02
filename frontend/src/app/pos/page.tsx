@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, getInvoiceResidual, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, getInvoiceResidual, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel, getBoostPosPricing, type BoostPosPricing } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { logout as odooLogout } from '@/lib/odoo-api';
@@ -59,6 +59,46 @@ async function loadSalesHistory(): Promise<SalesHistoryInvoice[]> {
 const TOMAN_TOLERANCE = 1;
 
 type CardPaymentRow = { amount: string; paid: boolean; accounted: boolean };
+type DirectPaymentMethod = 'cash' | 'card' | 'credit';
+type DirectSaleLine = { product_id: number; qty: number; price_unit: number };
+type DirectSaleRecovery = {
+  method: DirectPaymentMethod;
+  partnerId?: number;
+  lines: DirectSaleLine[];
+  total: number;
+  journalId?: number;
+  paxRequired: boolean;
+  paxStatus: 'not_started' | 'started' | 'paid';
+  invoiceCreationStarted: boolean;
+  invoiceId: number | null;
+  invoicePosted: boolean;
+  paymentAccounted: boolean;
+};
+
+function directPaymentLabel(method: DirectPaymentMethod): string {
+  if (method === 'cash') return 'نقد';
+  if (method === 'card') return 'کارت';
+  return 'اعتباری';
+}
+
+function hasDirectExternalEffect(recovery: DirectSaleRecovery | null): boolean {
+  return Boolean(recovery && (
+    recovery.paxStatus !== 'not_started' ||
+    recovery.invoiceCreationStarted ||
+    recovery.invoiceId ||
+    recovery.invoicePosted ||
+    recovery.paymentAccounted
+  ));
+}
+
+function canResumeDirectSale(recovery: DirectSaleRecovery | null): boolean {
+  return Boolean(
+    recovery &&
+    recovery.paxStatus !== 'started' &&
+    !(recovery.invoiceCreationStarted && !recovery.invoiceId) &&
+    (recovery.paxStatus === 'paid' || recovery.invoiceId),
+  );
+}
 
 function toman(value: string | number): number {
   const parsed = Number(value);
@@ -81,6 +121,23 @@ function formatSaleDateTime(value: string | false | undefined): string {
     minute: '2-digit',
     timeZone: 'Asia/Tehran',
   });
+}
+
+function resolveProductPrice(
+  product: OdooProduct,
+  discountId: number,
+  originalPlanPrices: Map<number, number>,
+  snapshot: BoostPosPricing | null,
+): number {
+  const original = discountId !== 0 && originalPlanPrices.has(product.id)
+    ? originalPlanPrices.get(product.id)!
+    : product.list_price;
+  if (!snapshot) return original;
+  const channelPrices = discountId === 0
+    ? snapshot.regular_prices
+    : snapshot.plan_prices[String(discountId)];
+  const resolved = channelPrices?.[String(product.id)];
+  return typeof resolved === 'number' && Number.isFinite(resolved) ? resolved : original;
 }
 
 export default function PosPage() {
@@ -114,6 +171,19 @@ export default function PosPage() {
   const [discountCategories, setDiscountCategories] = useState<{id:number;name:string}[]>([]);
   const [activeDiscount, setActiveDiscount] = useState<number>(0);
   const [discountPrices, setDiscountPrices] = useState<Map<number, number>>(new Map());
+  const [boostPricing, setBoostPricing] = useState<BoostPosPricing | null>(null);
+  const productsRef = useRef<OdooProduct[]>([]);
+  const activeDiscountRef = useRef(0);
+  const discountPricesRef = useRef<Map<number, number>>(new Map());
+  const discountRequestRef = useRef(0);
+  const boostPricingRef = useRef<BoostPosPricing | null>(null);
+  const boostRequestRef = useRef(0);
+  const pendingBoostPricingRef = useRef<BoostPosPricing | null>(null);
+  const checkoutPricingFrozenRef = useRef(false);
+  const checkoutCommittedRef = useRef(false);
+  const paymentModalOpenRef = useRef(false);
+  const directRecoveryRef = useRef<DirectSaleRecovery | null>(null);
+  const [directRecovery, setDirectRecoveryState] = useState<DirectSaleRecovery | null>(null);
   const [variantPopup, setVariantPopup] = useState<{tmplId:number; name:string; variants:any[]} | null>(null);
   // Variant cache for offline mode
   const [variantCache, setVariantCache] = useState<Map<number, any[]>>(new Map());
@@ -129,6 +199,10 @@ export default function PosPage() {
   const [newCustPhone, setNewCustPhone] = useState('');
   // PAX terminal setting
   const [paxTerminalEnabled, setPaxTerminalEnabled] = useState(false);
+
+  useEffect(() => { productsRef.current = products; }, [products]);
+  useEffect(() => { activeDiscountRef.current = activeDiscount; }, [activeDiscount]);
+  useEffect(() => { discountPricesRef.current = discountPrices; }, [discountPrices]);
 
   const searchBlocked = showCredit || showSplit || showSalesHistory || showMultiCard ||
     showNewCustomer || Boolean(variantPopup);
@@ -159,15 +233,32 @@ export default function PosPage() {
     setVariantCache(cache);
   }, []);
 
+  const replaceCanonicalProducts = useCallback((incoming: OdooProduct[]) => {
+    productsRef.current = incoming;
+    setProducts(incoming);
+    rebuildVariantCache(incoming);
+    return incoming;
+  }, [rebuildVariantCache]);
+
+  const mergeCanonicalProducts = useCallback((incoming: OdooProduct[]) => {
+    const byId = new Map(productsRef.current.map((product) => [product.id, product]));
+    for (const product of incoming) {
+      byId.set(product.id, { ...byId.get(product.id), ...product });
+    }
+    const merged = Array.from(byId.values());
+    productsRef.current = merged;
+    setProducts(merged);
+    rebuildVariantCache(merged);
+    return merged;
+  }, [rebuildVariantCache]);
+
   const refreshProducts = useCallback(async () => {
     try {
-      const data = (await getProducts()) || [];
-      setProducts(data);
-      rebuildVariantCache(data);
+      replaceCanonicalProducts((await getProducts()) || []);
     } catch {
       // Keep the current POS product cache available if refresh fails.
     }
-  }, [rebuildVariantCache]);
+  }, [replaceCanonicalProducts]);
 
   const applyLocalStockDelta = useCallback((lines: Array<{ product_id: number; qty: number }>) => {
     const soldByProduct = new Map<number, number>();
@@ -175,18 +266,66 @@ export default function PosPage() {
       soldByProduct.set(line.product_id, (soldByProduct.get(line.product_id) || 0) + line.qty);
     }
 
-    const reduceStock = (product: OdooProduct) => {
+    const next = productsRef.current.map((product) => {
       const sold = soldByProduct.get(product.id) || 0;
       return sold ? { ...product, qty_available: Math.max(0, product.qty_available - sold) } : product;
-    };
-
-    setProducts(previous => previous.map(reduceStock));
-    setVariantCache(previous => {
-      const next = new Map<number, any[]>();
-      previous.forEach((variants, templateId) => next.set(templateId, variants.map(reduceStock)));
-      return next;
     });
+    productsRef.current = next;
+    setProducts(next);
+    rebuildVariantCache(next);
+  }, [rebuildVariantCache]);
+
+  const commitBoostPricing = useCallback((next: BoostPosPricing) => {
+    boostPricingRef.current = next;
+    setBoostPricing(next);
+    const priceMap = new Map<number, number>();
+    const productMap = new Map(productsRef.current.map((product) => [product.id, product]));
+    for (const item of useCartStore.getState().items) {
+      const product = productMap.get(item.id);
+      if (product) {
+        priceMap.set(item.id, resolveProductPrice(
+          product,
+          activeDiscountRef.current,
+          discountPricesRef.current,
+          next,
+        ));
+      }
+    }
+    updateAllPrices(priceMap);
+  }, [updateAllPrices]);
+
+  const freezeCheckoutPricing = useCallback(() => {
+    checkoutPricingFrozenRef.current = true;
   }, []);
+
+  const releaseCheckoutPricing = useCallback(() => {
+    if (paymentModalOpenRef.current || checkoutCommittedRef.current) return;
+    checkoutPricingFrozenRef.current = false;
+    const pending = pendingBoostPricingRef.current;
+    if (pending) {
+      pendingBoostPricingRef.current = null;
+      commitBoostPricing(pending);
+    }
+  }, [commitBoostPricing]);
+
+  const acceptBoostPricing = useCallback((next: BoostPosPricing, requestId: number) => {
+    if (requestId !== boostRequestRef.current) return;
+    if (checkoutPricingFrozenRef.current) {
+      pendingBoostPricingRef.current = next;
+      return;
+    }
+    commitBoostPricing(next);
+  }, [commitBoostPricing]);
+
+  const refreshBoostPricing = useCallback(async () => {
+    if (!navigator.onLine) return;
+    const requestId = ++boostRequestRef.current;
+    try {
+      acceptBoostPricing(await getBoostPosPricing(), requestId);
+    } catch {
+      // Keep the last successful snapshot so an active sale remains consistently priced.
+    }
+  }, [acceptBoostPricing]);
 
   const finishSale = useCallback((lines: Array<{ product_id: number; qty: number }>, refreshStock = false) => {
     applyLocalStockDelta(lines);
@@ -298,12 +437,18 @@ export default function PosPage() {
 
   useEffect(() => {
     async function load() {
+      const boostRequestId = ++boostRequestRef.current;
       try {
-        const [data, jrnls, discCats] = await Promise.all([getProducts(), getBankCashBalances(), getDiscountCategories()]);
-        setProducts(data || []);
-        rebuildVariantCache(data || []);
+        const [data, jrnls, discCats, boost] = await Promise.all([
+          getProducts(),
+          getBankCashBalances(),
+          getDiscountCategories(),
+          getBoostPosPricing().catch(() => null),
+        ]);
+        replaceCanonicalProducts(data || []);
         setDiscountCategories(discCats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
         setPosJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
+        if (boost) acceptBoostPricing(boost, boostRequestId);
         // Check PAX terminal setting
         try {
           const settings = await getCompanySettings();
@@ -318,7 +463,19 @@ export default function PosPage() {
       } catch {}
     }
     load();
-  }, []);
+  }, [acceptBoostPricing, replaceCanonicalProducts]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshBoostPricing();
+    };
+    const interval = window.setInterval(refreshWhenVisible, 30000);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [refreshBoostPricing]);
 
   useEffect(() => {
     if (searchBlocked) {
@@ -331,16 +488,21 @@ export default function PosPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [loading, submitting, searchBlocked, focusSearchIfSafe]);
 
-  // Load discount prices when discount category changes
+  // Load original channel prices, then resolve the canonical Boost snapshot.
   async function handleDiscountChange(catId: number) {
-    setActiveDiscount(catId);
+    if (checkoutPricingFrozenRef.current) return;
+    const requestId = ++discountRequestRef.current;
     if (catId === 0) {
-      setDiscountPrices(new Map());
-      // Reset cart prices to original list_price
+      const emptyPrices = new Map<number, number>();
+      activeDiscountRef.current = 0;
+      discountPricesRef.current = emptyPrices;
+      setActiveDiscount(0);
+      setDiscountPrices(emptyPrices);
       const priceMap = new Map<number, number>();
-      for (const item of items) {
-        const prod = products.find(p => p.id === item.id);
-        if (prod) priceMap.set(item.id, prod.list_price);
+      const productMap = new Map(productsRef.current.map((product) => [product.id, product]));
+      for (const item of useCartStore.getState().items) {
+        const product = productMap.get(item.id);
+        if (product) priceMap.set(item.id, resolveProductPrice(product, 0, emptyPrices, boostPricingRef.current));
       }
       updateAllPrices(priceMap);
       return;
@@ -348,21 +510,38 @@ export default function PosPage() {
     try {
       const prods = await getProductsWithDiscount(catId);
       const priceMap = new Map<number, number>();
-      for (const p of (prods || [])) {
-        priceMap.set(p.id, p.discount_price);
+      for (const product of (prods || [])) {
+        if (typeof product.discount_price === 'number') priceMap.set(product.id, product.discount_price);
       }
+      if (requestId !== discountRequestRef.current || checkoutPricingFrozenRef.current) return;
+      mergeCanonicalProducts((prods || []) as OdooProduct[]);
+      activeDiscountRef.current = catId;
+      discountPricesRef.current = priceMap;
+      setActiveDiscount(catId);
       setDiscountPrices(priceMap);
-      // Update existing cart items with new prices
-      updateAllPrices(priceMap);
-    } catch { setDiscountPrices(new Map()); }
+      const repriced = new Map<number, number>();
+      const productMap = new Map(productsRef.current.map((product) => [product.id, product]));
+      for (const item of useCartStore.getState().items) {
+        const product = productMap.get(item.id);
+        if (product) repriced.set(item.id, resolveProductPrice(product, catId, priceMap, boostPricingRef.current));
+      }
+      updateAllPrices(repriced);
+    } catch {
+      // Keep the previous channel and prices if loading the requested plan fails.
+    }
   }
 
-  // Get effective price for a product (considering active discount)
   function getEffectivePrice(product: OdooProduct): number {
-    if (activeDiscount && discountPrices.has(product.id)) {
-      return discountPrices.get(product.id)!;
-    }
-    return product.list_price;
+    return resolveProductPrice(
+      product,
+      activeDiscountRef.current,
+      discountPricesRef.current,
+      boostPricingRef.current,
+    );
+  }
+
+  function getDisplayedPrice(product: OdooProduct): number {
+    return resolveProductPrice(product, activeDiscount, discountPrices, boostPricing);
   }
 
   function togglePin(productId: number) {
@@ -410,6 +589,7 @@ export default function PosPage() {
 
   // If searching by barcode, check for exact barcode match -> add directly
   useEffect(() => {
+    if (hasDirectExternalEffect(directRecoveryRef.current)) return;
     if (search.length >= 6) {
       // Support comma-separated barcodes
       const match = products.find((p) => {
@@ -426,16 +606,25 @@ export default function PosPage() {
   }, [search]);
 
   async function handleProductClick(product: OdooProduct & {variantCount?: number}) {
+    if (hasDirectExternalEffect(directRecoveryRef.current)) {
+      alert('این فروش در حال بازیابی است؛ ابتدا همان روش پرداخت را تکمیل کنید.');
+      return;
+    }
     const tmplId = (product as any).product_tmpl_id?.[0] || (product as any).product_tmpl_id;
     if (product.variantCount && product.variantCount > 1 && tmplId) {
       // Has variants - show popup (use cache first, API as fallback)
       let vars = variantCache.get(tmplId);
       if (!vars || vars.length <= 1) {
         try {
-          vars = await getProductVariants(tmplId);
+          const fetched = await getProductVariants(tmplId);
+          vars = (fetched || []).map((variant: OdooProduct) => ({
+            ...variant,
+            product_tmpl_id: variant.product_tmpl_id || tmplId,
+          }));
+          mergeCanonicalProducts(vars as OdooProduct[]);
         } catch {
           // Offline fallback: use cached products for this template
-          vars = products.filter(p => {
+          vars = productsRef.current.filter(p => {
             const pTmpl = (p as any).product_tmpl_id?.[0] || (p as any).product_tmpl_id || p.id;
             return pTmpl === tmplId;
           });
@@ -451,16 +640,20 @@ export default function PosPage() {
     window.requestAnimationFrame(focusSearchIfSafe);
   }
 
-  function selectVariant(variant: any) {
-    const price = activeDiscount && discountPrices.has(variant.id) ? discountPrices.get(variant.id)! : variant.list_price;
+  function selectVariant(variant: OdooProduct) {
+    if (hasDirectExternalEffect(directRecoveryRef.current)) {
+      alert('این فروش در حال بازیابی است؛ ابتدا همان روش پرداخت را تکمیل کنید.');
+      return;
+    }
+    const price = getEffectivePrice(variant);
     // Extract short name for display
-    const tmplName = variantPopup?.name || '';
     const shortName = variant.display_name || variant.name;
     addItem({ id: variant.id, name: shortName, price });
     setVariantPopup(null);
   }
 
   const cartTotal = total();
+  const directRecoveryLocked = hasDirectExternalEffect(directRecovery);
 
   function resolvePosJournal(type: 'cash' | 'bank'): number | undefined {
     let configuredId = 0;
@@ -472,150 +665,290 @@ export default function PosPage() {
     return posJournals.find(j => j.type === type)?.id;
   }
 
+  function storeDirectRecovery(next: DirectSaleRecovery | null): void {
+    directRecoveryRef.current = next;
+    setDirectRecoveryState(next);
+  }
+
+  function patchDirectRecovery(patch: Partial<DirectSaleRecovery>): DirectSaleRecovery {
+    const current = directRecoveryRef.current;
+    if (!current) throw new Error('اطلاعات بازیابی فروش در دسترس نیست');
+    const next = { ...current, ...patch };
+    storeDirectRecovery(next);
+    return next;
+  }
+
+  function resetSafeDirectRecovery(): void {
+    storeDirectRecovery(null);
+    checkoutCommittedRef.current = false;
+    releaseCheckoutPricing();
+  }
+
+  function closeCreditPayment(): void {
+    const recovery = directRecoveryRef.current;
+    if (hasDirectExternalEffect(recovery)) {
+      alert(`این فروش اثر خارجی دارد و قابل پاک‌کردن نیست؛ برای ادامه همان روش پرداخت «${directPaymentLabel(recovery!.method)}» را دوباره بزنید.`);
+      return;
+    }
+    setShowCredit(false);
+    resetSafeDirectRecovery();
+  }
+
+  function clearCartSafely(): void {
+    const recovery = directRecoveryRef.current;
+    if (checkoutCommittedRef.current || hasDirectExternalEffect(recovery)) {
+      const method = recovery ? directPaymentLabel(recovery.method) : 'فعلی';
+      alert(`بخشی از فروش انجام شده است و سبد نباید پاک شود؛ برای ادامه همان روش پرداخت «${method}» را دوباره بزنید.`);
+      return;
+    }
+    clearCart();
+    storeDirectRecovery(null);
+    checkoutCommittedRef.current = false;
+    releaseCheckoutPricing();
+  }
+
   function closeSplitPayment(): void {
-    if (splitInvoiceId || splitCashAccounted || splitCardPayments.some(row => row.paid || row.accounted)) {
+    if (checkoutCommittedRef.current || splitInvoiceId || splitCashAccounted || splitCardPayments.some(row => row.paid || row.accounted)) {
       alert('بخشی از پرداخت انجام شده است؛ تا تکمیل حسابداری امکان بستن این پنجره وجود ندارد');
       return;
     }
+    paymentModalOpenRef.current = false;
     setShowSplit(false);
+    releaseCheckoutPricing();
   }
 
   function closeMultiCardPayment(): void {
-    if (multiCardInvoiceId || cardPayments.some(row => row.paid || row.accounted)) {
+    if (checkoutCommittedRef.current || multiCardInvoiceId || cardPayments.some(row => row.paid || row.accounted)) {
       alert('بخشی از پرداخت انجام شده است؛ تا تکمیل حسابداری امکان بستن این پنجره وجود ندارد');
       return;
     }
+    paymentModalOpenRef.current = false;
     setShowMultiCard(false);
+    releaseCheckoutPricing();
   }
 
   // Reset all per-sale state only after the sale is registered or safely queued.
   function completeSale() {
+    const emptyPrices = new Map<number, number>();
     clearCart();
     setSearch('');
+    activeDiscountRef.current = 0;
+    discountPricesRef.current = emptyPrices;
     setActiveDiscount(0);
-    setDiscountPrices(new Map());
+    setDiscountPrices(emptyPrices);
+    storeDirectRecovery(null);
+    checkoutCommittedRef.current = false;
+    paymentModalOpenRef.current = false;
+    releaseCheckoutPricing();
   }
 
-  async function handlePayment(method: 'cash' | 'card' | 'credit') {
+  function createDirectRecovery(method: DirectPaymentMethod, partnerId?: number): DirectSaleRecovery | null {
+    const existing = directRecoveryRef.current;
+    if (existing) {
+      if (existing.method !== method) {
+        alert(`این فروش با روش «${directPaymentLabel(existing.method)}» شروع شده است؛ برای ادامه همان روش را دوباره بزنید.`);
+        return null;
+      }
+      if (method === 'credit' && existing.partnerId !== partnerId) {
+        alert('مشتری این فروش اعتباری قبلاً ثبت شده است؛ همان مشتری را انتخاب کنید.');
+        return null;
+      }
+      return existing;
+    }
+
+    const currentItems = useCartStore.getState().items;
+    const lines = currentItems.map(item => ({
+      product_id: item.id,
+      qty: item.quantity,
+      price_unit: item.price,
+    }));
+    if (lines.length === 0) return null;
+    const pinnedTotal = lines.reduce((sum, line) => sum + line.qty * line.price_unit, 0);
+    const journalId = method === 'credit'
+      ? undefined
+      : resolvePosJournal(method === 'card' ? 'bank' : 'cash');
+    if (method !== 'credit' && !journalId) {
+      alert(method === 'card' ? 'دفتر بانکی کارت تنظیم نشده است' : 'دفتر نقدی صندوق تنظیم نشده است');
+      return null;
+    }
+
+    const recovery: DirectSaleRecovery = {
+      method,
+      partnerId,
+      lines,
+      total: pinnedTotal,
+      journalId,
+      paxRequired: method === 'card' && paxTerminalEnabled,
+      paxStatus: 'not_started',
+      invoiceCreationStarted: false,
+      invoiceId: null,
+      invoicePosted: false,
+      paymentAccounted: false,
+    };
+    storeDirectRecovery(recovery);
+    return recovery;
+  }
+
+  async function queueDirectRecovery(recovery: DirectSaleRecovery): Promise<void> {
+    await queueTransaction({
+      lines: recovery.lines,
+      payment_method: recovery.method,
+      partner_id: recovery.partnerId,
+      credit_note: recovery.method === 'credit' && creditNote ? creditNote : undefined,
+      total: recovery.total,
+    });
+    setPendingCount(await getPendingCount());
+    finishSale(recovery.lines, false);
+  }
+
+  async function runDirectRecovery(initial: DirectSaleRecovery): Promise<void> {
+    let recovery = directRecoveryRef.current || initial;
+
+    if (recovery.method === 'card' && recovery.paxRequired) {
+      if (recovery.paxStatus === 'started') {
+        throw new Error('نتیجه درخواست قبلی کارتخوان نامشخص است؛ پیش از هر اقدام وضعیت تراکنش را روی دستگاه بررسی کنید');
+      }
+      if (recovery.paxStatus !== 'paid') {
+        recovery = patchDirectRecovery({ paxStatus: 'started' });
+        checkoutCommittedRef.current = true;
+        setMsg('💳 مبلغ به دستگاه کارتخوان ارسال شد، منتظر کشیدن کارت...');
+        const pax = await payWithPaxTerminal(recovery.total, 'sale');
+        if (!pax?.success) {
+          recovery = patchDirectRecovery({ paxStatus: 'not_started' });
+          checkoutCommittedRef.current = false;
+          setMsg('');
+          throw new Error(pax?.error || 'تراکنش کارتخوان ناموفق بود');
+        }
+        recovery = patchDirectRecovery({ paxStatus: 'paid' });
+      }
+    }
+
+    if (!recovery.invoiceId) {
+      if (recovery.invoiceCreationStarted) {
+        throw new Error('نتیجه ایجاد فاکتور قبلی نامشخص است؛ برای جلوگیری از فاکتور تکراری ابتدا وضعیت Odoo را بررسی کنید');
+      }
+      recovery = patchDirectRecovery({ invoiceCreationStarted: true });
+      checkoutCommittedRef.current = true;
+      const invoiceId = await createPosOrder({
+        lines: recovery.lines,
+        payment_method: recovery.method,
+        partner_id: recovery.partnerId,
+      });
+      recovery = patchDirectRecovery({ invoiceId });
+    }
+
+    const invoiceId = Number(recovery.invoiceId);
+    if (!recovery.invoicePosted) {
+      const invoices = await searchRead('account.move', [['id', '=', invoiceId]], ['state'], 1);
+      if (invoices?.[0]?.state !== 'posted') {
+        await confirmInvoice(invoiceId);
+      }
+      recovery = patchDirectRecovery({ invoicePosted: true });
+    }
+
+    if (recovery.method !== 'credit' && !recovery.paymentAccounted) {
+      const residual = await getInvoiceResidual(invoiceId);
+      if (amountsMatch(residual, 0)) {
+        recovery = patchDirectRecovery({ paymentAccounted: true });
+      } else {
+        await registerInvoicePayment(invoiceId, recovery.journalId!, recovery.total);
+        recovery = patchDirectRecovery({ paymentAccounted: true });
+      }
+    }
+
+    try {
+      await createStockDelivery(recovery.lines, recovery.partnerId);
+    } catch { /* best effort */ }
+    finishSale(recovery.lines, true);
+  }
+
+  function handleDirectFailure(error: unknown): void {
+    const recovery = directRecoveryRef.current;
+    const reason = error instanceof Error ? error.message : 'خطا در ثبت فاکتور';
+    if (!hasDirectExternalEffect(recovery)) {
+      resetSafeDirectRecovery();
+      alert(reason);
+      return;
+    }
+
+    const invoiceOutcomeUnknown = Boolean(recovery?.invoiceCreationStarted && !recovery.invoiceId);
+    const resumable = canResumeDirectSale(recovery);
+    const guidance = invoiceOutcomeUnknown
+      ? 'نتیجه ایجاد فاکتور نامشخص است؛ برای جلوگیری از فاکتور تکراری، تلاش خودکار و ساخت مجدد متوقف شده است. وضعیت فاکتور را در Odoo بررسی کنید.'
+      : resumable
+        ? `این فروش قابل ادامه است؛ برای ادامه همان روش پرداخت «${directPaymentLabel(recovery!.method)}» را دوباره بزنید. کارتخوان یا فاکتور انجام‌شده تکرار نخواهد شد.`
+        : 'وضعیت اثر خارجی نامشخص است؛ برای جلوگیری از پرداخت یا فاکتور تکراری دوباره تلاش نکنید و ابتدا وضعیت کارتخوان/Odoo را بررسی کنید.';
+    setMsg(`⚠️ ${guidance}`);
+    alert(`${reason}\n${guidance}`);
+  }
+
+  async function handlePayment(method: DirectPaymentMethod) {
+    const pendingRecovery = directRecoveryRef.current;
+    if (pendingRecovery && pendingRecovery.method !== method) {
+      alert(`این فروش با روش «${directPaymentLabel(pendingRecovery.method)}» شروع شده است؛ برای ادامه همان روش را دوباره بزنید.`);
+      return;
+    }
+
     if (method === 'credit') {
       try {
         const cust = await getPartners('customer');
         setCustomers(cust?.map((c:any) => ({id:c.id, name:c.name})) || []);
       } catch { setCustomers([]); }
+      if (pendingRecovery?.partnerId) setSelectedCustomer(pendingRecovery.partnerId);
       setShowCredit(true);
       return;
     }
 
+    const recovery = createDirectRecovery(method);
+    if (!recovery) return;
+    freezeCheckoutPricing();
     setSubmitting(true);
     try {
-      // If offline, queue the transaction
       if (!navigator.onLine) {
-        const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
-        await queueTransaction({ lines, payment_method: method, total: cartTotal });
-        const count = await getPendingCount();
-        setPendingCount(count);
-        finishSale(lines, false);
+        if (hasDirectExternalEffect(recovery)) {
+          throw new Error('این فروش قبلاً اثر خارجی داشته است؛ پس از اتصال همان روش پرداخت را دوباره بزنید');
+        }
+        await queueDirectRecovery(recovery);
         setMsg('📥 تراکنش ذخیره شد (آفلاین) - پس از اتصال همگام‌سازی می‌شود');
         setTimeout(() => setMsg(''), 4000);
-        setSubmitting(false);
-        return;
-      }
-
-      // For card payments, push the amount to the PAX S800 terminal if enabled.
-      if (method === 'card' && paxTerminalEnabled) {
-        setMsg('💳 مبلغ به دستگاه کارتخوان ارسال شد، منتظر کشیدن کارت...');
-        const pax = await payWithPaxTerminal(cartTotal, 'sale');
-        if (!pax?.success) {
-          setMsg('');
-          alert(pax?.error || 'تراکنش کارتخوان ناموفق بود');
-          setSubmitting(false);
-          return;
-        }
-      }
-      const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
-      const invoiceId = await createPosOrder({ lines, payment_method: method });
-      await confirmInvoice(invoiceId);
-      // Register payment - get journal from settings or fallback to first found
-      let journalId: number | undefined;
-      try {
-        const saved = localStorage.getItem('pos_journal_settings');
-        if (saved) {
-          const s = JSON.parse(saved);
-          journalId = method === 'card' ? s.card : s.cash;
-        }
-      } catch {}
-      if (!journalId) {
-        const cashJournal = posJournals.find(j => j.type === 'cash');
-        const bankJournal = posJournals.find(j => j.type === 'bank');
-        journalId = method === 'card' ? bankJournal?.id : cashJournal?.id;
-      }
-      if (journalId) {
-        await registerInvoicePayment(invoiceId, journalId, cartTotal);
-      }
-      // Create stock delivery to reduce inventory
-      try {
-        await createStockDelivery(lines);
-      } catch { /* best effort */ }
-      finishSale(lines, true);
-      setMsg('✅ فاکتور ثبت شد');
-      setTimeout(() => setMsg(''), 3000);
-    } catch (e:any) {
-      // If network error, queue offline
-      if (!navigator.onLine || e.message?.includes('fetch')) {
-        const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
-        await queueTransaction({ lines, payment_method: method, total: cartTotal });
-        const count = await getPendingCount();
-        setPendingCount(count);
-        finishSale(lines, false);
-        setMsg('📥 تراکنش ذخیره شد (آفلاین)');
-        setTimeout(() => setMsg(''), 4000);
       } else {
-        alert(e.message || 'خطا در ثبت فاکتور');
+        await runDirectRecovery(recovery);
+        setMsg('✅ فاکتور ثبت شد');
+        setTimeout(() => setMsg(''), 3000);
       }
+    } catch (error) {
+      handleDirectFailure(error);
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
   }
 
   async function handleCreditSale() {
     if (!selectedCustomer) { alert('مشتری را انتخاب کنید'); return; }
+    const recovery = createDirectRecovery('credit', selectedCustomer);
+    if (!recovery) return;
+    freezeCheckoutPricing();
     setSubmitting(true);
     try {
-      // If offline, queue
       if (!navigator.onLine) {
-        const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
-        await queueTransaction({
-          lines,
-          payment_method: 'credit',
-          partner_id: selectedCustomer,
-          credit_note: creditNote || undefined,
-          total: cartTotal,
-        });
-        const count = await getPendingCount();
-        setPendingCount(count);
-        finishSale(lines, false);
+        if (hasDirectExternalEffect(recovery)) {
+          throw new Error('این فروش قبلاً اثر خارجی داشته است؛ پس از اتصال همان روش پرداخت را دوباره بزنید');
+        }
+        await queueDirectRecovery(recovery);
         setShowCredit(false);
         setMsg('📥 فروش اعتباری ذخیره شد (آفلاین)');
         setTimeout(() => setMsg(''), 4000);
-        setSubmitting(false);
-        return;
+      } else {
+        await runDirectRecovery(recovery);
+        setShowCredit(false);
+        setMsg('✅ فروش اعتباری ثبت شد');
+        setTimeout(() => setMsg(''), 3000);
       }
-
-      const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
-      const invoiceId = await createPosOrder({ lines, payment_method: 'credit', partner_id: selectedCustomer });
-      await confirmInvoice(invoiceId);
-      // فاکتور فروش تأیید شده خودش receivable ایجاد میکنه - نیازی به ثبت جداگانه نیست
-      // Create stock delivery to reduce inventory
-      try {
-        await createStockDelivery(lines.map(l => ({ product_id: l.product_id, qty: l.qty })));
-      } catch { /* best effort */ }
-      finishSale(lines.map(line => ({ product_id: line.product_id, qty: line.qty })), true);
-      setShowCredit(false);
-      setMsg('✅ فروش اعتباری ثبت شد');
-      setTimeout(() => setMsg(''), 3000);
-    } catch (e:any) {
-      alert(e.message || 'خطا');
+    } catch (error) {
+      handleDirectFailure(error);
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
   }
 
   async function handleSplitPayment() {
@@ -649,6 +982,7 @@ export default function PosPage() {
     if (cashAmt > 0 && !cashJournalId) { alert('دفتر نقدی صندوق تنظیم نشده است'); return; }
     if (cardAmt > 0 && !bankJournalId) { alert('دفتر بانکی کارت تنظیم نشده است'); return; }
 
+    checkoutCommittedRef.current = true;
     setSubmitting(true);
     try {
       const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));
@@ -700,6 +1034,11 @@ export default function PosPage() {
         {/* Header */}
         <header className="bg-slate-800 text-white px-4 py-3 flex justify-between items-center">
           <span className="text-lg font-bold">🏪 صندوق فروش</span>
+          {boostPricing?.enabled && (
+            <span className="rounded-full bg-orange-500 px-3 py-1 text-xs font-bold text-white shadow" role="status">
+              🚀 حالت بوست فعال است ({boostPricing.percent >= 0 ? '+' : ''}{toPersianDigits(boostPricing.percent)}٪)
+            </span>
+          )}
           <div className="flex items-center gap-4">
             {msg && <span className="text-xs bg-green-500 px-2 py-1 rounded">{msg}</span>}
             {pendingCount > 0 && (
@@ -767,7 +1106,8 @@ export default function PosPage() {
             placeholder="🔍 جستجو یا اسکن بارکد..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none"
+            disabled={directRecoveryLocked}
+            className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 focus:outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
           />
           {/* Show all products toggle */}
           <label className="flex items-center gap-2 mt-2 cursor-pointer">
@@ -814,7 +1154,8 @@ export default function PosPage() {
               >
                 <button
                   onClick={() => handleProductClick(product)}
-                  className={`relative rounded-xl overflow-hidden border-2 ${pinnedIds.has(product.id) ? 'border-yellow-400' : 'border-transparent'} hover:border-indigo-400 hover:scale-[1.02] transition-all shadow-sm aspect-square w-full`}
+                  disabled={directRecoveryLocked}
+                  className={`relative rounded-xl overflow-hidden border-2 ${pinnedIds.has(product.id) ? 'border-yellow-400' : 'border-transparent'} hover:border-indigo-400 hover:scale-[1.02] disabled:opacity-60 disabled:hover:scale-100 transition-all shadow-sm aspect-square w-full`}
                 >
                   {product.image_128 ? (
                     <img src={`data:image/png;base64,${product.image_128}`} alt="" className="absolute inset-0 z-0 w-full h-full object-cover" />
@@ -832,7 +1173,7 @@ export default function PosPage() {
                       موجودی: {toPersianDigits(Math.max(0, Math.round(product.qty_available ?? 0)))}
                     </div>
                     <div className="text-white text-xs font-bold mt-1 bg-green-600/80 px-2 py-0.5 rounded">
-                      {formatPrice(getEffectivePrice(product))}
+                      {formatPrice(getDisplayedPrice(product))}
                     </div>
                     {activeDiscount !== 0 && discountPrices.has(product.id) && (
                       <span className="text-[10px] text-gray-300 line-through">{formatPrice(product.list_price)}</span>
@@ -858,7 +1199,7 @@ export default function PosPage() {
           <strong className="text-sm">🧾 فاکتور فروش</strong>
           {items.length > 0 && (
             <button
-              onClick={clearCart}
+              onClick={clearCartSafely}
               className="float-left text-xs text-red-500 hover:text-red-700"
             >
               پاک کردن
@@ -883,14 +1224,16 @@ export default function PosPage() {
                   <div className="flex items-center gap-2 mt-1">
                     <button
                       onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                      className="w-6 h-6 rounded bg-gray-200 text-xs font-bold"
+                      disabled={directRecoveryLocked}
+                      className="w-6 h-6 rounded bg-gray-200 text-xs font-bold disabled:opacity-40"
                     >
                       -
                     </button>
-                    <input type="number" value={item.quantity} onChange={(e) => updateQuantity(item.id, Number(e.target.value) || 1)} className="w-12 text-center text-sm border border-gray-200 rounded px-1 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" min="1" />
+                    <input type="number" value={item.quantity} onChange={(e) => updateQuantity(item.id, Number(e.target.value) || 1)} disabled={directRecoveryLocked} className="w-12 text-center text-sm border border-gray-200 rounded px-1 py-0.5 disabled:bg-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" min="1" />
                     <button
                       onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                      className="w-6 h-6 rounded bg-gray-200 text-xs font-bold"
+                      disabled={directRecoveryLocked}
+                      className="w-6 h-6 rounded bg-gray-200 text-xs font-bold disabled:opacity-40"
                     >
                       +
                     </button>
@@ -916,32 +1259,34 @@ export default function PosPage() {
         <div className="grid grid-cols-2 gap-2 p-3">
           <button
             onClick={() => handlePayment('cash')}
-            disabled={items.length === 0 || submitting}
+            disabled={items.length === 0 || submitting || Boolean(directRecovery && directRecovery.method !== 'cash')}
             className="py-3 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 disabled:opacity-40 transition"
           >
             💵 نقد
           </button>
           <button
             onClick={() => handlePayment('card')}
-            disabled={items.length === 0 || submitting || !isOnline}
+            disabled={items.length === 0 || submitting || !isOnline || Boolean(directRecovery && directRecovery.method !== 'card')}
             className="py-3 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-40 transition"
           >
             💳 کارت
           </button>
           <button
             onClick={() => {
+              paymentModalOpenRef.current = true;
+              freezeCheckoutPricing();
               setCardPayments([{amount: String(toman(cartTotal)), paid: false, accounted: false}]);
               setMultiCardInvoiceId(null);
               setShowMultiCard(true);
             }}
-            disabled={items.length === 0 || submitting || !isOnline}
+            disabled={items.length === 0 || submitting || !isOnline || Boolean(directRecovery)}
             className="py-3 bg-blue-400 text-white rounded-lg text-xs font-bold hover:bg-blue-500 disabled:opacity-40 transition"
           >
             💳💳 چند کارت
           </button>
           <button
             onClick={() => handlePayment('credit')}
-            disabled={items.length === 0 || submitting}
+            disabled={items.length === 0 || submitting || Boolean(directRecovery && directRecovery.method !== 'credit')}
             className="py-3 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 disabled:opacity-40 transition"
           >
             🤝 اعتباری
@@ -952,9 +1297,11 @@ export default function PosPage() {
               setSplitCash(''); setSplitCredit(''); setSplitCustomer(0);
               setSplitCardPayments([{amount: '', paid: false, accounted: false}]);
               setSplitCashAccounted(false); setSplitInvoiceId(null);
+              paymentModalOpenRef.current = true;
+              freezeCheckoutPricing();
               setShowSplit(true);
             }}
-            disabled={items.length === 0 || submitting}
+            disabled={items.length === 0 || submitting || Boolean(directRecovery)}
             className="py-3 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 disabled:opacity-40 transition"
           >
             🔀 ترکیبی
@@ -974,7 +1321,8 @@ export default function PosPage() {
                 <select
                   value={selectedCustomer}
                   onChange={(e) => setSelectedCustomer(Number(e.target.value))}
-                  className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-amber-400 focus:outline-none"
+                  disabled={directRecoveryLocked}
+                  className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:border-amber-400 focus:outline-none disabled:bg-gray-100"
                 >
                   <option value={0}>— انتخاب کنید —</option>
                   {customers.map((c) => (
@@ -1003,7 +1351,7 @@ export default function PosPage() {
                 {submitting ? 'در حال ثبت...' : 'ثبت فروش نسیه'}
               </button>
               <button
-                onClick={() => setShowCredit(false)}
+                onClick={closeCreditPayment}
                 className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300"
               >
                 انصراف
@@ -1252,6 +1600,7 @@ export default function PosPage() {
                 const bankJournalId = resolvePosJournal('bank');
                 if (!bankJournalId) { alert('دفتر بانکی کارت تنظیم نشده است'); return; }
 
+                checkoutCommittedRef.current = true;
                 setSubmitting(true);
                 try {
                   const lines = items.map(i => ({ product_id: i.id, qty: i.quantity, price_unit: i.price }));

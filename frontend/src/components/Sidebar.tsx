@@ -22,6 +22,7 @@ const menuItems = [
   { href: '/admin/analytics', label: 'تحلیل مدیریتی', icon: '📊', key: 'analytics' },
   { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️', key: 'returns' },
   { href: '/admin/discounts', label: 'تخفیفات', icon: '🏷️', key: 'discounts' },
+  { href: '/admin/boost', label: 'حالت بوست', icon: '🚀', key: 'boost', adminOnly: true },
   { href: '/admin/stock-count', label: 'انبارگردانی', icon: '📋', key: 'stock-count' },
   { href: '/admin/fiscal-year', label: 'سال مالی', icon: '📅', key: 'fiscal-year' },
   { href: '/admin/incentives', label: 'پورسانت و هابلیوم', icon: '🪙', key: 'incentives' },
@@ -53,13 +54,14 @@ export default function Sidebar() {
   // Filter menus for sellers based on allowed list
   const visibleMenus = (() => {
     if (isAdmin || role === 'admin') return menuItems;
+    const sellerMenus = menuItems.filter((menu) => !('adminOnly' in menu && menu.adminOnly));
     try {
       const saved = localStorage.getItem('seller_allowed_menus');
       const allowed: string[] = saved ? JSON.parse(saved) : [];
-      if (allowed.length === 0) return menuItems;
-      return menuItems.filter(m => allowed.includes(m.key));
+      if (allowed.length === 0) return sellerMenus;
+      return sellerMenus.filter(m => allowed.includes(m.key));
     } catch {
-      return menuItems;
+      return sellerMenus;
     }
   })();
 

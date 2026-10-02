@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="rule_fmcg_boost_config_company" model="ir.rule">
+        <field name="name">Boost configuration by allowed company</field>
+        <field name="model_id" ref="model_fmcg_boost_config"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+    <record id="rule_fmcg_boost_product_company" model="ir.rule">
+        <field name="name">Boost products by allowed company</field>
+        <field name="model_id" ref="model_fmcg_boost_product"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+    <record id="rule_fmcg_boost_plan_override_company" model="ir.rule">
+        <field name="name">Boost plan overrides by allowed company</field>
+        <field name="model_id" ref="model_fmcg_boost_plan_override"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+</odoo>
