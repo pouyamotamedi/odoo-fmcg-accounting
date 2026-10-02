@@ -2123,6 +2123,8 @@ export interface BoostConfiguration {
   percent: number;
   all_products: boolean;
   revision: number;
+  override_semantics: 'final';
+  currency_decimal_places: number;
   regular_prices: Record<string, number>;
   plan_prices: Record<string, Record<string, number>>;
   plans: BoostPlan[];
@@ -2134,6 +2136,8 @@ export interface BoostPosPricing {
   percent: number;
   all_products: boolean;
   revision: number;
+  override_semantics: 'final';
+  currency_decimal_places: number;
   regular_prices: Record<string, number>;
   plan_prices: Record<string, Record<string, number>>;
   plans: [];

@@ -46,6 +46,15 @@ function Switch({ checked, onChange, label, disabled = false }: {
   );
 }
 
+function roundCurrency(value: number, decimalPlaces: number): number {
+  const factor = 10 ** decimalPlaces;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function derivedPrice(original: number, percent: number, decimalPlaces: number): number {
+  return roundCurrency(Math.max(0, original * (1 + percent / 100)), decimalPlaces);
+}
+
 function toEditable(configuration: BoostConfiguration): EditableProduct[] {
   return configuration.products.map((product) => {
     const plans: Record<number, EditablePrice> = {};
@@ -143,14 +152,24 @@ export default function BoostPage() {
 
   function resetPrice(productId: number, categoryId: number | null) {
     updateProduct(productId, (product) => categoryId === null
-      ? { ...product, regular: { value: String(product.regularOriginal), hasOverride: false } }
+      ? { ...product, regular: { value: '', hasOverride: false } }
       : {
           ...product,
           plans: {
             ...product.plans,
-            [categoryId]: { value: String(product.originals[categoryId]), hasOverride: false },
+            [categoryId]: { value: '', hasOverride: false },
           },
         });
+  }
+
+  const draftPercent = Number(percent);
+  const displayPercent = Number.isFinite(draftPercent) && draftPercent >= -100 ? draftPercent : 0;
+
+  const currencyDecimalPlaces = configuration?.currency_decimal_places ?? 0;
+
+  function visiblePrice(price: EditablePrice, original: number): string {
+    if (price.hasOverride) return price.value;
+    return String(derivedPrice(original, displayPercent, currencyDecimalPlaces));
   }
 
   async function handleSave() {
@@ -273,7 +292,7 @@ export default function BoostPage() {
                   <td className="max-w-64 p-3 font-medium text-slate-700">{product.name}</td>
                   <td className="p-3">
                     <div className="flex items-center gap-2">
-                      <PriceInput value={product.regular.value} onChange={(value) => setPrice(product.id, null, value)} className={`w-32 rounded-md border px-2 py-1.5 text-left ${product.regular.hasOverride ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white'}`} />
+                      <PriceInput value={visiblePrice(product.regular, product.regularOriginal)} onChange={(value) => setPrice(product.id, null, value)} className={`w-32 rounded-md border px-2 py-1.5 text-left ${product.regular.hasOverride ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white'}`} />
                       {product.regular.hasOverride && <button type="button" onClick={() => resetPrice(product.id, null)} className="text-[10px] text-red-500 hover:underline">بازنشانی</button>}
                     </div>
                     <span className="mt-1 block text-[9px] text-gray-400">اصلی: {formatPrice(product.regularOriginal)}</span>
@@ -283,7 +302,7 @@ export default function BoostPage() {
                     return (
                       <td key={plan.id} className="p-3">
                         <div className="flex items-center gap-2">
-                          <PriceInput value={price.value} onChange={(value) => setPrice(product.id, plan.id, value)} className={`w-32 rounded-md border px-2 py-1.5 text-left ${price.hasOverride ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white'}`} />
+                          <PriceInput value={visiblePrice(price, product.originals[plan.id])} onChange={(value) => setPrice(product.id, plan.id, value)} className={`w-32 rounded-md border px-2 py-1.5 text-left ${price.hasOverride ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white'}`} />
                           {price.hasOverride && <button type="button" onClick={() => resetPrice(product.id, plan.id)} className="text-[10px] text-red-500 hover:underline">بازنشانی</button>}
                         </div>
                         <span className="mt-1 block text-[9px] text-gray-400">اصلی: {formatPrice(product.originals[plan.id])}</span>

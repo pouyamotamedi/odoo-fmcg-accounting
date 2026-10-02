@@ -11,6 +11,12 @@ _SELECTION_STATES = [
 ]
 
 
+_OVERRIDE_SEMANTICS = [
+    ('base', 'Legacy base price before Boost percent'),
+    ('final', 'Final POS price'),
+]
+
+
 class FmcgBoostConfig(models.Model):
     _name = 'fmcg.boost.config'
     _description = 'FMCG Boost Configuration'
@@ -23,6 +29,10 @@ class FmcgBoostConfig(models.Model):
     percent = fields.Float(default=0.0)
     all_products = fields.Boolean(default=True)
     revision = fields.Integer(default=1, readonly=True)
+    override_semantics = fields.Selection(
+        _OVERRIDE_SEMANTICS, required=True, default='base', readonly=True,
+        help='Storage contract for override prices. Legacy rows are normalized once from base to final.',
+    )
     product_ids = fields.One2many('fmcg.boost.product', 'config_id')
 
     _sql_constraints = [
@@ -48,8 +58,32 @@ class FmcgBoostConfig(models.Model):
         company = self.env.company
         config = self.sudo().search([('company_id', '=', company.id)], limit=1)
         if not config and create:
-            config = self.sudo().create({'company_id': company.id})
+            config = self.sudo().create({
+                'company_id': company.id,
+                'override_semantics': 'final',
+            })
+        if config:
+            config._normalize_override_semantics()
         return config
+
+    def _normalize_override_semantics(self):
+        """Convert legacy base-before-percent overrides to final prices exactly once."""
+        currency = self.company_id.currency_id
+        for config in self.filtered(lambda row: row.override_semantics == 'base'):
+            multiplier = 1 + config.percent / 100
+            boost_products = config.product_ids.sudo()
+            for boost_product in boost_products.filtered('regular_has_override'):
+                boost_product.sudo().write({
+                    'regular_override_price': currency.round(max(
+                        0.0, boost_product.regular_override_price * multiplier
+                    )),
+                })
+            for override in boost_products.mapped('plan_override_ids').filtered('has_override'):
+                override.sudo().write({
+                    'override_price': currency.round(max(0.0, override.override_price * multiplier)),
+                })
+            config.sudo().write({'override_semantics': 'final'})
+        return self
 
     @api.model
     def _active_products(self):
@@ -106,6 +140,8 @@ class FmcgBoostConfig(models.Model):
                 'percent': 0.0,
                 'all_products': True,
                 'revision': 0,
+                'override_semantics': 'final',
+                'currency_decimal_places': self.env.company.currency_id.decimal_places,
                 'regular_prices': regular_original,
                 'plan_prices': plan_original,
                 'plans': [],
@@ -142,9 +178,12 @@ class FmcgBoostConfig(models.Model):
                 boost_product.regular_override_price
                 if boost_product and boost_product.regular_has_override else None
             )
-            regular_base = regular_override if regular_override is not None else regular_original[product.id]
             effective_regular[product.id] = (
-                self.env.company.currency_id.round(max(0.0, regular_base * multiplier))
+                self.env.company.currency_id.round(max(
+                    0.0,
+                    regular_override if regular_override is not None
+                    else regular_original[product.id] * multiplier,
+                ))
                 if apply_boost else regular_original[product.id]
             )
 
@@ -153,9 +192,11 @@ class FmcgBoostConfig(models.Model):
                 override = override_by_key.get((product.id, plan.id))
                 override_price = override.override_price if override and override.has_override else None
                 original = plan_original[plan.id][product.id]
-                base = override_price if override_price is not None else original
                 effective_plans[plan.id][product.id] = (
-                    self.env.company.currency_id.round(max(0.0, base * multiplier))
+                    self.env.company.currency_id.round(max(
+                        0.0,
+                        override_price if override_price is not None else original * multiplier,
+                    ))
                     if apply_boost else original
                 )
                 if include_table:
@@ -181,6 +222,8 @@ class FmcgBoostConfig(models.Model):
             'percent': config.percent,
             'all_products': config.all_products,
             'revision': config.revision,
+            'override_semantics': 'final',
+            'currency_decimal_places': self.env.company.currency_id.decimal_places,
             'regular_prices': effective_regular,
             'plan_prices': effective_plans,
             'plans': [{
