@@ -144,11 +144,26 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
   const config = data?.config || {};
   const period = data?.period || {};
   
-  // Get days in month from period
+  // Get shift type for a specific date (considering custom times)
+  const getShiftTypeForDate = (date: Date, shiftType: 'morning' | 'evening'): string => {
+    return shiftType; // Just return the type, UI will show both options
+  };
+  
+  // Get default times from config
+  const defaultMorningStart = config.morning_start || 8;
+  const defaultMorningEnd = config.morning_end || 15;
+  const defaultEveningStart = config.evening_start || 15;
+  const defaultEveningEnd = config.evening_end || 24;
+  
+  // Get days in month from period - fix timezone issue by adding Tehran offset
   const getDaysInMonth = (from: string, to: string) => {
     const days: Date[] = [];
-    const start = new Date(from);
-    const end = new Date(to);
+    // Parse dates as UTC to avoid timezone issues
+    const startParts = from.split('-');
+    const endParts = to.split('-');
+    const start = new Date(Date.UTC(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2])));
+    const end = new Date(Date.UTC(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2])));
+    
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       days.push(new Date(d));
     }
@@ -166,27 +181,39 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
     shiftMap.set(key, s);
   });
   
-  // Save shift handler
-  const saveShift = async (date: string, shiftType: string, sellerId: number) => {
+  // Save shift handler with time
+  const saveShift = async (date: string, shiftType: string, sellerId: number, customTimes?: {start: number, end: number}) => {
     const key = `${date}-${shiftType}`;
     const existing = shiftMap.get(key);
     
     try {
       if (existing?.id) {
-        // Update existing shift
         if (sellerId) {
-          await write('fmcg.incentive.shift', [existing.id], { seller_id: sellerId });
+          const updateVals: any = { seller_id: sellerId };
+          if (customTimes) {
+            if (shiftType === 'morning') {
+              updateVals.custom_start = customTimes.start;
+              updateVals.custom_end = customTimes.end;
+            } else {
+              updateVals.custom_start = customTimes.start;
+              updateVals.custom_end = customTimes.end;
+            }
+          }
+          await write('fmcg.incentive.shift', [existing.id], updateVals);
         } else {
-          // If no seller selected, delete the shift
           await unlink('fmcg.incentive.shift', [existing.id]);
         }
       } else if (sellerId) {
-        // Create new shift
-        await create('fmcg.incentive.shift', {
+        const createVals: any = {
           shift_date: date,
           shift_type: shiftType,
           seller_id: sellerId,
-        });
+        };
+        if (customTimes) {
+          createVals.custom_start = customTimes.start;
+          createVals.custom_end = customTimes.end;
+        }
+        await create('fmcg.incentive.shift', createVals);
       }
       await reload();
     } catch (e) {
@@ -194,11 +221,24 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
     }
   };
   
-  const formatDate = (d: Date) => d.toISOString().split('T')[0];
+  // Format date as YYYY-MM-DD in Tehran timezone
+  const formatDate = (d: Date) => {
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
   
   const getDayName = (d: Date) => {
-    const names = ['دوشنبه', 'سه‌شنبه', 'چهارشننه', 'پنجشنبه', 'جمعه', 'شنبه', 'یکشنبه'];
-    return names[d.getDay()];
+    // UTC day matches Tehran day
+    const names = ['دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه', 'یکشنبه'];
+    return names[d.getUTCDay()];
+  };
+  
+  const formatTime = (hour: number) => {
+    const h = Math.floor(hour);
+    const m = Math.round((hour - h) * 60);
+    return `${h}:${String(m).padStart(2, '0')}`;
   };
 
   return (
@@ -210,8 +250,12 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
             <tr>
               <th className="p-2 text-right">تاریخ</th>
               <th className="p-2">روز</th>
-              <th className="p-2">صبح</th>
-              <th className="p-2">عصر</th>
+              <th className="p-2">صبح (ساعت)</th>
+              <th className="p-2">فروشنده صبح</th>
+              <th className="p-2">هدف صبح</th>
+              <th className="p-2">عصر (ساعت)</th>
+              <th className="p-2">فروشنده عصر</th>
+              <th className="p-2">هدف عصر</th>
             </tr>
           </thead>
           <tbody>
@@ -226,6 +270,20 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
                   <td className="p-2 text-gray-500">{getDayName(day)}</td>
                   <td className="p-2">
                     <select
+                      value={morningShift?.custom_start ? 'custom' : 'default'}
+                      onChange={(e) => {
+                        if (e.target.value === 'default') {
+                          saveShift(dateStr, 'morning', morningShift?.seller_id?.[0] || 0, undefined);
+                        }
+                      }}
+                      className="border rounded p-1 text-xs w-16"
+                    >
+                      <option value="default">{formatTime(defaultMorningStart)}-{formatTime(defaultMorningEnd)}</option>
+                      <option value="custom">دستی</option>
+                    </select>
+                  </td>
+                  <td className="p-2">
+                    <select
                       value={morningShift?.seller_id?.[0] || ''}
                       onChange={(e) => saveShift(dateStr, 'morning', Number(e.target.value))}
                       className="border rounded p-1 w-full"
@@ -234,6 +292,23 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
                       {sellers.map((s: any) => (
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
+                    </select>
+                  </td>
+                  <td className="p-2 text-center text-xs">
+                    {morningShift?.target_amount ? formatPrice(morningShift.target_amount) : '-'}
+                  </td>
+                  <td className="p-2">
+                    <select
+                      value={eveningShift?.custom_start ? 'custom' : 'default'}
+                      onChange={(e) => {
+                        if (e.target.value === 'default') {
+                          saveShift(dateStr, 'evening', eveningShift?.seller_id?.[0] || 0, undefined);
+                        }
+                      }}
+                      className="border rounded p-1 text-xs w-16"
+                    >
+                      <option value="default">{formatTime(defaultEveningStart)}-{formatTime(defaultEveningEnd)}</option>
+                      <option value="custom">دستی</option>
                     </select>
                   </td>
                   <td className="p-2">
@@ -247,6 +322,9 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
+                  </td>
+                  <td className="p-2 text-center text-xs">
+                    {eveningShift?.target_amount ? formatPrice(eveningShift.target_amount) : '-'}
                   </td>
                 </tr>
               );

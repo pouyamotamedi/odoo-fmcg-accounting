@@ -237,6 +237,8 @@ class FmcgIncentiveShift(models.Model):
 
     shift_date = fields.Date(required=True, index=True, default=tehran_today)
     shift_type = fields.Selection(SHIFT_SELECTION, required=True, index=True)
+    custom_start = fields.Float(string='ساعت شروع سفارشی', help='ساعت شروع شیفت (خالی برای استفاده از تنظیمات پیش‌فرض)')
+    custom_end = fields.Float(string='ساعت پایان سفارشی', help='ساعت پایان شیفت (خالی برای استفاده از تنظیمات پیش‌فرض)')
     seller_id = fields.Many2one('res.users', required=True, index=True, domain=[('share', '=', False)])
     policy_id = fields.Many2one('fmcg.incentive.policy', required=True, default=lambda self: self.env['fmcg.incentive.policy'].search([('company_id', '=', self.env.company.id), ('active', '=', True)], limit=1))
     company_id = fields.Many2one(related='policy_id.company_id', store=True, index=True)
