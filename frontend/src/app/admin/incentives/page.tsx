@@ -155,22 +155,26 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
   const defaultEveningStart = config.evening_start || 15;
   const defaultEveningEnd = config.evening_end || 24;
   
-  // Get days in month from period - fix timezone issue by adding Tehran offset
+  // Get days in month from period - use local Tehran time
   const getDaysInMonth = (from: string, to: string) => {
-    const days: Date[] = [];
-    // Parse dates as UTC to avoid timezone issues
-    const startParts = from.split('-');
-    const endParts = to.split('-');
-    const start = new Date(Date.UTC(parseInt(startParts[0]), parseInt(startParts[1]) - 1, parseInt(startParts[2])));
-    const end = new Date(Date.UTC(parseInt(endParts[0]), parseInt(endParts[1]) - 1, parseInt(endParts[2])));
+    const days: string[] = [];
+    const [startY, startM, startD] = from.split('-').map(Number);
+    const [endY, endM, endD] = to.split('-').map(Number);
     
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      days.push(new Date(d));
+    const current = new Date(startY, startM - 1, startD);
+    const end = new Date(endY, endM - 1, endD);
+    
+    while (current <= end) {
+      const y = current.getFullYear();
+      const m = String(current.getMonth() + 1).padStart(2, '0');
+      const d = String(current.getDate()).padStart(2, '0');
+      days.push(`${y}-${m}-${d}`);
+      current.setDate(current.getDate() + 1);
     }
     return days;
   };
   
-  const days = period.date_from && period.date_to 
+  const dateStrings = period.date_from && period.date_to 
     ? getDaysInMonth(period.date_from, period.date_to)
     : [];
   
@@ -182,7 +186,7 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
   });
   
   // Save shift handler with time
-  const saveShift = async (date: string, shiftType: string, sellerId: number, customTimes?: {start: number, end: number}) => {
+  const saveShift = async (date: string, shiftType: string, sellerId: number, customStart?: number, customEnd?: number) => {
     const key = `${date}-${shiftType}`;
     const existing = shiftMap.get(key);
     
@@ -190,14 +194,9 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
       if (existing?.id) {
         if (sellerId) {
           const updateVals: any = { seller_id: sellerId };
-          if (customTimes) {
-            if (shiftType === 'morning') {
-              updateVals.custom_start = customTimes.start;
-              updateVals.custom_end = customTimes.end;
-            } else {
-              updateVals.custom_start = customTimes.start;
-              updateVals.custom_end = customTimes.end;
-            }
+          if (customStart !== undefined) {
+            updateVals.custom_start = customStart;
+            updateVals.custom_end = customEnd;
           }
           await write('fmcg.incentive.shift', [existing.id], updateVals);
         } else {
@@ -209,9 +208,9 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
           shift_type: shiftType,
           seller_id: sellerId,
         };
-        if (customTimes) {
-          createVals.custom_start = customTimes.start;
-          createVals.custom_end = customTimes.end;
+        if (customStart !== undefined) {
+          createVals.custom_start = customStart;
+          createVals.custom_end = customEnd;
         }
         await create('fmcg.incentive.shift', createVals);
       }
@@ -221,18 +220,11 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
     }
   };
   
-  // Format date as YYYY-MM-DD in Tehran timezone
-  const formatDate = (d: Date) => {
-    const year = d.getUTCFullYear();
-    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(d.getUTCDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-  
-  const getDayName = (d: Date) => {
-    // UTC day matches Tehran day
+  const getDayName = (dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
     const names = ['دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه', 'یکشنبه'];
-    return names[d.getUTCDay()];
+    return names[date.getDay()];
   };
   
   const formatTime = (hour: number) => {
@@ -240,6 +232,11 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
     const m = Math.round((hour - h) * 60);
     return `${h}:${String(m).padStart(2, '0')}`;
   };
+  
+  // State for custom time editing
+  const [editingTime, setEditingTime] = useState<{date: string, type: string} | null>(null);
+  const [customStart, setCustomStart] = useState(8);
+  const [customEnd, setCustomEnd] = useState(15);
 
   return (
     <div className="space-y-4">
@@ -259,28 +256,40 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
             </tr>
           </thead>
           <tbody>
-            {days.map((day) => {
-              const dateStr = formatDate(day);
+            {dateStrings.map((dateStr) => {
               const morningShift = shiftMap.get(`${dateStr}-morning`);
               const eveningShift = shiftMap.get(`${dateStr}-evening`);
+              const isEditingMorning = editingTime?.date === dateStr && editingTime?.type === 'morning';
+              const isEditingEvening = editingTime?.date === dateStr && editingTime?.type === 'evening';
               
               return (
                 <tr key={dateStr} className="border-t">
                   <td className="p-2">{formatTehranJalaliDate(dateStr)}</td>
-                  <td className="p-2 text-gray-500">{getDayName(day)}</td>
+                  <td className="p-2 text-gray-500">{getDayName(dateStr)}</td>
                   <td className="p-2">
-                    <select
-                      value={morningShift?.custom_start ? 'custom' : 'default'}
-                      onChange={(e) => {
-                        if (e.target.value === 'default') {
-                          saveShift(dateStr, 'morning', morningShift?.seller_id?.[0] || 0, undefined);
-                        }
-                      }}
-                      className="border rounded p-1 text-xs w-16"
-                    >
-                      <option value="default">{formatTime(defaultMorningStart)}-{formatTime(defaultMorningEnd)}</option>
-                      <option value="custom">دستی</option>
-                    </select>
+                    {morningShift?.custom_start ? (
+                      <button
+                        onClick={() => {
+                          setEditingTime({ date: dateStr, type: 'morning' });
+                          setCustomStart(morningShift.custom_start || defaultMorningStart);
+                          setCustomEnd(morningShift.custom_end || defaultMorningEnd);
+                        }}
+                        className="text-xs bg-yellow-100 px-2 py-1 rounded"
+                      >
+                        {formatTime(morningShift.custom_start)}-{formatTime(morningShift.custom_end)}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setEditingTime({ date: dateStr, type: 'morning' });
+                          setCustomStart(defaultMorningStart);
+                          setCustomEnd(defaultMorningEnd);
+                        }}
+                        className="text-xs text-gray-500 hover:text-indigo-600"
+                      >
+                        {formatTime(defaultMorningStart)}-{formatTime(defaultMorningEnd)}
+                      </button>
+                    )}
                   </td>
                   <td className="p-2">
                     <select
@@ -298,18 +307,29 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
                     {morningShift?.target_amount ? formatPrice(morningShift.target_amount) : '-'}
                   </td>
                   <td className="p-2">
-                    <select
-                      value={eveningShift?.custom_start ? 'custom' : 'default'}
-                      onChange={(e) => {
-                        if (e.target.value === 'default') {
-                          saveShift(dateStr, 'evening', eveningShift?.seller_id?.[0] || 0, undefined);
-                        }
-                      }}
-                      className="border rounded p-1 text-xs w-16"
-                    >
-                      <option value="default">{formatTime(defaultEveningStart)}-{formatTime(defaultEveningEnd)}</option>
-                      <option value="custom">دستی</option>
-                    </select>
+                    {eveningShift?.custom_start ? (
+                      <button
+                        onClick={() => {
+                          setEditingTime({ date: dateStr, type: 'evening' });
+                          setCustomStart(eveningShift.custom_start || defaultEveningStart);
+                          setCustomEnd(eveningShift.custom_end || defaultEveningEnd);
+                        }}
+                        className="text-xs bg-yellow-100 px-2 py-1 rounded"
+                      >
+                        {formatTime(eveningShift.custom_start)}-{formatTime(eveningShift.custom_end)}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setEditingTime({ date: dateStr, type: 'evening' });
+                          setCustomStart(defaultEveningStart);
+                          setCustomEnd(defaultEveningEnd);
+                        }}
+                        className="text-xs text-gray-500 hover:text-indigo-600"
+                      >
+                        {formatTime(defaultEveningStart)}-{formatTime(defaultEveningEnd)}
+                      </button>
+                    )}
                   </td>
                   <td className="p-2">
                     <select
@@ -331,8 +351,63 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
             })}
           </tbody>
         </table>
-        {days.length === 0 && <Empty text="اطلاعات دوره مالی موجود نیست." />}
+        {dateStrings.length === 0 && <Empty text="اطلاعات دوره مالی موجود نیست." />}
       </div>
+      
+      {/* Custom Time Modal */}
+      {editingTime && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-80 shadow-xl">
+            <h3 className="font-bold mb-4">تنظیم ساعت شیفت</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm text-gray-500">ساعت شروع</label>
+                <input
+                  type="number"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(Number(e.target.value))}
+                  className="w-full border rounded p-2"
+                  min="0"
+                  max="24"
+                  step="0.5"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-500">ساعت پایان</label>
+                <input
+                  type="number"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(Number(e.target.value))}
+                  className="w-full border rounded p-2"
+                  min="0"
+                  max="24"
+                  step="0.5"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setEditingTime(null)}
+                className="flex-1 px-4 py-2 border rounded-lg"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={async () => {
+                  const currentShift = editingTime.type === 'morning' 
+                    ? shiftMap.get(`${editingTime.date}-morning`)
+                    : shiftMap.get(`${editingTime.date}-evening`);
+                  await saveShift(editingTime.date, editingTime.type, currentShift?.seller_id?.[0] || 0, customStart, customEnd);
+                  setEditingTime(null);
+                }}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg"
+              >
+                ذخیره
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
