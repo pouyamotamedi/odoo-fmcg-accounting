@@ -15,35 +15,35 @@
     </record>
 
     <record id="period_manager_rule" model="ir.rule">
-        <field name="Manager can manage incentive periods</field>
+        <field name="name">Manager can manage incentive periods</field>
         <field name="model_id" ref="model_fmcg_incentive_period"/>
         <field name="domain_force">[(1, '=', 1)]</field>
         <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager')), (4, ref('base.group_erp_manager'))]"/>
     </record>
 
     <record id="result_manager_rule" model="ir.rule">
-        <field name="Manager can manage incentive results</field>
+        <field name="name">Manager can manage incentive results</field>
         <field name="model_id" ref="model_fmcg_incentive_result"/>
         <field name="domain_force">[(1, '=', 1)]</field>
         <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager')), (4, ref('base.group_erp_manager'))]"/>
     </record>
 
     <record id="adjustment_manager_rule" model="ir.rule">
-        <field name="Manager can manage incentive adjustments</field>
+        <field name="name">Manager can manage incentive adjustments</field>
         <field name="model_id" ref="model_fmcg_incentive_adjustment"/>
         <field name="domain_force">[(1, '=', 1)]</field>
         <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager')), (4, ref('base.group_erp_manager'))]"/>
     </record>
 
     <record id="weight_manager_rule" model="ir.rule">
-        <field name="Manager can manage incentive weights</field>
+        <field name="name">Manager can manage incentive weights</field>
         <field name="model_id" ref="model_fmcg_incentive_weight"/>
         <field name="domain_force">[(1, '=', 1)]</field>
         <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager')), (4, ref('base.group_erp_manager'))]"/>
     </record>
 
     <record id="tier_manager_rule" model="ir.rule">
-        <field name="Manager can manage incentive tiers</field>
+        <field name="name">Manager can manage incentive tiers</field>
         <field name="model_id" ref="model_fmcg_incentive_tier"/>
         <field name="domain_force">[(1, '=', 1)]</field>
         <field name="groups" eval="[(4, ref('fmcg_sales_incentive.group_incentive_manager')), (4, ref('base.group_erp_manager'))]"/>
