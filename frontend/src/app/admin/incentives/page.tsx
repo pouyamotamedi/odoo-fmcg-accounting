@@ -190,32 +190,44 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
     const key = `${date}-${shiftType}`;
     const existing = shiftMap.get(key);
     
+    console.log('saveShift called:', { date, shiftType, sellerId, customStart, customEnd, existing });
+    
     try {
       if (existing?.id) {
-        if (sellerId) {
-          const updateVals: any = { seller_id: sellerId };
-          if (customStart !== undefined) {
-            updateVals.custom_start = customStart;
-            updateVals.custom_end = customEnd;
-          }
-          await write('fmcg.incentive.shift', [existing.id], updateVals);
-        } else {
-          await unlink('fmcg.incentive.shift', [existing.id]);
+        // Always use write for existing shifts - even if sellerId is 0, we can still update custom times
+        const updateVals: any = {};
+        
+        // Only update seller_id if explicitly provided and non-zero
+        if (sellerId && sellerId > 0) {
+          updateVals.seller_id = sellerId;
         }
-      } else if (sellerId) {
+        
+        // Always include custom times when provided
+        if (customStart !== undefined && customStart !== null) {
+          updateVals.custom_start = customStart;
+          updateVals.custom_end = customEnd;
+          console.log('Writing shift with custom times:', updateVals);
+        }
+        
+        if (Object.keys(updateVals).length > 0) {
+          await write('fmcg.incentive.shift', [existing.id], updateVals);
+        }
+      } else if (sellerId && sellerId > 0) {
         const createVals: any = {
           shift_date: date,
           shift_type: shiftType,
           seller_id: sellerId,
         };
-        if (customStart !== undefined) {
+        if (customStart !== undefined && customStart !== null) {
           createVals.custom_start = customStart;
           createVals.custom_end = customEnd;
+          console.log('Creating shift with custom times:', createVals);
         }
         await create('fmcg.incentive.shift', createVals);
       }
       await reload();
     } catch (e) {
+      console.error('saveShift error:', e);
       report(errorText(e));
     }
   };
@@ -394,10 +406,16 @@ function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(
               </button>
               <button
                 onClick={async () => {
-                  const currentShift = editingTime.type === 'morning' 
+                  // Get the existing shift to preserve seller_id
+                  const targetShift = editingTime.type === 'morning' 
                     ? shiftMap.get(`${editingTime.date}-morning`)
                     : shiftMap.get(`${editingTime.date}-evening`);
-                  await saveShift(editingTime.date, editingTime.type, currentShift?.seller_id?.[0] || 0, customStart, customEnd);
+                  
+                  // Get current seller_id or use 0 if none exists
+                  const currentSellerId = targetShift?.seller_id?.[0] || 0;
+                  
+                  // Save with custom times - always pass customStart to ensure it's saved
+                  await saveShift(editingTime.date, editingTime.type, currentSellerId, customStart, customEnd);
                   setEditingTime(null);
                 }}
                 className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg"
