@@ -6,6 +6,7 @@ import JalaliDatePicker from '@/components/JalaliDatePicker';
 import {
   create, getCurrentIncentiveDashboard, getIncentiveManagerData,
   requestHubbleiumReward, saveIncentiveConfiguration, swapIncentiveShifts,
+  write, unlink,
 } from '@/lib/odoo-api';
 import { formatPrice, formatTehranJalaliDate, toPersianDigits } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
@@ -78,8 +79,52 @@ function Card({ label, value }: { label: string; value: string }) { return <div 
 
 function Dashboard({ data, reload, report }: { data: any; reload: () => Promise<void>; report: (value: string) => void }) {
   if (!data) return <Empty text="داشبورد در دسترس نیست؛ خطای بالای صفحه را بررسی کنید." />;
-  const period = data.period || {}; const result = data.result || {};
-  const percent = period.target_amount ? period.total_sales / period.target_amount * 100 : 0;
+  
+  const isSimple = data.capabilities?.simple_dashboard;
+  const period = data.period || {};
+  const result = data.result || {};
+  const percent = period.target_amount ? (period.total_sales || 0) / period.target_amount * 100 : 0;
+  
+  // Simple dashboard - just show wallet and shifts
+  if (isSimple) {
+    return (
+      <div className="space-y-5">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Card label="موجودی هابلیوم" value={`${formatPrice(data.wallet?.balance || 0)} H`} />
+          <Card label="امتیاز شما" value={`${formatPrice(data.wallet?.balance || 0)} H`} />
+        </div>
+        <div className="bg-white rounded-xl border overflow-auto">
+          <div className="font-bold p-4 border-b">شیفت‌های ماه {period.name}</div>
+          {data.shifts?.length ? (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="p-3">تاریخ</th>
+                  <th>شیفت</th>
+                  <th>تحقق</th>
+                  <th>امتیاز</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.shifts.map((s: any) => (
+                  <tr key={s.id} className="border-t text-center">
+                    <td className="p-3">{formatTehranJalaliDate(s.shift_date)}</td>
+                    <td>{s.shift_type === 'morning' ? 'صبح' : 'عصر'}</td>
+                    <td>{toPersianDigits((s.achievement_percent || 0).toFixed(1))}٪</td>
+                    <td>{s.hubbleium_awarded || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="p-6 text-center text-gray-400">هنوز شیفتی برای شما تعریف نشده است.</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  
+  // Full dashboard
   return <div className="space-y-5">
     <div className="grid sm:grid-cols-4 gap-3"><Card label="هدف تیم" value={`${formatPrice(period.target_amount)} تومان`} /><Card label="فروش تیم" value={`${formatPrice(period.total_sales)} تومان`} /><Card label="پورسانت تخمینی من" value={`${formatPrice(result.final_commission || 0)} تومان`} /><Card label="موجودی هابلیوم" value={`${formatPrice(data.wallet?.balance || 0)} H`} /></div>
     <div className="bg-white rounded-xl border p-5"><div className="flex justify-between text-sm mb-2"><span>پیشرفت ماه {toPersianDigits(period.name || '')}</span><b>{toPersianDigits(percent.toFixed(1))}٪</b></div><div className="h-3 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500" style={{width:`${Math.min(percent,100)}%`}} /></div><div className="grid sm:grid-cols-3 gap-3 mt-5 text-sm"><div>هدف شخصی: <b>{formatPrice(result.personal_target || 0)}</b></div><div>فروش شیفت‌ها: <b>{formatPrice(result.actual_sales || 0)}</b></div><div>تحقق: <b>{toPersianDigits((result.achievement_percent || 0).toFixed(1))}٪</b></div></div></div>
@@ -91,9 +136,128 @@ function Dashboard({ data, reload, report }: { data: any; reload: () => Promise<
 function Action({label,onClick,disabled=false}:{label:string;onClick:()=>Promise<void>;disabled?:boolean}) { const [busy,setBusy]=useState(false);return <button disabled={disabled||busy} onClick={async()=>{setBusy(true);try{await onClick();}finally{setBusy(false);}}} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-40">{busy?'در حال انجام...':label}</button>; }
 function Field({label,value,onChange,step='1'}:{label:string;value:any;onChange:(v:string)=>void;step?:string}) {return <label className="text-xs text-gray-500"><span className="block mb-1">{label}</span><input type="number" step={step} value={value??''} onChange={e=>onChange(e.target.value)} className="w-full border rounded-lg p-2 text-slate-800"/></label>;}
 
-function Settings({initial,saved,report}:{initial:any;saved:()=>Promise<void>;report:(v:string)=>void}) { const [config,setConfig]=useState(structuredClone(initial)); const weight=(d:string,s:string)=>config.weights.find((r:any)=>String(r.weekday)===d&&r.shift_type===s)?.weight??1; return <div className="space-y-5"><div className="bg-white rounded-xl border p-5 grid sm:grid-cols-3 gap-4"><Field label="هدف ماهانه" value={config.monthly_target} onChange={v=>setConfig({...config,monthly_target:Number(v)})}/><Field label="شروع صبح" value={config.morning_start} step="0.25" onChange={v=>setConfig({...config,morning_start:Number(v)})}/><Field label="پایان صبح" value={config.morning_end} step="0.25" onChange={v=>setConfig({...config,morning_end:Number(v)})}/><Field label="شروع عصر" value={config.evening_start} step="0.25" onChange={v=>setConfig({...config,evening_start:Number(v)})}/><Field label="پایان عصر" value={config.evening_end} step="0.25" onChange={v=>setConfig({...config,evening_end:Number(v)})}/></div><div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 font-bold">وزن شیفت‌ها</div><table className="w-full text-sm"><thead><tr><th>روز</th><th>صبح</th><th>عصر</th></tr></thead><tbody>{DAYS.map(d=><tr key={d.value} className="border-t"><td className="p-3">{d.label}</td>{['morning','evening'].map(s=><td key={s} className="p-2"><input type="number" step="0.01" value={weight(d.value,s)} onChange={e=>setConfig({...config,weights:config.weights.map((r:any)=>String(r.weekday)===d.value&&r.shift_type===s?{...r,weight:Number(e.target.value)}:r)})} className="w-28 border rounded p-2"/></td>)}</tr>)}</tbody></table></div><div className="bg-white rounded-xl border p-5"><b>پلکان‌های پورسانت</b>{config.tiers.map((t:any,i:number)=><div key={i} className="grid grid-cols-3 gap-3 mt-3"><Field label="از درصد" value={t.from_percent} onChange={v=>{const a=[...config.tiers];a[i]={...t,from_percent:Number(v)};setConfig({...config,tiers:a});}}/><Field label="تا درصد؛ صفر یعنی باز" value={t.to_percent} onChange={v=>{const a=[...config.tiers];a[i]={...t,to_percent:Number(v)};setConfig({...config,tiers:a});}}/><Field label="درصد پورسانت" value={t.rate} onChange={v=>{const a=[...config.tiers];a[i]={...t,rate:Number(v)};setConfig({...config,tiers:a});}}/></div>)}</div><Action label="ذخیره تنظیمات" onClick={async()=>{try{await saveIncentiveConfiguration(config);await saved();}catch(e){report(errorText(e));throw e;}}}/></div>; }
+function Settings({initial,saved,report}:{initial:any;saved:()=>Promise<void>;report:(v:string)=>void}) { const [config,setConfig]=useState(structuredClone(initial)); const weight=(d:string,s:string)=>config.weights.find((r:any)=>String(r.weekday)===d&&r.shift_type===s)?.weight??1; return <div className="space-y-5"><div className="bg-white rounded-xl border p-5 grid sm:grid-cols-3 gap-4"><Field label="هدف ماهانه" value={config.monthly_target} onChange={v=>setConfig({...config,monthly_target:Number(v)})}/><Field label="شروع صبح" value={config.morning_start} step="0.25" onChange={v=>setConfig({...config,morning_start:Number(v)})}/><Field label="پایان صبح" value={config.morning_end} step="0.25" onChange={v=>setConfig({...config,morning_end:Number(v)})}/><Field label="شروع عصر" value={config.evening_start} step="0.25" onChange={v=>setConfig({...config,evening_start:Number(v)})}/><Field label="پایان عصر" value={config.evening_end} step="0.25" onChange={v=>setConfig({...config,evening_end:Number(v)})}/></div><div className="bg-white rounded-xl border p-5"><label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" checked={config.simple_dashboard||false} onChange={e=>setConfig({...config,simple_dashboard:e.target.checked})} className="w-5 h-5"/><div><div className="font-bold">داشبورد ساده برای فروشنده‌ها</div><div className="text-sm text-gray-500">اگر فعال باشد، فروشنده‌ها فقط موجودی هابلیوم و شیفت‌های خود را می‌بینند</div></div></label></div><div className="bg-white rounded-xl border overflow-hidden"><div className="p-4 font-bold">وزن شیفت‌ها</div><table className="w-full text-sm"><thead><tr><th>روز</th><th>صبح</th><th>عصر</th></tr></thead><tbody>{DAYS.map(d=><tr key={d.value} className="border-t"><td className="p-3">{d.label}</td>{['morning','evening'].map(s=><td key={s} className="p-2"><input type="number" step="0.01" value={weight(d.value,s)} onChange={e=>setConfig({...config,weights:config.weights.map((r:any)=>String(r.weekday)===d.value&&r.shift_type===s?{...r,weight:Number(e.target.value)}:r)})} className="w-28 border rounded p-2"/></td>)}</tr>)}</tbody></table></div><div className="bg-white rounded-xl border p-5"><b>پلکان‌های پورسانت</b>{config.tiers.map((t:any,i:number)=><div key={i} className="grid grid-cols-3 gap-3 mt-3"><Field label="از درصد" value={t.from_percent} onChange={v=>{const a=[...config.tiers];a[i]={...t,from_percent:Number(v)};setConfig({...config,tiers:a});}}/><Field label="تا درصد؛ صفر یعنی باز" value={t.to_percent} onChange={v=>{const a=[...config.tiers];a[i]={...t,to_percent:Number(v)};setConfig({...config,tiers:a});}}/><Field label="درصد پورسانت" value={t.rate} onChange={v=>{const a=[...config.tiers];a[i]={...t,rate:Number(v)};setConfig({...config,tiers:a});}}/></div>)}</div><Action label="ذخیره تنظیمات" onClick={async()=>{try{await saveIncentiveConfiguration(config);await saved();}catch(e){report(errorText(e));throw e;}}}/></div>; }
 
-function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(v:string)=>void}) {const shifts=data?.shifts||[],sellers=data?.sellers||[];const [date,setDate]=useState('');const [type,setType]=useState('morning');const [seller,setSeller]=useState(0);const [first,setFirst]=useState(0);const [second,setSecond]=useState(0);return <div className="space-y-4"><div className="bg-white border rounded-xl p-4"><b className="block mb-3">افزودن شیفت با تاریخ شمسی</b><div className="grid sm:grid-cols-4 gap-2"><JalaliDatePicker value={date} onChange={setDate}/><select value={type} onChange={e=>setType(e.target.value)} className="border rounded p-2"><option value="morning">صبح</option><option value="evening">عصر</option></select><select value={seller} onChange={e=>setSeller(Number(e.target.value))} className="border rounded p-2"><option value={0}>{sellers.length?'انتخاب فروشنده':'فروشنده‌ای تعریف نشده'}</option>{sellers.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}</select><Action disabled={!date||!seller} label="ثبت شیفت" onClick={async()=>{try{await create('fmcg.incentive.shift',{shift_date:date,shift_type:type,seller_id:seller});setDate('');await reload();}catch(e){report(errorText(e));throw e;}}}/></div></div><div className="bg-white border rounded-xl p-4"><b className="block mb-3">تعویض دو شیفت</b><div className="flex flex-wrap gap-2">{[first,second].map((value,i)=><select key={i} value={value} onChange={e=>i?setSecond(Number(e.target.value)):setFirst(Number(e.target.value))} className="border rounded p-2"><option value={0}>شیفت {i?'دوم':'اول'}</option>{shifts.map((s:any)=><option key={s.id} value={s.id}>{formatTehranJalaliDate(s.shift_date)} {s.shift_type==='morning'?'صبح':'عصر'} - {s.seller_id?.[1]}</option>)}</select>)}<Action disabled={!first||!second||first===second} label="تعویض و محاسبه مجدد" onClick={async()=>{try{await swapIncentiveShifts(first,second);await reload();}catch(e){report(errorText(e));throw e;}}}/></div></div><div className="bg-white border rounded-xl overflow-auto">{shifts.length?<table className="w-full text-sm"><thead><tr><th className="p-3">تاریخ</th><th>شیفت</th><th>فروشنده</th><th>هدف</th><th>فروش</th></tr></thead><tbody>{shifts.map((s:any)=><tr className="border-t text-center" key={s.id}><td className="p-3">{formatTehranJalaliDate(s.shift_date)}</td><td>{s.shift_type==='morning'?'صبح':'عصر'}</td><td>{s.seller_id?.[1]}</td><td>{formatPrice(s.target_amount)}</td><td>{formatPrice(s.actual_sales)}</td></tr>)}</tbody></table>:<Empty text="هنوز شیفتی ثبت نشده است."/>}</div></div>;}
+function Shifts({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(v:string)=>void}) {
+  const shifts = data?.shifts || [];
+  const sellers = data?.sellers || [];
+  const config = data?.config || {};
+  const period = data?.period || {};
+  
+  // Get days in month from period
+  const getDaysInMonth = (from: string, to: string) => {
+    const days: Date[] = [];
+    const start = new Date(from);
+    const end = new Date(to);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      days.push(new Date(d));
+    }
+    return days;
+  };
+  
+  const days = period.date_from && period.date_to 
+    ? getDaysInMonth(period.date_from, period.date_to)
+    : [];
+  
+  // Build shift map for quick lookup
+  const shiftMap = new Map();
+  shifts.forEach((s: any) => {
+    const key = `${s.shift_date}-${s.shift_type}`;
+    shiftMap.set(key, s);
+  });
+  
+  // Save shift handler
+  const saveShift = async (date: string, shiftType: string, sellerId: number) => {
+    const key = `${date}-${shiftType}`;
+    const existing = shiftMap.get(key);
+    
+    try {
+      if (existing?.id) {
+        // Update existing shift
+        if (sellerId) {
+          await write('fmcg.incentive.shift', [existing.id], { seller_id: sellerId });
+        } else {
+          // If no seller selected, delete the shift
+          await unlink('fmcg.incentive.shift', [existing.id]);
+        }
+      } else if (sellerId) {
+        // Create new shift
+        await create('fmcg.incentive.shift', {
+          shift_date: date,
+          shift_type: shiftType,
+          seller_id: sellerId,
+        });
+      }
+      await reload();
+    } catch (e) {
+      report(errorText(e));
+    }
+  };
+  
+  const formatDate = (d: Date) => d.toISOString().split('T')[0];
+  
+  const getDayName = (d: Date) => {
+    const names = ['دوشنبه', 'سه‌شنبه', 'چهارشننه', 'پنجشنبه', 'جمعه', 'شنبه', 'یکشنبه'];
+    return names[d.getDay()];
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white border rounded-xl overflow-auto">
+        <div className="p-4 font-bold border-b">برنامه شیفت‌های ماه {period.name}</div>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="p-2 text-right">تاریخ</th>
+              <th className="p-2">روز</th>
+              <th className="p-2">صبح</th>
+              <th className="p-2">عصر</th>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((day) => {
+              const dateStr = formatDate(day);
+              const morningShift = shiftMap.get(`${dateStr}-morning`);
+              const eveningShift = shiftMap.get(`${dateStr}-evening`);
+              
+              return (
+                <tr key={dateStr} className="border-t">
+                  <td className="p-2">{formatTehranJalaliDate(dateStr)}</td>
+                  <td className="p-2 text-gray-500">{getDayName(day)}</td>
+                  <td className="p-2">
+                    <select
+                      value={morningShift?.seller_id?.[0] || ''}
+                      onChange={(e) => saveShift(dateStr, 'morning', Number(e.target.value))}
+                      className="border rounded p-1 w-full"
+                    >
+                      <option value="">-</option>
+                      {sellers.map((s: any) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="p-2">
+                    <select
+                      value={eveningShift?.seller_id?.[0] || ''}
+                      onChange={(e) => saveShift(dateStr, 'evening', Number(e.target.value))}
+                      className="border rounded p-1 w-full"
+                    >
+                      <option value="">-</option>
+                      {sellers.map((s: any) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {days.length === 0 && <Empty text="اطلاعات دوره مالی موجود نیست." />}
+      </div>
+    </div>
+  );
+}
 
 function Adjustments({data,reload,report}:{data:any;reload:()=>Promise<void>;report:(v:string)=>void}) {const [seller,setSeller]=useState(0),[type,setType]=useState('commission'),[amount,setAmount]=useState(''),[reason,setReason]=useState('');return <div className="bg-white border rounded-xl p-5"><b className="block mb-4">افزایش یا کاهش دستی</b><div className="grid sm:grid-cols-2 gap-3"><select value={seller} onChange={e=>setSeller(Number(e.target.value))} className="border rounded p-2"><option value={0}>فروشنده</option>{(data?.sellers||[]).map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={type} onChange={e=>setType(e.target.value)} className="border rounded p-2"><option value="commission">پورسانت</option><option value="hubbleium">هابلیوم</option></select><input type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="مقدار؛ منفی برای کاهش" className="border rounded p-2"/><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="دلیل الزامی" className="border rounded p-2"/></div><div className="mt-4"><Action disabled={!seller||!data?.period?.id||!Number(amount)||!reason.trim()} label="ثبت تعدیل" onClick={async()=>{try{await create('fmcg.incentive.adjustment',{seller_id:seller,period_id:data.period.id,adjustment_type:type,amount:Number(amount),reason});setAmount('');setReason('');await reload();}catch(e){report(errorText(e));throw e;}}}/></div></div>;}
 

@@ -58,6 +58,11 @@ class FmcgIncentivePolicy(models.Model):
     hubbleium_personal_best = fields.Integer(default=25)
     hubbleium_consistency = fields.Integer(default=100)
     consistency_threshold = fields.Float(default=90.0)
+    simple_dashboard = fields.Boolean(
+        string='نمایش داشبورد ساده برای فروشنده‌ها',
+        default=False,
+        help='اگر فعال باشد، فروشنده‌ها داشبورد ساده بدون جزئیات مالی می‌بینند'
+    )
     weight_ids = fields.One2many('fmcg.incentive.weight', 'policy_id', copy=True)
     tier_ids = fields.One2many('fmcg.incentive.tier', 'policy_id', copy=True)
 
@@ -123,6 +128,7 @@ class FmcgIncentivePolicy(models.Model):
             'name', 'monthly_target', 'morning_start', 'morning_end', 'evening_start', 'evening_end',
             'hubbleium_90', 'hubbleium_100', 'hubbleium_110', 'hubbleium_team_day',
             'hubbleium_personal_best', 'hubbleium_consistency', 'consistency_threshold',
+            'simple_dashboard',
         ])[0]
 
     @api.model
@@ -140,6 +146,7 @@ class FmcgIncentivePolicy(models.Model):
             'monthly_target', 'morning_start', 'morning_end', 'evening_start', 'evening_end',
             'hubbleium_90', 'hubbleium_100', 'hubbleium_110', 'hubbleium_team_day',
             'hubbleium_personal_best', 'hubbleium_consistency', 'consistency_threshold',
+            'simple_dashboard',
         }
         policy.write({key: values[key] for key in allowed if key in values})
         if 'weights' in values:
@@ -398,27 +405,53 @@ class FmcgIncentivePeriod(models.Model):
         sudo_period_model = self.sudo()
         period = sudo_period_model.get_or_create_for_date()
         period.recompute()
+        
+        # Check if user is manager
+        is_manager = (
+            requesting_user.has_group('fmcg_sales_incentive.group_incentive_manager')
+            or requesting_user.has_group('base.group_system')
+            or requesting_user.has_group('base.group_erp_manager')
+        )
+        
+        # Get policy settings
+        policy = period.policy_id
+        simple_dashboard = policy.simple_dashboard if policy else False
+        
+        # If simple dashboard is enabled and user is just a seller (not manager), return simplified data
+        is_simple_seller = simple_dashboard and not is_manager and requesting_user.fmcg_is_seller
+        
         seller_result = period.result_ids.filtered(lambda row: row.seller_id.id == requesting_user.id)[:1]
         wallet = self.env['fmcg.hubbleium.wallet'].sudo().get_wallet(requesting_user)
         shifts = self.env['fmcg.incentive.shift'].sudo().search([
             ('seller_id', '=', requesting_user.id), ('shift_date', '>=', period.date_from), ('shift_date', '<=', period.date_to)
         ], order='shift_date, shift_type')
-        rewards = self.env['fmcg.reward'].sudo().search([
-            ('active', '=', True), '|', ('stock_qty', '>', 0), ('unlimited_stock', '=', True)
-        ])
-        return {
-            'period': period.read(['name', 'date_from', 'date_to', 'target_amount', 'total_sales', 'excess_percent', 'commission_pool', 'state'])[0],
-            'result': seller_result.read(['personal_target', 'actual_sales', 'achievement_percent', 'eligible', 'commission_amount', 'manual_commission', 'final_commission'])[0] if seller_result else False,
+        
+        # Only fetch rewards if not simple dashboard
+        rewards = []
+        if not is_simple_seller:
+            rewards = self.env['fmcg.reward'].sudo().search([
+                ('active', '=', True), '|', ('stock_qty', '>', 0), ('unlimited_stock', '=', True)
+            ]).read(['name', 'cost', 'stock_qty', 'unlimited_stock'])
+        
+        # Build response based on dashboard type
+        result_data = {
+            'period': period.read(['name', 'date_from', 'date_to'])[0],
             'wallet': wallet.read(['balance'])[0],
-            'shifts': shifts.read(['shift_date', 'shift_type', 'target_amount', 'actual_sales', 'achievement_percent', 'hubbleium_awarded']),
-            'rewards': rewards.read(['name', 'cost', 'stock_qty', 'unlimited_stock']),
+            'shifts': shifts.read(['shift_date', 'shift_type', 'achievement_percent', 'hubbleium_awarded']),
             'capabilities': {
-                'is_manager': requesting_user.has_group('fmcg_sales_incentive.group_incentive_manager')
-                or requesting_user.has_group('base.group_system')
-                or requesting_user.has_group('base.group_erp_manager'),
+                'is_manager': is_manager,
                 'is_seller': bool(requesting_user.fmcg_is_seller),
+                'simple_dashboard': is_simple_seller,
             },
         }
+        
+        if not is_simple_seller:
+            # Full dashboard for managers or when simple mode is off
+            result_data['period'].update(period.read(['target_amount', 'total_sales', 'excess_percent', 'commission_pool', 'state'])[0])
+            result_data['result'] = seller_result.read(['personal_target', 'actual_sales', 'achievement_percent', 'eligible', 'commission_amount', 'manual_commission', 'final_commission'])[0] if seller_result else False
+            result_data['rewards'] = rewards
+        
+        return result_data
 
     @api.model
     def manager_bootstrap(self):
@@ -445,7 +478,13 @@ class FmcgIncentivePeriod(models.Model):
             'from_percent', 'to_percent', 'rate', 'sequence'
         ])
         sellers = self.env['res.users'].sudo().search([
-            ('active', '=', True), ('share', '=', False), ('fmcg_is_seller', '=', True)
+            ('active', '=', True), ('share', '=', False),
+            '|', ('fmcg_is_seller', '=', True),
+            ('groups_id', 'in', [
+                self.env.ref('fmcg_sales_incentive.group_incentive_manager').id,
+                self.env.ref('base.group_erp_manager').id,
+                self.env.ref('base.group_system').id,
+            ])
         ], order='name')
         shifts = self.env['fmcg.incentive.shift'].sudo().search([
             ('company_id', '=', period.company_id.id),
