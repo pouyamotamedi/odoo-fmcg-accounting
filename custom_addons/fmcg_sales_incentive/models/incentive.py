@@ -439,7 +439,7 @@ class FmcgIncentivePeriod(models.Model):
         result_data = {
             'period': period.read(['name', 'date_from', 'date_to'])[0],
             'wallet': wallet.read(['balance'])[0],
-            'shifts': shifts.read(['shift_date', 'shift_type', 'achievement_percent', 'hubbleium_awarded']),
+            'shifts': shifts.read(['shift_date', 'shift_type', 'achievement_percent', 'hubbleium_awarded', 'custom_start', 'custom_end']),
             'capabilities': {
                 'is_manager': is_manager,
                 'is_seller': bool(requesting_user.fmcg_is_seller),
@@ -497,7 +497,7 @@ class FmcgIncentivePeriod(models.Model):
             'period': period.read(['name', 'date_from', 'date_to', 'target_amount', 'total_sales', 'commission_pool', 'state'])[0],
             'config': policy_data,
             'sellers': sellers.read(['name']),
-            'shifts': shifts.read(['shift_date', 'shift_type', 'seller_id', 'target_amount', 'actual_sales', 'achievement_percent']),
+            'shifts': shifts.read(['shift_date', 'shift_type', 'seller_id', 'target_amount', 'actual_sales', 'achievement_percent', 'custom_start', 'custom_end']),
             'rewards': rewards.read(['name', 'cost', 'stock_qty', 'unlimited_stock', 'active']),
         }
 

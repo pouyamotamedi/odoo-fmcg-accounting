@@ -71,7 +71,17 @@ export function formatTehranDateTime(value: string | Date | false | undefined): 
 
 export function formatTehranJalaliDate(value: string | Date | false | undefined): string {
   if (!value) return '—';
-  const date = value instanceof Date ? value : new Date(`${value}T12:00:00+03:30`);
+  
+  let date: Date;
+  if (value instanceof Date) {
+    date = value;
+  } else {
+    // Parse YYYY-MM-DD directly as Tehran date
+    const [year, month, day] = value.split('-').map(Number);
+    // Create date in Tehran timezone by using UTC and adding the offset
+    date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  }
+  
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleDateString('fa-IR-u-ca-persian', {
     year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Tehran',
