@@ -130,6 +130,7 @@ class FmcgIncentivePolicy(models.Model):
         if not (
             self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
             or self.env.user.has_group('base.group_system')
+            or self.env.user.has_group('base.group_erp_manager')
         ):
             raise UserError(_('Only incentive managers can change these settings.'))
         policy = self.search([('company_id', '=', self.env.company.id), ('active', '=', True)], limit=1)
@@ -276,6 +277,7 @@ class FmcgIncentiveShift(models.Model):
         if not (
             self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
             or self.env.user.has_group('base.group_system')
+            or self.env.user.has_group('base.group_erp_manager')
         ):
             raise UserError(_('Only incentive managers can swap shifts.'))
         first = self.browse(first_shift_id).exists()
@@ -412,7 +414,8 @@ class FmcgIncentivePeriod(models.Model):
             'rewards': rewards.read(['name', 'cost', 'stock_qty', 'unlimited_stock']),
             'capabilities': {
                 'is_manager': requesting_user.has_group('fmcg_sales_incentive.group_incentive_manager')
-                or requesting_user.has_group('base.group_system'),
+                or requesting_user.has_group('base.group_system')
+                or requesting_user.has_group('base.group_erp_manager'),
                 'is_seller': bool(requesting_user.fmcg_is_seller),
             },
         }
@@ -423,6 +426,7 @@ class FmcgIncentivePeriod(models.Model):
         if not (
             self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
             or self.env.user.has_group('base.group_system')
+            or self.env.user.has_group('base.group_erp_manager')
         ):
             raise UserError(_('Only incentive managers can access management data.'))
         sudo_period_model = self.sudo()
@@ -617,6 +621,7 @@ class FmcgIncentiveAdjustment(models.Model):
         if not (
             self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
             or self.env.user.has_group('base.group_system')
+            or self.env.user.has_group('base.group_erp_manager')
         ):
             raise UserError(_('Only incentive managers can create adjustments.'))
         records = super().create(vals_list)
@@ -711,7 +716,11 @@ class FmcgRewardRedemption(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
-            if not self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager'):
+            if not (
+                self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
+                or self.env.user.has_group('base.group_system')
+                or self.env.user.has_group('base.group_erp_manager')
+            ):
                 vals['seller_id'] = self.env.user.id
             reward = self.env['fmcg.reward'].browse(vals.get('reward_id'))
             wallet = self.env['fmcg.hubbleium.wallet'].get_wallet(self.env['res.users'].browse(vals.get('seller_id', self.env.user.id)))
@@ -720,7 +729,11 @@ class FmcgRewardRedemption(models.Model):
         return super().create(vals_list)
 
     def action_approve(self):
-        if not self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager'):
+        if not (
+            self.env.user.has_group('fmcg_sales_incentive.group_incentive_manager')
+            or self.env.user.has_group('base.group_system')
+            or self.env.user.has_group('base.group_erp_manager')
+        ):
             raise UserError(_('Only incentive managers can approve rewards.'))
         for redemption in self.filtered(lambda item: item.state == 'pending'):
             wallet = self.env['fmcg.hubbleium.wallet'].get_wallet(redemption.seller_id)
