@@ -9,9 +9,9 @@ import {
   getProductVariants, getTemplateAttributeLines, addAttributeToTemplate,
   updateVariantBarcode, deleteProductTemplate, write,
   getDiscountCategories, syncDiscountPriceForProducts,
-  getTemplateDiscountPrices,
+  getTemplateDiscountPrices, odooImageUrl,
 } from '@/lib/odoo-api';
-import { formatPrice, toPersianDigits } from '@/lib/utils';
+import { formatPrice, toPersianDigits, priceToInput } from '@/lib/utils';
 import PriceInput from '@/components/PriceInput';
 import ExcelButtons from '@/components/ExcelButtons';
 
@@ -24,7 +24,8 @@ interface ProductTemplate {
   categ_id: [number, string] | false;
   product_variant_count: number;
   barcode: string | false;
-  image_512: string | false;
+  has_image: boolean;
+  write_date: string | false;
   total_qty: number;
   fmcg_reorder_threshold?: number;
 }
@@ -187,10 +188,12 @@ export default function InventoryPage() {
   async function fetchTemplates() {
     setLoading(true);
     try {
-      // Read product.product and group by template for accurate prices
+      // Read product.product and group by template for accurate prices.
+      // bin_size makes Odoo return only the image size (not the base64 data), so the list
+      // loads fast; the actual images are lazy-loaded via /web/image when they scroll into view.
       const prods = await searchRead('product.product', [['type', '=', 'consu'], ['active', '=', true]], [
-        'name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_512', 'fmcg_reorder_threshold',
-      ], 0, 0, 'name asc');
+        'name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'categ_id', 'product_tmpl_id', 'image_128', 'write_date', 'fmcg_reorder_threshold',
+      ], 0, 0, 'name asc', { bin_size: true });
       
       const tmplMap = new Map<number, ProductTemplate>();
       for (const p of (prods || [])) {
@@ -205,7 +208,8 @@ export default function InventoryPage() {
             categ_id: p.categ_id || false,
             product_variant_count: 0,
             barcode: p.barcode || false,
-            image_512: p.image_512 || false,
+            has_image: !!p.image_128,
+            write_date: p.write_date || false,
             total_qty: 0,
             fmcg_reorder_threshold: p.fmcg_reorder_threshold ?? 10,
           });
@@ -255,7 +259,7 @@ export default function InventoryPage() {
 
   async function openEditForm(t: ProductTemplate) {
     const requestId = ++discountLoadRequest.current;
-    setForm({ name: t.name, barcode: t.product_variant_count === 1 ? (t.barcode || '') : '', list_price: String(t.list_price), standard_price: String(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold ?? 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
+    setForm({ name: t.name, barcode: t.product_variant_count === 1 ? (t.barcode || '') : '', list_price: priceToInput(t.list_price), standard_price: priceToInput(t.standard_price), fmcg_reorder_threshold: String(t.fmcg_reorder_threshold ?? 10), categ_id: t.categ_id ? t.categ_id[0] : 0 });
     setEditingId(t.id); setImageFile(null);
     setInvPriceLinked(true);
     setInvPriceOriginal(t.standard_price);
@@ -535,18 +539,6 @@ export default function InventoryPage() {
     return matchSearch && matchCat;
   });
 
-  const imgUrl = (img: string | false) => {
-    if (!img) return null;
-    // Odoo stores images as base64. Try to detect format from header bytes.
-    // PNG starts with iVBOR, JPEG with /9j/, WEBP with UklG, GIF with R0lG
-    if (img.startsWith('iVBOR')) return `data:image/png;base64,${img}`;
-    if (img.startsWith('/9j/')) return `data:image/jpeg;base64,${img}`;
-    if (img.startsWith('UklG')) return `data:image/webp;base64,${img}`;
-    if (img.startsWith('R0lG')) return `data:image/gif;base64,${img}`;
-    // Default: let browser figure it out
-    return `data:image/png;base64,${img}`;
-  };
-
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -611,7 +603,17 @@ export default function InventoryPage() {
               <div className="flex items-center p-3 cursor-pointer hover:bg-gray-50" onClick={() => toggleExpand(t.id)}>
                 {/* Image */}
                 <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden ml-3 flex-shrink-0">
-                  {imgUrl(t.image_512) ? <img src={imgUrl(t.image_512)!} alt="" className="w-full h-full object-cover" /> : <span className="text-lg">📦</span>}
+                  {t.has_image ? (
+                    <img
+                      src={odooImageUrl('product.product', t.default_variant_id, 'image_128', t.write_date)}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      width={40}
+                      height={40}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : <span className="text-lg">📦</span>}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm text-slate-800 truncate">{t.name}</div>

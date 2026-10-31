@@ -126,19 +126,33 @@ export async function searchRead(
   fields: string[] = [],
   limit?: number,
   offset?: number,
-  order?: string
+  order?: string,
+  context?: Record<string, any>
 ) {
+  const kwargs: Record<string, any> = {
+    fields,
+    limit: limit || 0,
+    offset: offset || 0,
+    order: order || '',
+  };
+  if (context) kwargs.context = context;
   return await jsonRpc('/web/dataset/call_kw', {
     model,
     method: 'search_read',
     args: [domain],
-    kwargs: {
-      fields,
-      limit: limit || 0,
-      offset: offset || 0,
-      order: order || '',
-    },
+    kwargs,
   });
+}
+
+/**
+ * URL of a record's image served by Odoo's /web/image route (through the /api proxy).
+ * Use with <img loading="lazy"> so images are fetched only when visible, instead of
+ * embedding base64 for every record in the JSON-RPC response.
+ * `unique` (e.g. write_date) busts the browser cache after the image changes.
+ */
+export function odooImageUrl(model: string, id: number, field = 'image_128', unique?: string | false) {
+  const base = `${ODOO_URL}/web/image/${model}/${id}/${field}`;
+  return unique ? `${base}?unique=${encodeURIComponent(unique)}` : base;
 }
 
 export async function create(model: string, values: Record<string, any>) {

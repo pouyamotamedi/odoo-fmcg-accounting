@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { formatPrice, toPersianDigits } from '@/lib/utils';
+import { formatPrice, toPersianDigits, priceToInput } from '@/lib/utils';
 import { getProducts, getPartners, createPurchaseInvoice, createProduct, getPurchaseInvoices, getPurchaseInvoiceLines, deletePurchaseInvoice, createStockReceipt, getCategories, updateProduct, getBankCashBalances, registerInvoicePayment, getProductVariants, searchRead, getProductAttributes, getAttributeValues, createProductAttribute, createAttributeValue, addAttributeToTemplate, write, getDiscountCategories, syncDiscountPriceForProducts, getTemplateDiscountPrices, editPostedInvoice, cancelRelatedPickings, create, confirmInvoice, createPartner } from '@/lib/odoo-api';
 import JalaliDatePicker from '@/components/JalaliDatePicker';
 import PriceInput from '@/components/PriceInput';
@@ -102,27 +102,30 @@ export default function PurchasePage() {
   }, [searchBlocked]);
 
   async function loadData() {
-    try {
-      const [prods, sups, cats, jrnls, discCats] = await Promise.all([
-        getProducts(),
-        getPartners('supplier'), getCategories(), getBankCashBalances(), getDiscountCategories()
-      ]);
-      setProducts(prods || []);
-      setSuppliers(sups?.map((s:any) => ({ id: s.id, name: s.name })) || []);
-      setCategories(cats?.map((c:any) => ({ id: c.id, name: c.name })) || []);
-      setJournals(jrnls?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
-      setDiscountCats((discCats||[]).filter((c:any) => !c.is_fixed_percent).map((c:any) => ({id: c.id, name: c.name})));
-    } catch { /* ignore */ }
+    // allSettled: one failing request (e.g. journals) must not keep the product list stale.
+    const [prods, sups, cats, jrnls, discCats] = await Promise.allSettled([
+      getProducts(),
+      getPartners('supplier'), getCategories(), getBankCashBalances(), getDiscountCategories()
+    ]);
+    if (prods.status === 'fulfilled') setProducts(prods.value || []);
+    if (sups.status === 'fulfilled') setSuppliers(sups.value?.map((s:any) => ({ id: s.id, name: s.name })) || []);
+    if (cats.status === 'fulfilled') setCategories(cats.value?.map((c:any) => ({ id: c.id, name: c.name })) || []);
+    if (jrnls.status === 'fulfilled') setJournals(jrnls.value?.map((j:any) => ({ id: j.id, name: j.name, type: j.type })) || []);
+    if (discCats.status === 'fulfilled') setDiscountCats((discCats.value||[]).filter((c:any) => !c.is_fixed_percent).map((c:any) => ({id: c.id, name: c.name})));
     setLoading(false);
+  }
+
+  function applyEditorValues(product: OdooProduct) {
+    setEditPrice(priceToInput(product.standard_price));
+    setEditSellPrice(priceToInput(product.list_price));
+    setEditThreshold(String(product.fmcg_reorder_threshold ?? 10));
+    setEditPriceOriginal(Number(product.standard_price) || 0);
   }
 
   async function openProductEditor(product: OdooProduct) {
     const requestId = ++editDiscountLoadRequest.current;
     setEditingProduct(product);
-    setEditPrice(String(product.standard_price));
-    setEditSellPrice(String(product.list_price));
-    setEditThreshold(String(product.fmcg_reorder_threshold ?? 10));
-    setEditPriceOriginal(product.standard_price);
+    applyEditorValues(product);
     setEditPriceLinked(true);
     setEditImage(null);
     setEditDiscountPrices({});
@@ -130,6 +133,22 @@ export default function PurchasePage() {
     setEditDiscountLoading(true);
 
     try {
+      // The product list is loaded once; costs can change on the server afterwards
+      // (posted bills / receipts, edits from the inventory page). Always edit the latest values.
+      const fresh = await searchRead(
+        'product.product',
+        [['id', '=', product.id]],
+        ['name', 'display_name', 'barcode', 'list_price', 'standard_price', 'qty_available', 'fmcg_reorder_threshold', 'product_tmpl_id'],
+        1,
+      );
+      if (requestId !== editDiscountLoadRequest.current) return;
+      if (fresh && fresh[0]) {
+        const latest: OdooProduct = { ...product, ...fresh[0] };
+        setEditingProduct(latest);
+        applyEditorValues(latest);
+        setProducts((prev) => prev.map((p) => (p.id === latest.id ? { ...p, ...fresh[0] } : p)));
+      }
+
       let cats = discountCats;
       if (cats.length === 0) {
         const loadedCats = await searchRead(
@@ -308,10 +327,11 @@ export default function PurchasePage() {
         });
         setItems([]);
         setSupplier(0);
+        void loadData(); // refresh product costs updated by the posted bill
         setMsg('✅ فاکتور خرید (نسیه) ثبت شد');
         setTimeout(() => setMsg(''), 4000);
         if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-          try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
+          try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); void loadData(); } catch {}
         }
       } catch (e:any) { alert(e.message || 'خطا'); }
       setSubmitting(false);
@@ -332,10 +352,11 @@ export default function PurchasePage() {
         await registerInvoicePayment(invoiceId, relevantJournals[0].id, total);
         setItems([]);
         setSupplier(0);
+        void loadData(); // refresh product costs updated by the posted bill
         setMsg('✅ فاکتور خرید ثبت و پرداخت شد');
         setTimeout(() => setMsg(''), 4000);
         if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-          try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
+          try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); void loadData(); } catch {}
         }
       } catch (e:any) { alert(e.message || 'خطا'); }
       setSubmitting(false);
@@ -359,11 +380,12 @@ export default function PurchasePage() {
       await registerInvoicePayment(invoiceId, paymentJournal, total);
       setItems([]);
       setSupplier(0);
+      void loadData(); // refresh product costs updated by the posted bill
       setShowPayment(false);
       setMsg('✅ فاکتور خرید ثبت و پرداخت شد');
       setTimeout(() => setMsg(''), 4000);
       if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-        try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
+        try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); void loadData(); } catch {}
       }
     } catch (e:any) { alert(e.message || 'خطا'); }
     setSubmitting(false);
@@ -399,11 +421,12 @@ export default function PurchasePage() {
       // creditAmt remains as residual (نسیه)
       setItems([]);
       setSupplier(0);
+      void loadData(); // refresh product costs updated by the posted bill
       setShowSplit(false);
       setMsg('✅ فاکتور با پرداخت ترکیبی ثبت شد');
       setTimeout(() => setMsg(''), 4000);
       if (confirm('آیا سند ورود به انبار هم ثبت شود؟')) {
-        try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); } catch {}
+        try { await createStockReceipt(invoiceId); setInvoicesWithPicking(prev => new Set([...prev, invoiceId])); void loadData(); } catch {}
       }
     } catch (e: any) {
       alert(e.message || 'خطا');
@@ -1031,7 +1054,14 @@ export default function PurchasePage() {
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">حداقل موجودی</label>
-                  <input type="number" value={editThreshold} onChange={(e) => setEditThreshold(e.target.value)} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                  {/* text + numeric inputMode: a type=number input drops Persian digits (۰-۹), which made the value silently fall back to 10 */}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={toPersianDigits(editThreshold)}
+                    onChange={(e) => setEditThreshold(normalizePersian(e.target.value).replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[^\d]/g, ''))}
+                    className="w-full p-2 border border-gray-200 rounded-lg text-sm"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">تصویر</label>
@@ -1069,14 +1099,27 @@ export default function PurchasePage() {
                 if (editDiscountLoading) return;
                 try {
                   const parsedThreshold = Number.parseInt(editThreshold, 10);
-                  const threshold = Number.isNaN(parsedThreshold) ? 10 : parsedThreshold;
+                  const threshold = Number.isNaN(parsedThreshold) ? (editingProduct.fmcg_reorder_threshold ?? 10) : parsedThreshold;
                   const tmplId = (editingProduct as any).product_tmpl_id?.[0] || (editingProduct as any).product_tmpl_id;
+                  let imageBase64: string | null = null;
+                  if (editImage) {
+                    imageBase64 = await new Promise<string>((resolve, reject) => {
+                      const reader = new FileReader();
+                      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+                      reader.onerror = () => reject(reader.error || new Error('خطا در خواندن تصویر'));
+                      reader.readAsDataURL(editImage);
+                    });
+                  }
                   if (tmplId) {
-                    await write('product.template', [tmplId], {
+                    const templateValues: Record<string, any> = {
                       standard_price: Number(editPrice) || 0,
                       list_price: Number(editSellPrice) || 0,
                       fmcg_reorder_threshold: threshold,
-                    });
+                    };
+                    // Previously the image was only saved for products without a template id,
+                    // which in practice never happened, so changed images were silently dropped.
+                    if (imageBase64) templateValues.image_1920 = imageBase64;
+                    await write('product.template', [tmplId], templateValues);
                     // Update all variants too
                     const vars = await searchRead('product.product', [['product_tmpl_id', '=', tmplId], ['active', '=', true]], ['id']);
                     if (vars && vars.length > 0) {
@@ -1092,11 +1135,7 @@ export default function PurchasePage() {
                     }
                   } else {
                     const updateValues: any = { standard_price: Number(editPrice)||0, list_price: Number(editSellPrice)||0, fmcg_reorder_threshold: threshold };
-                    if (editImage) {
-                      const reader = new FileReader();
-                      const base64 = await new Promise<string>((resolve) => { reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.readAsDataURL(editImage); });
-                      updateValues.image_1920 = base64;
-                    }
+                    if (imageBase64) updateValues.image_1920 = imageBase64;
                     await updateProduct(editingProduct.id, updateValues);
                     // Keep the single product's discount lines synchronized too.
                     const salePrice = Number(editSellPrice) || 0;

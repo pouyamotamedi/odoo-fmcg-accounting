@@ -35,6 +35,17 @@ export function formatPrice(amount: number | undefined | null): string {
 }
 
 /**
+ * Convert a numeric price from Odoo into the raw string used by <PriceInput>.
+ * Keeps real decimals (e.g. 12500.5 -> "12500.5") but drops float noise
+ * (e.g. 12500.499999999 -> "12500.5").
+ */
+export function priceToInput(value: number | string | null | undefined): string {
+  const n = Number(value);
+  if (value == null || value === '' || !Number.isFinite(n)) return '';
+  return String(Number(n.toFixed(4)));
+}
+
+/**
  * Format price with currency suffix
  */
 export function formatCurrency(amount: number): string {

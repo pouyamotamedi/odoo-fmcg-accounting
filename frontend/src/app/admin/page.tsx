@@ -26,9 +26,9 @@ interface ChartPoint {
 
 function DashCard({ title, value, color }: { title: string; value: string; color?: string }) {
   return (
-    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-      <div className={`text-2xl font-bold ${color || 'text-slate-800'}`}>{value}</div>
-      <div className="text-sm text-gray-500 mt-1">{title}</div>
+    <div className="bg-white rounded-xl p-3 md:p-5 shadow-sm border border-gray-100 min-w-0">
+      <div className={`text-lg md:text-2xl font-bold break-words ${color || 'text-slate-800'}`}>{value}</div>
+      <div className="text-xs md:text-sm text-gray-500 mt-1">{title}</div>
     </div>
   );
 }
@@ -37,9 +37,9 @@ function ActionButton({ href, icon, label }: { href: string; icon: string; label
   return (
     <Link
       href={href}
-      className="bg-white border-2 border-gray-100 rounded-xl p-5 text-center hover:border-indigo-400 hover:-translate-y-0.5 transition-all shadow-sm"
+      className="bg-white border-2 border-gray-100 rounded-xl p-3 md:p-5 text-center hover:border-indigo-400 hover:-translate-y-0.5 transition-all shadow-sm"
     >
-      <div className="text-3xl mb-2">{icon}</div>
+      <div className="text-2xl md:text-3xl mb-1 md:mb-2">{icon}</div>
       <div className="text-xs font-bold text-gray-700">{label}</div>
     </Link>
   );
@@ -199,7 +199,7 @@ function SalesChart() {
   const totalPurchases = chartData.reduce((s, d) => s + d.purchases, 0);
 
   return (
-    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mb-8">
+    <div className="bg-white rounded-xl p-3 md:p-5 shadow-sm border border-gray-100 mb-6 md:mb-8">
       {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
         <h3 className="text-sm font-bold text-slate-700">📊 نمودار فروش و خرید</h3>
@@ -257,7 +257,7 @@ function SalesChart() {
       ) : chartData.length === 0 ? (
         <div className="text-center py-8 text-gray-400 text-sm">داده‌ای یافت نشد</div>
       ) : (
-        <div dir="ltr" className="mt-2" style={{ height: '180px' }}>
+        <div dir="ltr" className="-mt-4 overflow-x-auto overflow-y-hidden pt-6" style={{ height: '204px' }}>
           <div className="flex items-end gap-1 h-full px-1">
             {chartData.map((d, i) => (
               <div key={i} className="flex-1 min-w-[28px] flex flex-col items-center h-full group cursor-pointer">
@@ -356,12 +356,12 @@ export default function AdminDashboard() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">داشبورد</h1>
+      <div className="mb-4 md:mb-6">
+        <h1 className="text-xl md:text-2xl font-bold text-slate-800">داشبورد</h1>
         <p className="text-gray-500 text-sm">خلاصه وضعیت فروشگاه امروز</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
         <DashCard title="فروش امروز (تومان)" value={loading ? '...' : formatPrice(data.todaySales)} color="text-green-600" />
         <DashCard title="تعداد فاکتور" value={loading ? '...' : toPersianDigits(data.txCount)} color="text-blue-600" />
         <DashCard title="موجودی صندوق" value={loading ? '...' : formatPrice(data.cashBalance)} />
@@ -526,17 +526,17 @@ function SellerDashboard({ userName }: { userName: string }) {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-6">
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
-          <div className="text-2xl font-bold text-blue-600">{toPersianDigits(todayCount)}</div>
+          <div className="text-xl md:text-2xl font-bold text-blue-600">{toPersianDigits(todayCount)}</div>
           <div className="text-xs text-gray-500 mt-1">فاکتور امروز</div>
         </div>
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
-          <div className="text-2xl font-bold text-green-600">{formatPrice(weekSales)}</div>
+          <div className="text-xl md:text-2xl font-bold text-green-600 break-words">{formatPrice(weekSales)}</div>
           <div className="text-xs text-gray-500 mt-1">فروش هفته ({toPersianDigits(weekCount)} فاکتور)</div>
         </div>
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
-          <div className="text-2xl font-bold text-amber-600">{formatPrice(cashBalance)}</div>
+          <div className="text-xl md:text-2xl font-bold text-amber-600 break-words">{formatPrice(cashBalance)}</div>
           <div className="text-xs text-gray-500 mt-1">موجودی صندوق</div>
         </div>
       </div>

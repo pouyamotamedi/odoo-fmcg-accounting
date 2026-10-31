@@ -142,6 +142,14 @@ function resolveProductPrice(
 
 export default function PosPage() {
   const { items, addItem, updateQuantity, clearCart, total, updateAllPrices } = useCartStore();
+  // Mobile-only: cart is shown as a bottom sheet instead of a sidebar
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [prevCartCount, setPrevCartCount] = useState(items.length);
+  if (items.length !== prevCartCount) {
+    // Close the sheet once the cart is emptied (sale completed / cleared)
+    setPrevCartCount(items.length);
+    if (items.length === 0 && mobileCartOpen) setMobileCartOpen(false);
+  }
   const [products, setProducts] = useState<OdooProduct[]>([]);
   const [search, setSearch] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -205,10 +213,12 @@ export default function PosPage() {
   useEffect(() => { discountPricesRef.current = discountPrices; }, [discountPrices]);
 
   const searchBlocked = showCredit || showSplit || showSalesHistory || showMultiCard ||
-    showNewCustomer || Boolean(variantPopup);
+    showNewCustomer || Boolean(variantPopup) || mobileCartOpen;
 
   const focusSearchIfSafe = useCallback(() => {
     if (searchBlocked) return;
+    // On phones, auto-focusing the search box pops up the on-screen keyboard after every tap.
+    if (typeof window !== 'undefined' && window.matchMedia?.('(hover: none) and (pointer: coarse)').matches) return;
 
     const input = searchInputRef.current;
     if (!input) return;
@@ -1028,18 +1038,18 @@ export default function PosPage() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex flex-col md:flex-row h-[100dvh] overflow-hidden">
       {/* Products Area */}
-      <div className="flex-1 flex flex-col bg-gray-50">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-gray-50">
         {/* Header */}
-        <header className="bg-slate-800 text-white px-4 py-3 flex justify-between items-center">
-          <span className="text-lg font-bold">🏪 صندوق فروش</span>
+        <header className="bg-slate-800 text-white px-3 py-2 md:px-4 md:py-3 flex flex-wrap justify-between items-center gap-2">
+          <span className="text-base md:text-lg font-bold">🏪 صندوق فروش</span>
           {boostPricing?.enabled && (
-            <span className="rounded-full bg-orange-500 px-3 py-1 text-xs font-bold text-white shadow" role="status">
-              🚀 حالت بوست فعال است ({boostPricing.percent >= 0 ? '+' : ''}{toPersianDigits(boostPricing.percent)}٪)
+            <span className="rounded-full bg-orange-500 px-2 md:px-3 py-1 text-[10px] md:text-xs font-bold text-white shadow" role="status">
+              🚀 <span className="hidden sm:inline">حالت </span>بوست<span className="hidden sm:inline"> فعال است</span> ({boostPricing.percent >= 0 ? '+' : ''}{toPersianDigits(boostPricing.percent)}٪)
             </span>
           )}
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-2 md:gap-4">
             {msg && <span className="text-xs bg-green-500 px-2 py-1 rounded">{msg}</span>}
             {pendingCount > 0 && (
               <div className="flex gap-1">
@@ -1099,7 +1109,7 @@ export default function PosPage() {
         )}
 
         {/* Search */}
-        <div className="p-3 border-b border-gray-200 bg-white">
+        <div className="p-2 md:p-3 border-b border-gray-200 bg-white">
           <input
             ref={searchInputRef}
             type="text"
@@ -1116,7 +1126,7 @@ export default function PosPage() {
           </label>
           {/* Discount category selector */}
           {discountCategories.length > 0 && (
-            <div className="flex gap-2 mt-2 flex-wrap">
+            <div className="flex gap-2 mt-2 overflow-x-auto md:flex-wrap pb-1 md:pb-0 [&>button]:shrink-0">
               <button
                 onClick={() => handleDiscountChange(0)}
                 className={`px-3 py-1.5 rounded-full text-xs font-bold transition ${activeDiscount === 0 ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
@@ -1137,11 +1147,12 @@ export default function PosPage() {
         </div>
 
         {/* Product Grid */}
-        <div className="flex-1 overflow-auto p-3">
+        {/* pb-24 on mobile leaves room for the fixed cart bar */}
+        <div className="flex-1 min-h-0 overflow-auto p-2 pb-24 md:p-3">
           {loading ? (
             <div className="text-center py-12 text-gray-400">در حال بارگذاری محصولات...</div>
           ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-3">
             {sortedDisplayProducts.map((product) => (
               <div
                 key={product.id}
@@ -1183,7 +1194,8 @@ export default function PosPage() {
                 {/* Pin button */}
                 <button
                   onClick={(e) => { e.stopPropagation(); togglePin(product.id); }}
-                  className={`absolute top-1 right-1 text-xs z-20 w-5 h-5 rounded-full flex items-center justify-center ${pinnedIds.has(product.id) ? 'bg-yellow-400 text-yellow-900' : 'bg-black/30 text-white/60 hover:text-white'}`}
+                  aria-label={pinnedIds.has(product.id) ? 'برداشتن سنجاق' : 'سنجاق کردن'}
+                  className={`absolute top-1 right-1 text-xs z-20 w-7 h-7 md:w-5 md:h-5 rounded-full flex items-center justify-center ${pinnedIds.has(product.id) ? 'bg-yellow-400 text-yellow-900' : 'bg-black/30 text-white/60 hover:text-white'}`}
                 >📌</button>
               </div>
             ))}
@@ -1192,23 +1204,66 @@ export default function PosPage() {
         </div>
       </div>
 
-      {/* Cart Area */}
-      <div className="w-80 bg-white flex flex-col border-r border-gray-200 shadow-lg">
+      {/* Mobile: fixed bar with cart summary; tapping opens the cart as a bottom sheet */}
+      {!mobileCartOpen && (
+        <div className="md:hidden fixed inset-x-0 bottom-0 z-30 bg-white border-t border-gray-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            onClick={() => setMobileCartOpen(true)}
+            className="w-full flex items-center justify-between gap-3 rounded-xl bg-indigo-600 text-white px-4 py-3 font-bold active:bg-indigo-700"
+          >
+            <span className="flex items-center gap-2 text-sm">
+              🧾 فاکتور
+              <span className="rounded-full bg-white/25 px-2 py-0.5 text-xs">
+                {toPersianDigits(items.reduce((sum, item) => sum + item.quantity, 0))} قلم
+              </span>
+            </span>
+            <span className="text-sm">{formatPrice(cartTotal)} تومان ▲</span>
+          </button>
+        </div>
+      )}
+
+      {/* Mobile backdrop behind the cart sheet */}
+      {mobileCartOpen && (
+        <button
+          type="button"
+          aria-label="بستن فاکتور"
+          onClick={() => setMobileCartOpen(false)}
+          className="md:hidden fixed inset-0 z-30 bg-black/40"
+        />
+      )}
+
+      {/* Cart Area: sidebar on desktop, bottom sheet on mobile */}
+      <div
+        className={`${mobileCartOpen ? 'flex' : 'hidden'} md:flex flex-col bg-white
+          fixed inset-x-0 bottom-0 z-40 max-h-[85dvh] rounded-t-2xl shadow-2xl pb-[env(safe-area-inset-bottom)]
+          md:static md:z-auto md:max-h-none md:w-80 md:rounded-none md:shadow-lg md:pb-0 md:border-r md:border-gray-200`}
+      >
         {/* Cart Header */}
-        <div className="p-4 bg-gray-50 border-b border-gray-200">
+        <div className="p-3 md:p-4 bg-gray-50 border-b border-gray-200 rounded-t-2xl md:rounded-none flex items-center justify-between gap-2">
           <strong className="text-sm">🧾 فاکتور فروش</strong>
-          {items.length > 0 && (
+          <div className="flex items-center gap-3">
+            {items.length > 0 && (
+              <button
+                onClick={clearCartSafely}
+                className="text-xs text-red-500 hover:text-red-700 py-1"
+              >
+                پاک کردن
+              </button>
+            )}
             <button
-              onClick={clearCartSafely}
-              className="float-left text-xs text-red-500 hover:text-red-700"
+              type="button"
+              onClick={() => setMobileCartOpen(false)}
+              aria-label="بستن فاکتور"
+              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg bg-gray-200 text-gray-700 text-sm"
             >
-              پاک کردن
+              ▼
             </button>
-          )}
+          </div>
         </div>
 
         {/* Cart Items */}
-        <div className="flex-1 overflow-auto p-3">
+        <div className="flex-1 min-h-0 overflow-auto p-3">
           {items.length === 0 ? (
             <p className="text-center text-gray-400 text-sm mt-10">
               محصولی انتخاب نشده
@@ -1225,15 +1280,17 @@ export default function PosPage() {
                     <button
                       onClick={() => updateQuantity(item.id, item.quantity - 1)}
                       disabled={directRecoveryLocked}
-                      className="w-6 h-6 rounded bg-gray-200 text-xs font-bold disabled:opacity-40"
+                      aria-label="کم کردن"
+                      className="w-9 h-9 md:w-6 md:h-6 rounded bg-gray-200 text-sm md:text-xs font-bold disabled:opacity-40"
                     >
                       -
                     </button>
-                    <input type="number" value={item.quantity} onChange={(e) => updateQuantity(item.id, Number(e.target.value) || 1)} disabled={directRecoveryLocked} className="w-12 text-center text-sm border border-gray-200 rounded px-1 py-0.5 disabled:bg-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" min="1" />
+                    <input type="number" value={item.quantity} onChange={(e) => updateQuantity(item.id, Number(e.target.value) || 1)} disabled={directRecoveryLocked} inputMode="numeric" className="w-12 h-9 md:h-auto text-center text-sm border border-gray-200 rounded px-1 py-0.5 disabled:bg-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" min="1" />
                     <button
                       onClick={() => updateQuantity(item.id, item.quantity + 1)}
                       disabled={directRecoveryLocked}
-                      className="w-6 h-6 rounded bg-gray-200 text-xs font-bold disabled:opacity-40"
+                      aria-label="اضافه کردن"
+                      className="w-9 h-9 md:w-6 md:h-6 rounded bg-gray-200 text-sm md:text-xs font-bold disabled:opacity-40"
                     >
                       +
                     </button>
@@ -1248,15 +1305,15 @@ export default function PosPage() {
         </div>
 
         {/* Total */}
-        <div className="p-4 border-t-2 border-gray-200">
-          <div className="flex justify-between text-lg font-bold text-slate-800">
+        <div className="p-3 md:p-4 border-t-2 border-gray-200">
+          <div className="flex justify-between text-base md:text-lg font-bold text-slate-800">
             <span>جمع کل:</span>
             <span>{formatPrice(cartTotal)} تومان</span>
           </div>
         </div>
 
         {/* Payment Buttons */}
-        <div className="grid grid-cols-2 gap-2 p-3">
+        <div className="grid grid-cols-3 md:grid-cols-2 gap-2 p-3 pt-0 md:pt-3">
           <button
             onClick={() => handlePayment('cash')}
             disabled={items.length === 0 || submitting || Boolean(directRecovery && directRecovery.method !== 'cash')}
@@ -1311,8 +1368,8 @@ export default function PosPage() {
 
       {/* Credit Sale Dialog */}
       {showCredit && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3">
+          <div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-md shadow-2xl max-h-[90dvh] overflow-auto">
             <h3 className="text-lg font-bold mb-4">🤝 فروش اعتباری (نسیه)</h3>
             <div className="mb-3 text-sm text-gray-600">مبلغ: <b>{formatPrice(cartTotal)} تومان</b></div>
             <div className="space-y-3">
@@ -1363,8 +1420,8 @@ export default function PosPage() {
 
       {/* Split Payment Dialog */}
       {showSplit && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl max-h-[85vh] overflow-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3">
+          <div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-md shadow-2xl max-h-[90dvh] overflow-auto">
             <h3 className="text-lg font-bold mb-4">🔀 پرداخت ترکیبی</h3>
             <div className="mb-3 text-sm text-gray-600">جمع کل: <b>{formatPrice(cartTotal)} تومان</b></div>
             <div className="space-y-3">
@@ -1450,18 +1507,18 @@ export default function PosPage() {
       {/* Sales History Modal */}
       {showSalesHistory && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setShowSalesHistory(false);
           }}
         >
-          <div className="bg-white rounded-2xl p-6 w-[96vw] max-w-6xl shadow-2xl max-h-[80vh] overflow-auto">
+          <div className="bg-white rounded-2xl p-3 sm:p-6 w-full max-w-6xl shadow-2xl max-h-[90dvh] md:max-h-[80vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">📋 سوابق فاکتورهای فروش</h3>
-              <button onClick={() => setShowSalesHistory(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              <h3 className="text-base sm:text-lg font-bold">📋 سوابق فاکتورهای فروش</h3>
+              <button onClick={() => setShowSalesHistory(false)} aria-label="بستن" className="text-gray-400 hover:text-gray-600 text-xl w-10 h-10 flex items-center justify-center">✕</button>
             </div>
             {salesHistory.length === 0 ? <p className="text-center text-gray-400 py-8">فاکتوری یافت نشد</p> : (
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-gray-50 border-b"><tr>
                   <th className="text-right p-2">شماره</th><th className="text-right p-2">تاریخ و ساعت</th><th className="text-right p-2">مشتری</th><th className="text-right p-2">روش پرداخت</th><th className="text-right p-2">مبلغ</th><th className="text-right p-2">وضعیت</th><th className="text-right p-2">عملیات</th>
                 </tr></thead>
@@ -1512,8 +1569,8 @@ export default function PosPage() {
 
       {/* New Customer Quick Add */}
       {showNewCustomer && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-3">
+          <div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-sm shadow-2xl max-h-[90dvh] overflow-auto">
             <h3 className="text-sm font-bold mb-3">+ ثبت مشتری جدید</h3>
             <div className="space-y-3">
               <input type="text" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} placeholder="نام مشتری *" className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
@@ -1538,8 +1595,8 @@ export default function PosPage() {
 
       {/* Multi-Card Payment Popup */}
       {showMultiCard && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3">
+          <div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-sm shadow-2xl max-h-[90dvh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">💳 پرداخت چند کارته</h3>
               <button onClick={closeMultiCardPayment} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
@@ -1643,8 +1700,8 @@ export default function PosPage() {
 
       {/* Variant Selection Popup */}
       {variantPopup && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3">
+          <div className="bg-white rounded-2xl p-4 sm:p-6 w-full max-w-sm shadow-2xl max-h-[90dvh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">{variantPopup.name}</h3>
               <button onClick={() => setVariantPopup(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>

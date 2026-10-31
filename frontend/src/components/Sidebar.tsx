@@ -29,7 +29,12 @@ const menuItems = [
   { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️', key: 'settings' },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  /** Called after a link is tapped (used to close the mobile drawer). */
+  onNavigate?: () => void;
+}
+
+export default function Sidebar({ onNavigate }: SidebarProps = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const { name: companyName, setCompany } = useCompanyStore();
@@ -66,7 +71,7 @@ export default function Sidebar() {
   })();
 
   return (
-    <aside className="w-60 bg-slate-800 text-white h-screen flex flex-col sticky top-0 overflow-y-auto">
+    <aside className="w-64 max-w-[80vw] md:w-60 bg-slate-800 text-white h-[100dvh] flex flex-col sticky top-0 overflow-y-auto">
       {/* Logo */}
       <div className="p-5 border-b border-slate-700 text-center">
         <h2 className="text-lg font-bold">🏪 {companyName || 'فروشگاه من'}</h2>
@@ -82,6 +87,7 @@ export default function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
+            onClick={onNavigate}
             className={cn(
               'flex items-center gap-3 px-5 py-3 text-sm transition-colors',
               (item.href === '/admin' ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`))
@@ -99,6 +105,7 @@ export default function Sidebar() {
       <div className="p-4 border-t border-slate-700 space-y-2">
         <Link
           href="/pos"
+          onClick={onNavigate}
           className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white rounded-lg py-3 text-sm font-bold transition"
         >
           🖥️ صندوق فروش
