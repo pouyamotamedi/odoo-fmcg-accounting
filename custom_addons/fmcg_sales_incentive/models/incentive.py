@@ -399,8 +399,9 @@ class FmcgIncentivePeriod(models.Model):
     def seller_ui_mode(self):
         """Lightweight check used by the frontend to restrict the seller panel.
 
-        Same rule as current_dashboard(): simple mode applies to sellers who are
-        not incentive managers, when the active policy enables it. No recompute.
+        When the active policy enables "simple dashboard", users who are not
+        incentive managers get a simple dashboard instead of the main shop
+        dashboard. Menu access is configured separately. No recompute.
         """
         user = self.env.user
         is_manager = (
@@ -411,7 +412,7 @@ class FmcgIncentivePeriod(models.Model):
         policy = self.env['fmcg.incentive.policy'].sudo().search([
             ('company_id', '=', self.env.company.id), ('active', '=', True)
         ], limit=1)
-        simple = bool(policy and policy.simple_dashboard and not is_manager and user.fmcg_is_seller)
+        simple = bool(policy and policy.simple_dashboard and not is_manager)
         return {'simple_dashboard': simple}
 
     @api.model

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { useAuthStore } from '@/stores/auth-store';
-import { getSellerEffectiveMenus } from '@/lib/odoo-api';
+import { getSellerAccess } from '@/lib/odoo-api';
 import { isSellerPathAllowed, sellerHomePath } from '@/lib/menus';
 
 export default function AdminLayout({
@@ -15,7 +15,7 @@ export default function AdminLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isLoggedIn, role, isAdmin, allowedMenus, setAllowedMenus } = useAuthStore();
+  const { isLoggedIn, role, isAdmin, allowedMenus, setAllowedMenus, setSimpleDashboard } = useAuthStore();
   const [hasHydrated, setHasHydrated] = useState(false);
   const [menusSynced, setMenusSynced] = useState(false);
   // Mobile drawer; closed by the backdrop or by Sidebar's onNavigate when a link is tapped
@@ -42,15 +42,16 @@ export default function AdminLayout({
   useEffect(() => {
     if (!isRestrictedSeller) return;
     let cancelled = false;
-    getSellerEffectiveMenus()
-      .then((menus) => {
+    getSellerAccess()
+      .then(({ menus, simpleDashboard }) => {
         if (cancelled) return;
         if (menus) setAllowedMenus(menus);
+        if (simpleDashboard !== null) setSimpleDashboard(simpleDashboard);
         setMenusSynced(true);
       })
       .catch(() => { if (!cancelled) setMenusSynced(true); });
     return () => { cancelled = true; };
-  }, [isRestrictedSeller, setAllowedMenus]);
+  }, [isRestrictedSeller, setAllowedMenus, setSimpleDashboard]);
 
   const sellerPathBlocked = isRestrictedSeller && !isSellerPathAllowed(pathname, allowedMenus);
 

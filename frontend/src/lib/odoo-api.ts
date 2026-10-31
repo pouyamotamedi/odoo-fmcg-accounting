@@ -1258,20 +1258,22 @@ export async function getSellerAllowedMenus(): Promise<string[] | null> {
   }
 }
 
-/**
- * Menus the current seller may actually use.
- * When "simple dashboard for sellers" is enabled in the incentive settings, sellers only get
- * the commission/Hubbleium page, regardless of the menu list in Settings.
- * Returns null if the server could not be reached (caller keeps its cached value).
- */
-export async function getSellerEffectiveMenus(): Promise<string[] | null> {
-  try {
-    const mode = await callMethod('fmcg.incentive.period', 'seller_ui_mode', []);
-    if (mode?.simple_dashboard) return ['incentives'];
-  } catch {
-    // Older server without seller_ui_mode: fall back to the menu list
-  }
-  return getSellerAllowedMenus();
+export interface SellerAccess {
+  /** Menus allowed in Settings; null if they could not be loaded (keep the cached value). */
+  menus: string[] | null;
+  /** "Simple dashboard for sellers" (incentive settings): the dashboard page shows a simple view. */
+  simpleDashboard: boolean | null;
+}
+
+/** Seller panel access: allowed menus + whether the dashboard must be the simple one. */
+export async function getSellerAccess(): Promise<SellerAccess> {
+  const [menus, simpleDashboard] = await Promise.all([
+    getSellerAllowedMenus(),
+    callMethod('fmcg.incentive.period', 'seller_ui_mode', [])
+      .then((mode: any) => Boolean(mode?.simple_dashboard))
+      .catch(() => null),
+  ]);
+  return { menus, simpleDashboard };
 }
 
 export async function saveSellerAllowedMenus(menus: string[]) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import SellerSimpleDashboard from '@/components/SellerSimpleDashboard';
 import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 import { searchRead, getBankCashBalances, getTodaySales, getProducts, getPartnerBalances } from '@/lib/odoo-api';
 import { useAuthStore } from '@/stores/auth-store';
@@ -292,6 +293,18 @@ function SalesChart() {
 
 export default function AdminDashboard() {
   // Seller access to this page is controlled by the admin layout (Settings → seller menus).
+  // With "simple dashboard for sellers" enabled, sellers get a simple dashboard here instead.
+  const role = useAuthStore((s) => s.role);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
+  const simpleDashboard = useAuthStore((s) => s.simpleDashboard);
+  const userName = useAuthStore((s) => s.name);
+  if (role === 'seller' && !isAdmin && simpleDashboard) {
+    return <SellerSimpleDashboard userName={userName} />;
+  }
+  return <MainDashboard />;
+}
+
+function MainDashboard() {
   const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [] });
   const [loading, setLoading] = useState(true);
 

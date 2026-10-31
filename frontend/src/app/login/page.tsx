@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore, UserRole } from '@/stores/auth-store';
 import { useCompanyStore } from '@/stores/company-store';
-import { login as odooLogin, getCompanySettings, getSellerEffectiveMenus } from '@/lib/odoo-api';
+import { login as odooLogin, getCompanySettings, getSellerAccess } from '@/lib/odoo-api';
 import { sellerHomePath } from '@/lib/menus';
 
 export default function LoginPage() {
   const router = useRouter();
   const authLogin = useAuthStore((s) => s.login);
   const setAllowedMenus = useAuthStore((s) => s.setAllowedMenus);
+  const setSimpleDashboard = useAuthStore((s) => s.setSimpleDashboard);
   const { name: companyName, setCompany } = useCompanyStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -47,8 +48,10 @@ export default function LoginPage() {
 
       if (actualRole === 'seller') {
         // Menu access is configured by the admin in Settings and stored on the server
-        const menus = (await getSellerEffectiveMenus()) ?? [];
+        const access = await getSellerAccess();
+        const menus = access.menus ?? [];
         setAllowedMenus(menus);
+        setSimpleDashboard(Boolean(access.simpleDashboard));
         router.push(sellerHomePath(menus));
       } else {
         router.push('/admin');
