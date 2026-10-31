@@ -288,6 +288,7 @@ export default function SettingsPage() {
         <div className="bg-white rounded-xl p-6 border border-gray-100">
           <h3 className="font-bold text-sm mb-4">🔐 دسترسی فروشنده‌ها به منوها</h3>
           <p className="text-xs text-gray-500 mb-4">مشخص کنید فروشنده‌ها به کدام منوهای پنل مدیریت دسترسی داشته باشند. فروشنده‌ها فقط از طریق صندوق فروش وارد می‌شوند.</p>
+          <p className="text-[11px] text-indigo-600 mb-4">ℹ️ اگر «داشبورد ساده برای فروشنده‌ها» در تنظیمات پورسانت و هابلیوم فعال باشد، فروشنده‌ها فقط صندوق فروش و داشبورد ساده را می‌بینند و این فهرست نادیده گرفته می‌شود.</p>
           <SellerMenuAccess />
         </div>
 

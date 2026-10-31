@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, getInvoiceResidual, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel, getBoostPosPricing, getSellerAllowedMenus, type BoostPosPricing } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, getInvoiceResidual, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel, getBoostPosPricing, getSellerEffectiveMenus, type BoostPosPricing } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { sellerHomePath } from '@/lib/menus';
@@ -151,7 +151,7 @@ export default function PosPage() {
     // Keep the seller's menu access in sync with Settings (stored on the server)
     if (authIsAdmin || authRole === 'admin') return;
     let cancelled = false;
-    getSellerAllowedMenus().then((menus) => {
+    getSellerEffectiveMenus().then((menus) => {
       if (!cancelled && menus) useAuthStore.getState().setAllowedMenus(menus);
     }).catch(() => {});
     return () => { cancelled = true; };

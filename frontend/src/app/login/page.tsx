@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore, UserRole } from '@/stores/auth-store';
 import { useCompanyStore } from '@/stores/company-store';
-import { login as odooLogin, getCompanySettings, getSellerAllowedMenus } from '@/lib/odoo-api';
+import { login as odooLogin, getCompanySettings, getSellerEffectiveMenus } from '@/lib/odoo-api';
 import { sellerHomePath } from '@/lib/menus';
 
 export default function LoginPage() {
@@ -47,7 +47,7 @@ export default function LoginPage() {
 
       if (actualRole === 'seller') {
         // Menu access is configured by the admin in Settings and stored on the server
-        const menus = (await getSellerAllowedMenus()) ?? [];
+        const menus = (await getSellerEffectiveMenus()) ?? [];
         setAllowedMenus(menus);
         router.push(sellerHomePath(menus));
       } else {

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { useAuthStore } from '@/stores/auth-store';
-import { getSellerAllowedMenus } from '@/lib/odoo-api';
+import { getSellerEffectiveMenus } from '@/lib/odoo-api';
 import { isSellerPathAllowed, sellerHomePath } from '@/lib/menus';
 
 export default function AdminLayout({
@@ -42,7 +42,7 @@ export default function AdminLayout({
   useEffect(() => {
     if (!isRestrictedSeller) return;
     let cancelled = false;
-    getSellerAllowedMenus()
+    getSellerEffectiveMenus()
       .then((menus) => {
         if (cancelled) return;
         if (menus) setAllowedMenus(menus);

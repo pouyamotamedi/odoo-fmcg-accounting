@@ -396,6 +396,25 @@ class FmcgIncentivePeriod(models.Model):
         return period
 
     @api.model
+    def seller_ui_mode(self):
+        """Lightweight check used by the frontend to restrict the seller panel.
+
+        Same rule as current_dashboard(): simple mode applies to sellers who are
+        not incentive managers, when the active policy enables it. No recompute.
+        """
+        user = self.env.user
+        is_manager = (
+            user.has_group('fmcg_sales_incentive.group_incentive_manager')
+            or user.has_group('base.group_system')
+            or user.has_group('base.group_erp_manager')
+        )
+        policy = self.env['fmcg.incentive.policy'].sudo().search([
+            ('company_id', '=', self.env.company.id), ('active', '=', True)
+        ], limit=1)
+        simple = bool(policy and policy.simple_dashboard and not is_manager and user.fmcg_is_seller)
+        return {'simple_dashboard': simple}
+
+    @api.model
     def current_dashboard(self):
         """Return the current user's dashboard through one safe RPC endpoint.
 

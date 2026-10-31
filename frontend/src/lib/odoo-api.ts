@@ -1258,6 +1258,22 @@ export async function getSellerAllowedMenus(): Promise<string[] | null> {
   }
 }
 
+/**
+ * Menus the current seller may actually use.
+ * When "simple dashboard for sellers" is enabled in the incentive settings, sellers only get
+ * the commission/Hubbleium page, regardless of the menu list in Settings.
+ * Returns null if the server could not be reached (caller keeps its cached value).
+ */
+export async function getSellerEffectiveMenus(): Promise<string[] | null> {
+  try {
+    const mode = await callMethod('fmcg.incentive.period', 'seller_ui_mode', []);
+    if (mode?.simple_dashboard) return ['incentives'];
+  } catch {
+    // Older server without seller_ui_mode: fall back to the menu list
+  }
+  return getSellerAllowedMenus();
+}
+
 export async function saveSellerAllowedMenus(menus: string[]) {
   const companies = await searchRead('res.company', [], ['id'], 1);
   if (!companies?.[0]) throw new Error('شرکت یافت نشد');
