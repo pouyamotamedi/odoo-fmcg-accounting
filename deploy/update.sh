@@ -140,9 +140,38 @@ for i in $(seq 1 30); do
     curl -s "http://localhost:${FRONTEND_PORT}/login" >/dev/null 2>&1 && break
     sleep 2
 done
-if ! sudo -u odoo python3 "${INSTALL_DIR}/deploy/verify_incentives.py" \
-    --base-url "http://localhost:${FRONTEND_PORT}/api" --database "${DB_NAME}"; then
+# Odoo was restarted together with the frontend and boots slower; until it answers,
+# the Next.js /api proxy returns a plain "500 Internal Server Error".
+echo "  Waiting for Odoo on port ${ODOO_PORT}..."
+ODOO_READY=0
+for i in $(seq 1 60); do
+    if curl -s -o /dev/null -w '%{http_code}' "http://localhost:${ODOO_PORT}/web/login" 2>/dev/null | grep -qE '^(200|303)$'; then
+        ODOO_READY=1
+        break
+    fi
+    sleep 2
+done
+if [ "${ODOO_READY}" != "1" ]; then
+    echo "ERROR: Odoo did not become ready on port ${ODOO_PORT}. Recent Odoo logs:"
+    sudo journalctl -u "odoo-${DB_NAME}" -n 40 --no-pager || true
+    exit 1
+fi
+VERIFY_OK=0
+for attempt in 1 2 3 4 5; do
+    if sudo -u odoo python3 "${INSTALL_DIR}/deploy/verify_incentives.py" \
+        --base-url "http://localhost:${FRONTEND_PORT}/api" --database "${DB_NAME}"; then
+        VERIFY_OK=1
+        break
+    fi
+    echo "  Verification attempt ${attempt} failed; retrying in 5s..."
+    sleep 5
+done
+if [ "${VERIFY_OK}" != "1" ]; then
     echo "ERROR: Post-deploy RPC verification failed. Update is NOT complete."
+    echo "Recent Odoo logs:"
+    sudo journalctl -u "odoo-${DB_NAME}" -n 40 --no-pager || true
+    echo "Recent frontend logs:"
+    sudo journalctl -u "fmcg-${DB_NAME}" -n 20 --no-pager || true
     exit 1
 fi
 
