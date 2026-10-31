@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { useAuthStore } from '@/stores/auth-store';
+import { getSellerAllowedMenus } from '@/lib/odoo-api';
+import { isSellerPathAllowed, sellerHomePath } from '@/lib/menus';
 
 export default function AdminLayout({
   children,
@@ -13,8 +15,9 @@ export default function AdminLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isLoggedIn, role, isAdmin } = useAuthStore();
+  const { isLoggedIn, role, isAdmin, allowedMenus, setAllowedMenus } = useAuthStore();
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [menusSynced, setMenusSynced] = useState(false);
   // Mobile drawer; closed by the backdrop or by Sidebar's onNavigate when a link is tapped
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -32,27 +35,37 @@ export default function AdminLayout({
     return unsubscribe;
   }, []);
 
-  const sellerHasNoMenus = (() => {
-    if (!hasHydrated || role !== 'seller' || isAdmin) return false;
-    try {
-      const savedMenus = localStorage.getItem('seller_allowed_menus');
-      return !savedMenus || JSON.parse(savedMenus).length === 0;
-    } catch {
-      return true;
-    }
-  })();
+  const isRestrictedSeller = hasHydrated && isLoggedIn && role === 'seller' && !isAdmin;
+
+  // Always re-read seller menu access from the server, so changes made by the admin
+  // (on any device) apply without the seller having to log out.
+  useEffect(() => {
+    if (!isRestrictedSeller) return;
+    let cancelled = false;
+    getSellerAllowedMenus()
+      .then((menus) => {
+        if (cancelled) return;
+        if (menus) setAllowedMenus(menus);
+        setMenusSynced(true);
+      })
+      .catch(() => { if (!cancelled) setMenusSynced(true); });
+    return () => { cancelled = true; };
+  }, [isRestrictedSeller, setAllowedMenus]);
+
+  const sellerPathBlocked = isRestrictedSeller && !isSellerPathAllowed(pathname, allowedMenus);
 
   useEffect(() => {
     if (!hasHydrated) return;
     if (!isLoggedIn) {
       router.replace('/login');
-    } else if (sellerHasNoMenus && pathname !== '/admin/incentives') {
-      router.replace('/admin/incentives');
+    } else if (sellerPathBlocked && menusSynced) {
+      router.replace(sellerHomePath(allowedMenus));
     }
-  }, [hasHydrated, isLoggedIn, sellerHasNoMenus, pathname, router]);
+  }, [hasHydrated, isLoggedIn, sellerPathBlocked, menusSynced, allowedMenus, router]);
 
-  if (!hasHydrated || !isLoggedIn || (sellerHasNoMenus && pathname !== '/admin/incentives')) {
-    return null;
+  if (!hasHydrated || !isLoggedIn) return null;
+  if (sellerPathBlocked) {
+    return <div className="py-12 text-center text-gray-400">{menusSynced ? 'انتقال...' : 'بارگذاری دسترسی‌ها...'}</div>;
   }
 
   return (

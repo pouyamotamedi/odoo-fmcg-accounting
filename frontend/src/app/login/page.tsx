@@ -4,11 +4,13 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore, UserRole } from '@/stores/auth-store';
 import { useCompanyStore } from '@/stores/company-store';
-import { login as odooLogin, getCompanySettings } from '@/lib/odoo-api';
+import { login as odooLogin, getCompanySettings, getSellerAllowedMenus } from '@/lib/odoo-api';
+import { sellerHomePath } from '@/lib/menus';
 
 export default function LoginPage() {
   const router = useRouter();
   const authLogin = useAuthStore((s) => s.login);
+  const setAllowedMenus = useAuthStore((s) => s.setAllowedMenus);
   const { name: companyName, setCompany } = useCompanyStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -43,8 +45,11 @@ export default function LoginPage() {
       const actualRole: UserRole = role === 'admin' && result.isAdmin ? 'admin' : 'seller';
       authLogin(result.uid, result.name, result.username, actualRole, result.isAdmin);
 
-      if (role === 'seller') {
-        router.push('/admin/incentives');
+      if (actualRole === 'seller') {
+        // Menu access is configured by the admin in Settings and stored on the server
+        const menus = (await getSellerAllowedMenus()) ?? [];
+        setAllowedMenus(menus);
+        router.push(sellerHomePath(menus));
       } else {
         router.push('/admin');
       }

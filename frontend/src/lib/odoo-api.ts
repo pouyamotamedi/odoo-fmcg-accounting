@@ -1241,6 +1241,29 @@ export async function updateCompanySettings(id: number, values: Record<string, a
   return write('res.company', [id], values);
 }
 
+/**
+ * Seller menu access is stored on the company (fmcg_base.fmcg_seller_allowed_menus)
+ * so it is shared by every device and every seller, instead of living in one browser's localStorage.
+ * Returns null when the field is not available (fmcg_base not upgraded yet).
+ */
+export async function getSellerAllowedMenus(): Promise<string[] | null> {
+  try {
+    const companies = await searchRead('res.company', [], ['fmcg_seller_allowed_menus'], 1);
+    const raw = companies?.[0]?.fmcg_seller_allowed_menus;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((key: unknown): key is string => typeof key === 'string') : [];
+  } catch {
+    return null;
+  }
+}
+
+export async function saveSellerAllowedMenus(menus: string[]) {
+  const companies = await searchRead('res.company', [], ['id'], 1);
+  if (!companies?.[0]) throw new Error('شرکت یافت نشد');
+  return write('res.company', [companies[0].id], { fmcg_seller_allowed_menus: JSON.stringify(menus) });
+}
+
 export async function changePassword(newPassword: string) {
   // Updates the current user's password
   return callMethod('res.users', 'change_password', ['', newPassword]);

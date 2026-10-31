@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getCompanySettings, updateCompanySettings, changePassword, searchRead, write, getBankCashBalances } from '@/lib/odoo-api';
+import { getCompanySettings, updateCompanySettings, changePassword, searchRead, write, getBankCashBalances, getSellerAllowedMenus, saveSellerAllowedMenus } from '@/lib/odoo-api';
+import { sellerAssignableMenus, parseAllowedMenus } from '@/lib/menus';
+import { toPersianDigits } from '@/lib/utils';
 import { useCompanyStore } from '@/stores/company-store';
 import Link from 'next/link';
 
@@ -304,56 +306,74 @@ export default function SettingsPage() {
 }
 
 
+const LEGACY_SELLER_MENUS_KEY = 'seller_allowed_menus';
+
 function SellerMenuAccess() {
-  const allMenus = [
-    { key: 'dashboard', label: 'داشبورد' },
-    { key: 'purchase', label: 'فاکتور خرید' },
-    { key: 'inventory', label: 'انبار و کالاها' },
-    { key: 'people', label: 'اشخاص' },
-    { key: 'accounts', label: 'حساب اشخاص' },
-    { key: 'treasury', label: 'بانک و صندوق' },
-    { key: 'reconciliation', label: 'مغایرت‌گیری' },
-    { key: 'accounting', label: 'اسناد حسابداری' },
-    { key: 'chart-of-accounts', label: 'سرفصل حساب‌ها' },
-    { key: 'reports', label: 'گزارش‌ها' },
-    { key: 'analytics', label: 'تحلیل مدیریتی' },
-    { key: 'returns', label: 'برگشت از فروش' },
-    { key: 'discounts', label: 'تخفیفات' },
-    { key: 'stock-count', label: 'انبارگردانی' },
-    { key: 'fiscal-year', label: 'سال مالی' },
-    { key: 'incentives', label: 'پورسانت و هابلیوم' },
-    { key: 'settings', label: 'تنظیمات' },
-  ];
+  const allMenus = sellerAssignableMenus;
 
-  const [allowed, setAllowed] = useState<string[]>(() => {
+  // Stored on the server (res.company) so it applies to every seller on every device.
+  const [allowed, setAllowed] = useState<string[]>([]);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error' | 'unavailable'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const serverMenus = await getSellerAllowedMenus();
+      if (cancelled) return;
+      if (serverMenus === null) { setStatus('unavailable'); return; }
+      let menus = serverMenus;
+      // One-time migration of the old per-browser setting
+      if (menus.length === 0) {
+        const legacy = parseAllowedMenus(localStorage.getItem(LEGACY_SELLER_MENUS_KEY));
+        if (legacy.length > 0) {
+          try { await saveSellerAllowedMenus(legacy); menus = legacy; } catch { /* keep server value */ }
+        }
+      }
+      localStorage.removeItem(LEGACY_SELLER_MENUS_KEY);
+      if (cancelled) return;
+      setAllowed(menus);
+      setStatus('ready');
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function toggle(key: string) {
+    const previous = allowed;
+    const next = previous.includes(key) ? previous.filter(k => k !== key) : [...previous, key];
+    setAllowed(next);
+    setStatus('saving');
     try {
-      const saved = localStorage.getItem('seller_allowed_menus');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-
-  function toggle(key: string) {
-    setAllowed(prev => {
-      const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-      localStorage.setItem('seller_allowed_menus', JSON.stringify(next));
-      return next;
-    });
+      await saveSellerAllowedMenus(next);
+      setStatus('ready');
+    } catch (error) {
+      setAllowed(previous);
+      setStatus('error');
+      alert(error instanceof Error ? error.message : 'خطا در ذخیره دسترسی منوها');
+    }
   }
 
   const noneSelected = allowed.length === 0;
+  const disabled = status === 'loading' || status === 'saving' || status === 'unavailable';
 
   return (
     <div>
-      <p className="text-[11px] text-amber-600 mb-3">
-        {noneSelected ? '⚠️ هیچ منویی انتخاب نشده — فروشنده‌ها فقط به صندوق فروش دسترسی دارند.' : `✅ ${allowed.length} منو فعال برای فروشنده‌ها`}
-      </p>
+      {status === 'unavailable' ? (
+        <p className="text-[11px] text-red-600 mb-3">⚠️ این تنظیم روی سرور در دسترس نیست. ماژول fmcg_base باید آپدیت شود (اسکریپت update.sh).</p>
+      ) : (
+        <p className="text-[11px] text-amber-600 mb-3">
+          {status === 'loading' ? 'بارگذاری...' : noneSelected
+            ? `⚠️ هیچ منویی انتخاب نشده — فروشنده‌ها فقط صندوق فروش و صفحه پورسانت را می‌بینند.`
+            : `✅ ${toPersianDigits(allowed.length)} منو فعال برای فروشنده‌ها${status === 'saving' ? ' (در حال ذخیره...)' : ''}`}
+        </p>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {allMenus.map(menu => (
-          <label key={menu.key} className="flex items-center gap-2 text-xs cursor-pointer p-2 rounded-lg border border-gray-100 hover:bg-gray-50">
+          <label key={menu.key} className={`flex items-center gap-2 text-xs p-2 rounded-lg border border-gray-100 hover:bg-gray-50 ${disabled ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}>
             <input
               type="checkbox"
               checked={allowed.includes(menu.key)}
-              onChange={() => toggle(menu.key)}
+              onChange={() => void toggle(menu.key)}
+              disabled={disabled}
               className="w-3.5 h-3.5 rounded"
             />
             <span>{menu.label}</span>

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { formatPrice, toPersianDigits, toJalali } from '@/lib/utils';
 import { searchRead, getBankCashBalances, getTodaySales, getProducts, getPartnerBalances } from '@/lib/odoo-api';
@@ -292,15 +291,7 @@ function SalesChart() {
 }
 
 export default function AdminDashboard() {
-  const router = useRouter();
-  const { role, isAdmin, name: userName } = useAuthStore();
-
-  // The seller's home is the commission and Hubbleium dashboard.
-  if (role === 'seller') {
-    router.replace('/admin/incentives');
-    return <div className="py-12 text-center text-gray-400">انتقال به داشبورد فروشنده...</div>;
-  }
-
+  // Seller access to this page is controlled by the admin layout (Settings → seller menus).
   const [data, setData] = useState<DashData>({ todaySales: 0, txCount: 0, cashBalance: 0, outstanding: 0, lowStockProducts: [], highDebtCustomers: [] });
   const [loading, setLoading] = useState(true);
 

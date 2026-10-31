@@ -7,27 +7,8 @@ import { cn } from '@/lib/utils';
 import { useCompanyStore } from '@/stores/company-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { getCompanySettings, logout as odooLogout } from '@/lib/odoo-api';
+import { isMenuActive, visibleMenusFor } from '@/lib/menus';
 
-const menuItems = [
-  { href: '/admin', label: 'داشبورد', icon: '📊', key: 'dashboard' },
-  { href: '/admin/purchase', label: 'فاکتور خرید', icon: '🛒', key: 'purchase' },
-  { href: '/admin/inventory', label: 'انبار و کالاها', icon: '📦', key: 'inventory' },
-  { href: '/admin/people', label: 'اشخاص', icon: '👥', key: 'people' },
-  { href: '/admin/accounts', label: 'حساب اشخاص', icon: '📒', key: 'accounts' },
-  { href: '/admin/treasury', label: 'بانک و صندوق', icon: '🏦', key: 'treasury' },
-  { href: '/admin/reconciliation', label: 'مغایرت‌گیری', icon: '🔄', key: 'reconciliation' },
-  { href: '/admin/accounting', label: 'اسناد حسابداری', icon: '📋', key: 'accounting' },
-  { href: '/admin/chart-of-accounts', label: 'سرفصل حساب‌ها', icon: '🗂️', key: 'chart-of-accounts' },
-  { href: '/admin/reports', label: 'گزارش‌ها', icon: '📈', key: 'reports' },
-  { href: '/admin/analytics', label: 'تحلیل مدیریتی', icon: '📊', key: 'analytics' },
-  { href: '/admin/returns', label: 'برگشت از فروش', icon: '↩️', key: 'returns' },
-  { href: '/admin/discounts', label: 'تخفیفات', icon: '🏷️', key: 'discounts' },
-  { href: '/admin/boost', label: 'حالت بوست', icon: '🚀', key: 'boost', adminOnly: true },
-  { href: '/admin/stock-count', label: 'انبارگردانی', icon: '📋', key: 'stock-count' },
-  { href: '/admin/fiscal-year', label: 'سال مالی', icon: '📅', key: 'fiscal-year' },
-  { href: '/admin/incentives', label: 'پورسانت و هابلیوم', icon: '🪙', key: 'incentives' },
-  { href: '/admin/settings', label: 'تنظیمات', icon: '⚙️', key: 'settings' },
-];
 
 interface SidebarProps {
   /** Called after a link is tapped (used to close the mobile drawer). */
@@ -38,7 +19,7 @@ export default function Sidebar({ onNavigate }: SidebarProps = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const { name: companyName, setCompany } = useCompanyStore();
-  const { name: userName, role, isAdmin, logout: authLogout } = useAuthStore();
+  const { name: userName, role, isAdmin, allowedMenus, logout: authLogout } = useAuthStore();
 
   useEffect(() => {
     if (!companyName) {
@@ -56,19 +37,8 @@ export default function Sidebar({ onNavigate }: SidebarProps = {}) {
     router.push('/login');
   }
 
-  // Filter menus for sellers based on allowed list
-  const visibleMenus = (() => {
-    if (isAdmin || role === 'admin') return menuItems;
-    const sellerMenus = menuItems.filter((menu) => !('adminOnly' in menu && menu.adminOnly));
-    try {
-      const saved = localStorage.getItem('seller_allowed_menus');
-      const allowed: string[] = saved ? JSON.parse(saved) : [];
-      if (allowed.length === 0) return sellerMenus;
-      return sellerMenus.filter(m => allowed.includes(m.key));
-    } catch {
-      return sellerMenus;
-    }
-  })();
+  // Sellers only see the menus the admin allowed in Settings (loaded from the server)
+  const visibleMenus = visibleMenusFor(isAdmin || role === 'admin', allowedMenus);
 
   return (
     <aside className="w-64 max-w-[80vw] md:w-60 bg-slate-800 text-white h-[100dvh] flex flex-col sticky top-0 overflow-y-auto">
@@ -90,7 +60,7 @@ export default function Sidebar({ onNavigate }: SidebarProps = {}) {
             onClick={onNavigate}
             className={cn(
               'flex items-center gap-3 px-5 py-3 text-sm transition-colors',
-              (item.href === '/admin' ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`))
+              isMenuActive(item.href, pathname)
                 ? 'bg-slate-700 text-white'
                 : 'text-slate-300 hover:bg-slate-700/50 hover:text-white'
             )}

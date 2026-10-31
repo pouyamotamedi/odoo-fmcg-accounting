@@ -32,6 +32,12 @@ class ResCompany(models.Model):
         default=True,
         help='Enable offline operation with automatic sync when connectivity returns',
     )
+    fmcg_seller_allowed_menus = fields.Char(
+        string='Seller Allowed Menus',
+        default='[]',
+        help='JSON list of frontend menu keys that seller users may access. '
+             'Stored on the company so it applies on every device.',
+    )
     fmcg_jalali_calendar = fields.Boolean(
         string='Jalali Calendar',
         default=True,

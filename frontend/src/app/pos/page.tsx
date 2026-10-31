@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useCartStore } from '@/stores/cart-store';
 import { formatPrice, toPersianDigits } from '@/lib/utils';
-import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, getInvoiceResidual, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel, getBoostPosPricing, type BoostPosPricing } from '@/lib/odoo-api';
+import { getProducts, createPosOrder, confirmInvoice, getPartners, createCustomerCredit, payWithPaxTerminal, registerInvoicePayment, getInvoiceResidual, searchRead, getPurchaseInvoiceLines, getBankCashBalances, createStockDelivery, getDiscountCategories, getProductsWithDiscount, getProductVariants, createPartner, editPostedInvoice, cancelRelatedPickings, getCompanySettings, getPosPaymentLabel, getBoostPosPricing, getSellerAllowedMenus, type BoostPosPricing } from '@/lib/odoo-api';
 import { queueTransaction, replayPendingTransactions, getPendingCount, OfflineTransaction } from '@/stores/offline-store';
 import { useAuthStore } from '@/stores/auth-store';
+import { sellerHomePath } from '@/lib/menus';
 import { logout as odooLogout } from '@/lib/odoo-api';
 import Link from 'next/link';
 
@@ -142,6 +143,19 @@ function resolveProductPrice(
 
 export default function PosPage() {
   const { items, addItem, updateQuantity, clearCart, total, updateAllPrices } = useCartStore();
+  const authIsAdmin = useAuthStore((s) => s.isAdmin);
+  const authRole = useAuthStore((s) => s.role);
+  const authAllowedMenus = useAuthStore((s) => s.allowedMenus);
+  const sellerPanelHref = sellerHomePath(authAllowedMenus);
+  useEffect(() => {
+    // Keep the seller's menu access in sync with Settings (stored on the server)
+    if (authIsAdmin || authRole === 'admin') return;
+    let cancelled = false;
+    getSellerAllowedMenus().then((menus) => {
+      if (!cancelled && menus) useAuthStore.getState().setAllowedMenus(menus);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [authIsAdmin, authRole]);
   // Mobile-only: cart is shown as a bottom sheet instead of a sidebar
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [prevCartCount, setPrevCartCount] = useState(items.length);
@@ -1080,15 +1094,13 @@ export default function PosPage() {
             <span className={`text-xs ${isOnline ? 'text-green-400' : 'text-red-400'}`}>
               {isOnline ? '🟢 آنلاین' : '🔴 آفلاین'}
             </span>
-            {(() => {
-              const auth = useAuthStore.getState();
-              const hasMenus = (() => { try { const m = localStorage.getItem('seller_allowed_menus'); return m ? JSON.parse(m).length > 0 : false; } catch { return false; } })();
-              return (auth.isAdmin || hasMenus) ? (
-                <Link href="/admin" className="text-xs text-slate-400 hover:text-white">
-                  بازگشت به پنل ←
-                </Link>
-              ) : null;
-            })()}
+            {/* Shown for every user; sellers land on their first allowed panel page */}
+            <Link
+              href={authIsAdmin || authRole === 'admin' ? '/admin' : sellerPanelHref}
+              className="text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2 py-1 rounded"
+            >
+              بازگشت به پنل ←
+            </Link>
             <button onClick={async () => {
               try { const d = await loadSalesHistory(); setSalesHistory(d); } catch { setSalesHistory([]); }
               setShowSalesHistory(true);
